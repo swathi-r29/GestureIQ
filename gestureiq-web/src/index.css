@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  transition: background-color 0.3s, color 0.3s;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #8B1A1A; border-radius: 2px; }
+
+.light {
+  --bg: #FAF6F0;
+  --bg-card: #FFFFFF;
+  --bg-card2: #F5EDE0;
+  --border: #E8D5C0;
+  --text: #2C1810;
+  --text-muted: #8B6B55;
+  --accent: #8B1A1A;
+  --copper: #A0522D;
+  --gold: #8B6914;
+}
+
+.dark {
+  --bg: #0F0A08;
+  --bg-card: #1A1008;
+  --bg-card2: #120D06;
+  --border: #2D1A0E;
+  --text: #F5E6C8;
+  --text-muted: #8B6B55;
+  --accent: #8B1A1A;
+  --copper: #C8956C;
+  --gold: #C8956C;
+}
