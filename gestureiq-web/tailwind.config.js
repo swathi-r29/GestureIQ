@@ -4,6 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
+        accent: 'var(--accent)',
         ivory: '#F5E6C8',
         copper: '#C8956C',
         crimson: '#8B1A1A',

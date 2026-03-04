@@ -1,9 +1,10 @@
 // src/components/Navbar.jsx
 
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Download } from 'lucide-react';
 
 const Lotus = () => (
     <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
@@ -20,6 +21,25 @@ export default function Navbar() {
     const { theme, toggle } = useTheme();
     const location = useLocation();
     const navigate = useNavigate();
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+    useEffect(() => {
+        const handler = (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+    }, []);
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setDeferredPrompt(null);
+        }
+    };
 
     const baseLinks = [
         { to: '/', label: 'Home' },
@@ -80,6 +100,18 @@ export default function Navbar() {
                         </Link>
                     ))}
 
+                    <div className="h-4 w-px mx-2 opacity-20 bg-current" style={{ color: 'var(--text-muted)' }} />
+
+                    <button
+                        onClick={handleInstallClick}
+                        className={`flex items-center gap-2 px-3 py-1.5 text-[10px] tracking-[2px] uppercase font-bold rounded-lg border-2 border-dashed transition-all group ${!deferredPrompt ? 'opacity-40 grayscale cursor-not-allowed' : 'hover:bg-accent hover:text-white'}`}
+                        style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                        title={deferredPrompt ? 'Install App' : 'App already installed or not supported by browser'}
+                    >
+                        <Download size={14} className={deferredPrompt ? "group-hover:animate-bounce" : ""} />
+                        Download App
+                    </button>
+
                     {/* Theme toggle */}
                     <button onClick={toggle}
                         className="ml-2 p-2 rounded-full transition-all"
@@ -89,11 +121,15 @@ export default function Navbar() {
 
                     {user ? (
                         <div className="flex items-center gap-3 ml-3 pl-3 border-l" style={{ borderColor: 'var(--border)' }}>
-                            <span className="text-xs tracking-widest" style={{ color: 'var(--text-muted)' }}>
+                            <Link
+                                to="/profile"
+                                className="text-xs tracking-widest font-black uppercase hover:text-accent transition-colors"
+                                style={{ color: location.pathname === '/profile' ? 'var(--accent)' : 'var(--text-muted)' }}
+                            >
                                 {user.name}
-                            </span>
+                            </Link>
                             <button onClick={() => { logout(); navigate('/login'); }}
-                                className="px-3 py-1.5 text-xs tracking-widest uppercase border rounded transition-all"
+                                className="px-3 py-1.5 text-xs tracking-widest uppercase border rounded transition-all hover:bg-red-500 hover:text-white hover:border-red-500"
                                 style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                                 Logout
                             </button>

@@ -23,9 +23,9 @@ export default function Login() {
             if (user.role === 'admin') {
                 navigate('/admin/dashboard');
             } else if (user.role === 'staff') {
-                navigate('/staff/live-classes');
+                navigate('/staff/dashboard');
             } else {
-                navigate('/detect');
+                navigate('/');
             }
         } catch (err) {
             setError(err.response?.data?.msg || 'Login failed');

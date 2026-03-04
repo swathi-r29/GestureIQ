@@ -72,9 +72,9 @@ export default function MudraContentEditor() {
         setUploadProgress(0);
 
         const formData = new FormData();
-        formData.append(type === 'image' ? 'imageFile' : 'videoFile', file);
         formData.append('mudraName', mudraName);
         formData.append('isPrimary', 'false');
+        formData.append(type === 'image' ? 'imageFile' : 'videoFile', file);
 
         try {
             const token = localStorage.getItem('token');

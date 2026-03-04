@@ -65,21 +65,8 @@ router.post('/register/staff', async (req, res) => {
     });
     await user.save();
 
-    const payload = {
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
-    };
-
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role, status: user.status } });
+    // Staff do not receive a token upon registration as they require admin approval
+    res.json({ msg: 'Registration successful. Your account is pending administrator approval.' });
   } catch (err) {
     res.status(500).json({ msg: 'Server error' });
   }

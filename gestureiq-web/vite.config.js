@@ -23,9 +23,9 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/api': 'http://localhost:5000',
-      '/video_feed': 'http://localhost:5001',
-      '/mudra_data': 'http://localhost:5001'
+      '/api': 'http://127.0.0.1:5000',
+      '/video_feed': 'http://127.0.0.1:5001',
+      '/mudra_data': 'http://127.0.0.1:5001'
     }
   }
 })

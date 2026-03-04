@@ -27,6 +27,7 @@ const UserSchema = new mongoose.Schema({
 
     progress: {
         detectedMudras: [String],
+        mudraScores: { type: Map, of: Number, default: {} },
         practiceCount: { type: Number, default: 0 },
         lastPracticed: { type: Date }
     },

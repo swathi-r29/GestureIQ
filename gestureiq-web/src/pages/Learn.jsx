@@ -43,9 +43,9 @@ const STAGES = {
 };
 
 const LEVEL_CONFIG = {
-    'Basic': { title: 'The Foundations', count: 7, icon: '✦' },
-    'Intermediate': { title: 'The Expressions', count: 9, icon: '❦' },
-    'Advanced': { title: 'The Mastery', count: 12, icon: '✧' }
+    'Basic': { title: 'The Foundations', icon: '✦' },
+    'Intermediate': { title: 'The Expressions', icon: '❦' },
+    'Advanced': { title: 'The Mastery', icon: '✧' }
 };
 
 export default function Learn() {
@@ -55,6 +55,7 @@ export default function Learn() {
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [selectedMudra, setSelectedMudra] = useState(null);
     const [progress, setProgress] = useState([]);
+    const [bestScores, setBestScores] = useState({});
     const [cameraOn, setCameraOn] = useState(false);
     const [detected, setDetected] = useState({ name: "", confidence: 0, detected: false });
     const [loading, setLoading] = useState(true);
@@ -62,6 +63,9 @@ export default function Learn() {
     const [contentLoading, setContentLoading] = useState(false);
     const [sessionComplete, setSessionComplete] = useState(false);
     const [sessionScore, setSessionScore] = useState(0);
+
+    const getLevelMudras = (lvl) => MUDRAS.filter(m => m.level === lvl);
+    const getLevelProgress = (lvl) => getLevelMudras(lvl).filter(m => progress.includes(m.folder));
 
     useEffect(() => {
         if (user && user.role !== 'student') {
@@ -84,7 +88,7 @@ export default function Learn() {
         setContentLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await axios.get(`/api/admin/mudra/content/${mudraName}`, {
+            const res = await axios.get(`/api/user/mudra/content/${mudraName}`, {
                 headers: { 'x-auth-token': token }
             });
             setMudraContent(res.data);
@@ -122,6 +126,7 @@ export default function Learn() {
                 headers: { 'x-auth-token': token }
             });
             setProgress(res.data.progress.detectedMudras || []);
+            setBestScores(res.data.progress.mudraScores || {});
         } catch (err) {
             console.error('Failed to fetch progress', err);
         } finally {
@@ -137,10 +142,11 @@ export default function Learn() {
             const score = Math.round(currentConfidence);
             setSessionScore(score);
 
-            const res = await axios.post('/api/user/progress/update', { mudraName: folder }, {
+            const res = await axios.post('/api/user/progress/update', { mudraName: folder, score }, {
                 headers: { 'x-auth-token': token }
             });
             setProgress(res.data.detectedMudras || []);
+            setBestScores(res.data.mudraScores || {});
             setSessionComplete(true);
             setCameraOn(false);
         } catch (err) {
@@ -149,7 +155,7 @@ export default function Learn() {
     };
 
     const nextMudra = () => {
-        const levelMudras = MUDRAS.filter(m => m.level === selectedLevel);
+        const levelMudras = getLevelMudras(selectedLevel);
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         if (currentIndex < levelMudras.length - 1) {
             setSelectedMudra(levelMudras[currentIndex + 1]);
@@ -185,9 +191,30 @@ export default function Learn() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                         {['Basic', 'Intermediate', 'Advanced'].map((lvl) => {
                             const config = LEVEL_CONFIG[lvl];
-                            const completedCount = MUDRAS.filter(m => m.level === lvl && progress.includes(m.folder)).length;
-                            const totalCount = MUDRAS.filter(m => m.level === lvl).length;
-                            const isLocked = lvl !== 'Basic' && MUDRAS.filter(m => m.level === (lvl === 'Intermediate' ? 'Basic' : 'Intermediate') && progress.includes(m.folder)).length < (lvl === 'Intermediate' ? 3 : 5);
+                            const levelMudras = getLevelMudras(lvl);
+                            const completedMudras = getLevelProgress(lvl);
+                            const completedCount = completedMudras.length;
+                            const totalCount = levelMudras.length;
+
+                            // Progression logic: Intermediate needs Basic (7), Advanced needs Intermediate (8)
+                            let isLocked = false;
+                            let lockReason = "";
+
+                            if (lvl === 'Intermediate') {
+                                const basicMudras = getLevelMudras('Basic');
+                                const basicProgress = getLevelProgress('Basic');
+                                if (basicProgress.length < basicMudras.length) {
+                                    isLocked = true;
+                                    lockReason = `Master all 7 Basic Mudras to unlock`;
+                                }
+                            } else if (lvl === 'Advanced') {
+                                const intermediateMudras = getLevelMudras('Intermediate');
+                                const intermediateProgress = getLevelProgress('Intermediate');
+                                if (intermediateProgress.length < intermediateMudras.length) {
+                                    isLocked = true;
+                                    lockReason = `Master all 8 Intermediate Mudras to unlock`;
+                                }
+                            }
 
                             return (
                                 <div key={lvl}
@@ -195,13 +222,18 @@ export default function Learn() {
                                     className={`group p-8 rounded-xl border-2 transition-all duration-500 cursor-pointer relative overflow-hidden ${isLocked ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:scale-105 shadow-xl hover:border-accent'}`}
                                     style={{
                                         backgroundColor: 'var(--bg-card)',
-                                        borderColor: 'var(--border)',
                                         borderColor: isLocked ? 'var(--border)' : 'var(--border)'
                                     }}>
 
                                     <div className="text-4xl mb-6 group-hover:scale-110 transition-transform" style={{ color: 'var(--accent)' }}>{config.icon}</div>
                                     <h3 className="text-2xl font-bold mb-2 uppercase tracking-widest" style={{ color: 'var(--text)' }}>{lvl}</h3>
                                     <p className="text-xs mb-8" style={{ color: 'var(--text-muted)' }}>{config.title}</p>
+
+                                    {lockReason && (
+                                        <div className="mb-6 px-3 py-1 bg-accent/5 rounded-full inline-block border border-accent/10">
+                                            <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{lockReason}</p>
+                                        </div>
+                                    )}
 
                                     <div className="flex justify-between items-end">
                                         <div>
@@ -248,8 +280,15 @@ export default function Learn() {
                                     <p className="text-[10px] italic" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
 
                                     {isMastered && (
-                                        <div className="absolute top-2 right-2 text-green-500">
-                                            <CheckCircle2 size={16} fill="currentColor" className="text-white dark:text-gray-900" />
+                                        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+                                            <div className="text-green-500">
+                                                <CheckCircle2 size={16} fill="currentColor" className="text-white dark:text-gray-900" />
+                                            </div>
+                                            {bestScores[mudra.folder] && (
+                                                <span className="text-[8px] font-bold bg-green-500/10 text-green-600 px-1 rounded">
+                                                    {bestScores[mudra.folder]}%
+                                                </span>
+                                            )}
                                         </div>
                                     )}
 
@@ -278,8 +317,32 @@ export default function Learn() {
                             <div className="w-full aspect-video rounded-xl border flex flex-col items-center justify-center mb-8 relative overflow-hidden transition-all group"
                                 style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
                                 {mudraContent?.primaryImage ? (
-                                    <img src={`http://localhost:5000/uploads/mudras/${selectedMudra.folder}/images/${mudraContent.primaryImage}`}
-                                        alt={selectedMudra.name} className="w-full h-full object-cover" />
+                                    <div className="w-full h-full relative overflow-hidden group">
+                                        {/* Blurred Background Fallback */}
+                                        <div
+                                            className="absolute inset-0 scale-110 blur-xl opacity-30 saturate-150"
+                                            style={{
+                                                backgroundImage: `url(http://localhost:5000/uploads/mudras/${selectedMudra.folder}/images/${mudraContent.primaryImage})`,
+                                                backgroundSize: 'cover',
+                                                backgroundPosition: 'center'
+                                            }}
+                                        />
+
+                                        {/* Main Focused Image */}
+                                        <img
+                                            src={`http://localhost:5000/uploads/mudras/${selectedMudra.folder}/images/${mudraContent.primaryImage}`}
+                                            onError={(e) => {
+                                                if (!e.target.src.includes('/undefined/')) {
+                                                    e.target.src = `http://localhost:5000/uploads/mudras/undefined/images/${mudraContent.primaryImage}`;
+                                                }
+                                            }}
+                                            alt={selectedMudra.name}
+                                            className="relative z-10 w-full h-full object-contain drop-shadow-2xl transition-transform duration-700 group-hover:scale-[1.02]"
+                                        />
+
+                                        {/* Subtle Vignette Overlay */}
+                                        <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-transparent via-transparent to-black/5 z-20" />
+                                    </div>
                                 ) : (
                                     <div className="text-center">
                                         <div className="text-3xl mb-3 opacity-20 group-hover:opacity-100 group-hover:scale-110 transition-all">📸</div>
@@ -295,7 +358,15 @@ export default function Learn() {
 
                             <div className="p-8 rounded-xl border relative overflow-hidden flex-1" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                                 <div className="text-[10px] tracking-[6px] uppercase mb-4" style={{ color: 'var(--text-muted)' }}>Mudra Details</div>
-                                <h1 className="text-4xl font-bold mb-2 uppercase tracking-tight" style={{ color: 'var(--accent)' }}>{selectedMudra.name}</h1>
+                                <div className="flex justify-between items-start mb-2">
+                                    <h1 className="text-4xl font-bold uppercase tracking-tight" style={{ color: 'var(--accent)' }}>{selectedMudra.name}</h1>
+                                    {bestScores[selectedMudra.folder] && (
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[10px] tracking-[4px] uppercase opacity-50 mb-1" style={{ color: 'var(--text-muted)' }}>Personal Best</span>
+                                            <span className="text-2xl font-black" style={{ color: 'var(--copper)' }}>{bestScores[selectedMudra.folder]}%</span>
+                                        </div>
+                                    )}
+                                </div>
                                 <p className="text-sm italic mb-6 border-l-4 pl-4" style={{ color: 'var(--text-muted)', borderColor: 'var(--accent)' }}>
                                     {mudraContent?.description?.meaning || selectedMudra.meaning}
                                 </p>
@@ -323,9 +394,16 @@ export default function Learn() {
                                 {sessionComplete && (
                                     <div className="mt-8 p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg flex items-center gap-3">
                                         <CheckCircle2 className="text-green-500" />
-                                        <div>
-                                            <span className="text-xs font-bold uppercase tracking-widest text-green-700 dark:text-green-400">Mastered! Score: {sessionScore}%</span>
-                                            <p className="text-[10px] text-green-600 dark:text-green-500">Postured captured with high confidence</p>
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-xs font-black uppercase tracking-widest text-green-950 dark:text-green-300">Mastered! Score: {sessionScore}%</span>
+                                                {bestScores[selectedMudra.folder] && (
+                                                    <span className="text-[10px] font-black text-green-900 dark:text-green-200 bg-green-200/50 dark:bg-green-800/30 px-2 py-0.5 rounded">
+                                                        Personal Best: {bestScores[selectedMudra.folder]}%
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-green-800 dark:text-green-500 font-medium">Postured captured with high confidence</p>
                                         </div>
                                     </div>
                                 )}
@@ -397,7 +475,8 @@ export default function Learn() {
                         </div>
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }

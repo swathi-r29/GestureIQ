@@ -3,6 +3,34 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const MudraContent = require('../models/MudraContent');
+
+// Get mudra content for students
+router.get('/mudra/content/:mudraName', auth, async (req, res) => {
+  try {
+    let content = await MudraContent.findOne({ mudraName: req.params.mudraName.toLowerCase() });
+
+    // Auto-initialize if not found
+    if (!content) {
+      content = new MudraContent({
+        mudraName: req.params.mudraName.toLowerCase(),
+        handType: 'single'
+      });
+      await content.save();
+    }
+
+    // Ensure primaryImage has a fallback if not explicitly set
+    const response = content.toObject ? content.toObject() : content;
+    if (!response.primaryImage && response.images && response.images.length > 0) {
+      response.primaryImage = response.images[0];
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error('API Error [/mudra/content/:mudraName]:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
 
 // Get user progress
 router.get('/progress', auth, async (req, res) => {
@@ -17,18 +45,33 @@ router.get('/progress', auth, async (req, res) => {
 // Update progress when mudra detected
 router.post('/progress/update', auth, async (req, res) => {
   try {
-    const { mudraName } = req.body;
+    const { mudraName, score } = req.body;
     const user = await User.findById(req.user.id);
+
+    // Initialize mudraScores if it doesn't exist (for existing users)
+    if (!user.progress.mudraScores) {
+      user.progress.mudraScores = new Map();
+    }
 
     if (!user.progress.detectedMudras.includes(mudraName)) {
       user.progress.detectedMudras.push(mudraName);
     }
+
+    // Update best score if provided
+    if (score) {
+      const currentBest = user.progress.mudraScores.get(mudraName) || 0;
+      if (score > currentBest) {
+        user.progress.mudraScores.set(mudraName, score);
+      }
+    }
+
     user.progress.practiceCount += 1;
     user.progress.lastPracticed = new Date();
     await user.save();
 
     res.json(user.progress);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ msg: 'Server error' });
   }
 });

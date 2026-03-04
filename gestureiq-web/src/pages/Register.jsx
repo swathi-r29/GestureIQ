@@ -38,9 +38,24 @@ export default function Register() {
                 payload.contact_number = form.contact_number;
             }
 
-            const res = await axios.post('/api/auth/register', payload);
-            login(res.data.token, res.data.user);
-            navigate('/detect');
+            const res = await axios.post(`/api/auth/register/${form.role}`, payload);
+
+            if (form.role === 'staff') {
+                setError('Registration successful! Please wait for admin approval before logging in.');
+                setLoading(false);
+                // Optionally redirect to login after a delay
+                setTimeout(() => navigate('/login'), 3000);
+                return;
+            }
+
+            const { token, user } = res.data;
+            login(token, user);
+
+            if (user.role === 'admin') {
+                navigate('/admin/dashboard');
+            } else {
+                navigate('/');
+            }
         } catch (err) {
             setError(err.response?.data?.msg || 'Registration failed');
         } finally {

@@ -73,76 +73,76 @@ export default function StaffLiveClasses() {
     };
 
     return (
-        <div className="max-w-6xl mx-auto px-6 py-12 space-y-12 animate-fadeIn text-[var(--text)]">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-[var(--border)] pb-10">
+        <div className="max-w-6xl mx-auto px-6 py-12 space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000 text-[var(--text)] pb-20">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-b border-[var(--border)] pb-12 px-2">
                 <div>
-                    <h1 className="text-4xl font-black tracking-tighter mb-2">Live Session Portal</h1>
-                    <p className="text-xs tracking-[6px] uppercase opacity-40 font-bold">Manage your virtual classrooms</p>
+                    <h1 className="text-4xl font-black tracking-tighter mb-3">Studio Broadcast</h1>
+                    <p className="text-[10px] tracking-[6px] uppercase opacity-40 font-black">Virtual Stage Management Protocol</p>
                 </div>
-                <button onClick={() => setShowModal(true)} className="flex items-center gap-3 px-8 py-4 bg-accent text-white rounded-2xl font-bold text-[11px] tracking-[4px] uppercase hover:scale-[1.02] shadow-xl shadow-accent/20 transition-all">
-                    <Plus size={18} /> Schedule Session
+                <button onClick={() => setShowModal(true)} className="flex items-center gap-3 px-10 py-5 bg-accent text-white rounded-[20px] font-black text-[10px] tracking-[4px] uppercase hover:scale-[1.02] active:scale-95 shadow-2xl shadow-accent/40 transition-all">
+                    <Plus size={18} /> Seal New Session
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 gap-8">
                 {loading ? (
-                    <div className="py-20 text-center opacity-30 tracking-[10px] uppercase text-[10px] animate-pulse">Syncing Scheduled Data...</div>
+                    <div className="py-24 text-center opacity-30 tracking-[12px] font-black uppercase text-[10px] animate-pulse">Synchronizing Data...</div>
                 ) : classes.length === 0 ? (
-                    <div className="py-32 text-center rounded-3xl border-4 border-dashed border-[var(--border)] bg-[var(--bg-card)]">
-                        <Video size={48} className="mx-auto mb-6 opacity-10" />
-                        <h3 className="text-lg font-bold opacity-30 uppercase tracking-widest">No Sessions Found</h3>
-                        <p className="text-[10px] opacity-20 uppercase tracking-[4px] mt-2 italic">Start by scheduling your first Bharatanatyam class</p>
+                    <div className="py-40 text-center rounded-[40px] border-[3px] border-dashed border-[var(--border)] bg-[var(--bg-card)]">
+                        <Video size={56} className="mx-auto mb-8 opacity-10" />
+                        <h3 className="text-lg font-black opacity-30 uppercase tracking-[6px]">No Active Broadcasts</h3>
+                        <p className="text-[10px] opacity-20 uppercase tracking-[4px] mt-4 italic font-bold">Start by scheduling your first Bharatanatyam class</p>
                     </div>
                 ) : classes.map((c) => (
-                    <div key={c._id} className="p-8 rounded-3xl border bg-[var(--bg-card2)] border-[var(--border)] relative overflow-hidden group transition-all hover:bg-[var(--bg-card)]">
-                        <div className="flex flex-col md:flex-row gap-8 items-start md:items-center justify-between">
-                            <div className="flex-1 space-y-4">
+                    <div key={c._id} className="p-10 rounded-[35px] border shadow-sm bg-[var(--bg-card)] border-[var(--border)] relative overflow-hidden group transition-all hover:bg-[var(--bg-card2)] hover:shadow-2xl hover:border-accent/20">
+                        <div className="flex flex-col md:flex-row gap-10 items-start md:items-center justify-between">
+                            <div className="flex-1 space-y-6">
                                 <div className="flex items-center gap-4">
-                                    <div className={`px-4 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border border-current ${c.status === 'active' ? 'bg-red-500/10 text-red-500 animate-pulse' : 'bg-blue-500/10 text-blue-500 opacity-60'}`}>
+                                    <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border border-current ${c.status === 'active' ? 'bg-red-500/10 text-red-500 animate-pulse' : 'bg-[var(--bg)] text-accent opacity-60'}`}>
                                         {c.status}
                                     </div>
-                                    <div className="text-[10px] opacity-40 font-bold tracking-widest flex items-center gap-2">
-                                        <Clock size={12} /> {c.duration} MINS
+                                    <div className="text-[9px] opacity-40 font-black tracking-widest flex items-center gap-2 uppercase">
+                                        <Clock size={14} /> {c.duration} MINUTES
                                     </div>
                                 </div>
                                 <div>
-                                    <h2 className="text-2xl font-black tracking-tight">{c.title}</h2>
-                                    <p className="text-[10px] opacity-40 mt-1 uppercase tracking-widest flex items-center gap-2 font-bold">
-                                        <Calendar size={12} /> {new Date(c.startTime).toLocaleString()}
+                                    <h2 className="text-3xl font-black tracking-tighter">{c.title}</h2>
+                                    <p className="text-[10px] opacity-40 mt-3 uppercase tracking-[4px] flex items-center gap-2 font-black">
+                                        <Calendar size={14} /> {new Date(c.startTime).toLocaleString()}
                                     </p>
                                 </div>
-                                <p className="text-xs opacity-50 max-w-2xl italic">"{c.description || 'No description provided'}"</p>
+                                <p className="text-sm opacity-50 max-w-2xl font-medium leading-relaxed italic border-l-2 border-accent/20 pl-4">"{c.description || 'No description provided'}"</p>
                             </div>
 
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-4">
                                 {c.status === 'scheduled' && (
-                                    <button onClick={() => updateStatus(c._id, 'active')} className="px-8 py-3 bg-accent text-white rounded-xl text-[9px] font-bold tracking-[3px] uppercase flex items-center gap-3 hover:opacity-90 transition-all shadow-lg shadow-accent/20">
-                                        <Play size={12} fill="currentColor" /> Go Live
+                                    <button onClick={() => updateStatus(c._id, 'active')} className="px-10 py-4 bg-accent text-white rounded-[18px] text-[10px] font-black tracking-[4px] uppercase flex items-center gap-3 hover:scale-105 transition-all shadow-xl shadow-accent/30">
+                                        <Play size={14} fill="currentColor" /> Initiate
                                     </button>
                                 )}
                                 {c.status === 'active' && (
                                     <>
-                                        <a href={c.meetingLink} target="_blank" rel="noopener noreferrer" className="px-8 py-3 border-2 border-accent text-accent rounded-xl text-[9px] font-bold tracking-[3px] uppercase flex items-center gap-3 hover:bg-accent hover:text-white transition-all">
-                                            <ExternalLink size={12} /> Enter Studio
+                                        <a href={c.meetingLink} target="_blank" rel="noopener noreferrer" className="px-10 py-4 border-2 border-accent text-accent rounded-[18px] text-[10px] font-black tracking-[4px] uppercase flex items-center gap-3 hover:bg-accent hover:text-white transition-all shadow-xl shadow-accent/10">
+                                            <ExternalLink size={14} /> Enter Room
                                         </a>
-                                        <button onClick={() => updateStatus(c._id, 'completed')} className="px-8 py-3 bg-green-600 text-white rounded-xl text-[9px] font-bold tracking-[3px] uppercase flex items-center gap-3 hover:opacity-90 transition-all shadow-lg shadow-green-900/20">
-                                            <CheckCircle2 size={12} /> End Session
+                                        <button onClick={() => updateStatus(c._id, 'completed')} className="px-10 py-4 bg-emerald-600 text-white rounded-[18px] text-[10px] font-black tracking-[4px] uppercase flex items-center gap-3 hover:opacity-90 transition-all shadow-xl shadow-emerald-900/30">
+                                            <CheckCircle2 size={14} /> Terminate
                                         </button>
                                     </>
                                 )}
                                 {c.status === 'completed' && (
-                                    <div className="flex flex-col items-end gap-1">
-                                        <div className="text-[9px] font-black uppercase text-green-500 tracking-widest flex items-center gap-2">
-                                            <CheckCircle2 size={12} /> Session Finished
+                                    <div className="flex flex-col items-end gap-2 pr-4">
+                                        <div className="text-[10px] font-black uppercase text-emerald-500 tracking-[3px] flex items-center gap-2 bg-emerald-500/5 px-4 py-2 rounded-full border border-emerald-500/10">
+                                            <CheckCircle2 size={14} /> Archived
                                         </div>
-                                        <div className="text-[8px] opacity-40 tracking-widest uppercase font-bold">
-                                            {c.attendees?.length || 0} Students Attended
+                                        <div className="text-[9px] opacity-40 tracking-[2px] uppercase font-black">
+                                            {c.attendees?.length || 0} Students Verified
                                         </div>
                                     </div>
                                 )}
                                 {c.status === 'scheduled' && (
-                                    <button onClick={() => updateStatus(c._id, 'cancelled')} className="p-3 opacity-20 hover:opacity-100 hover:text-red-500 transition-all border border-transparent hover:border-red-500/20 rounded-xl">
-                                        <X size={20} />
+                                    <button onClick={() => updateStatus(c._id, 'cancelled')} className="p-4 opacity-10 hover:opacity-100 hover:text-red-500 transition-all border border-transparent hover:border-red-500/20 rounded-2xl hover:bg-red-500/5">
+                                        <X size={24} />
                                     </button>
                                 )}
                             </div>
@@ -153,45 +153,45 @@ export default function StaffLiveClasses() {
 
             {/* Modal for Scheduling */}
             {showModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fadeIn">
-                    <div className="w-full max-w-2xl bg-[var(--bg-card)] border border-[var(--border)] rounded-3xl p-10 shadow-2xl relative overflow-hidden">
-                        <button onClick={() => setShowModal(false)} className="absolute top-8 right-8 opacity-40 hover:opacity-100 transition-all"><X size={24} /></button>
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-500">
+                    <div className="w-full max-w-2xl bg-[var(--bg-card)] border border-[var(--border)] rounded-[40px] p-12 shadow-[0_0_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
+                        <button onClick={() => setShowModal(false)} className="absolute top-10 right-10 opacity-20 hover:opacity-100 transition-all hover:scale-110"><X size={28} /></button>
 
-                        <div className="flex items-center gap-4 mb-10">
-                            <div className="w-12 h-12 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
-                                <Video />
+                        <div className="flex items-center gap-6 mb-12">
+                            <div className="w-16 h-16 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-inner">
+                                <Video size={32} />
                             </div>
                             <div>
-                                <h3 className="text-2xl font-black tracking-tight uppercase">Schedule New Studio Session</h3>
-                                <p className="text-[9px] tracking-[4px] uppercase opacity-40 font-bold">Prepare your virtual Bharatanatyam stage</p>
+                                <h3 className="text-2xl font-black tracking-tighter uppercase mb-1">New Broadcast Slot</h3>
+                                <p className="text-[9px] tracking-[5px] uppercase opacity-40 font-black">Prepare the digital Bharatanatyam stage</p>
                             </div>
                         </div>
 
-                        <form onSubmit={handleCreate} className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-widest uppercase font-black opacity-40">Class Title</label>
-                                    <input required type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-xl p-4 text-xs font-bold focus:outline-none focus:border-accent transition-all" placeholder="e.g. Masterclass: Alapadma Mudra" />
+                        <form onSubmit={handleCreate} className="space-y-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] tracking-[4px] uppercase font-black opacity-30 ml-2">Broadcast Title</label>
+                                    <input required type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-2xl p-5 text-sm font-black focus:outline-none focus:border-accent transition-all shadow-inner" placeholder="e.g. Masterclass: Alapadma" />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-widest uppercase font-black opacity-40">Meeting Link (Zoom/Jitsi)</label>
-                                    <input required type="url" value={form.meetingLink} onChange={e => setForm({ ...form, meetingLink: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-xl p-4 text-xs font-bold focus:outline-none focus:border-accent transition-all" placeholder="https://meet.jit.si/..." />
+                                <div className="space-y-3">
+                                    <label className="text-[10px] tracking-[4px] uppercase font-black opacity-30 ml-2">Studio URL</label>
+                                    <input required type="url" value={form.meetingLink} onChange={e => setForm({ ...form, meetingLink: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-2xl p-5 text-sm font-black focus:outline-none focus:border-accent transition-all shadow-inner" placeholder="https://meet.jit.si/..." />
                                 </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-[9px] tracking-widest uppercase font-black opacity-40">Description</label>
-                                <textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-xl p-4 text-xs font-bold focus:outline-none focus:border-accent transition-all resize-none" placeholder="What will students learn in this session?" />
+                            <div className="space-y-3">
+                                <label className="text-[10px] tracking-[4px] uppercase font-black opacity-30 ml-2">Class Manifesto</label>
+                                <textarea rows={4} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-2xl p-5 text-sm font-black focus:outline-none focus:border-accent transition-all resize-none shadow-inner" placeholder="Define the objectives of this session..." />
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-widest uppercase font-black opacity-40">Start Date & Time</label>
-                                    <input required type="datetime-local" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-xl p-4 text-xs font-bold focus:outline-none focus:border-accent transition-all" />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] tracking-[4px] uppercase font-black opacity-30 ml-2">Execution Timestamp</label>
+                                    <input required type="datetime-local" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-2xl p-5 text-sm font-black focus:outline-none focus:border-accent transition-all shadow-inner select-none" />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-widest uppercase font-black opacity-40">Duration (Minutes)</label>
-                                    <select value={form.duration} onChange={e => setForm({ ...form, duration: parseInt(e.target.value) })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-xl p-4 text-xs font-bold focus:outline-none focus:border-accent transition-all">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] tracking-[4px] uppercase font-black opacity-30 ml-2">Temporal Duration</label>
+                                    <select value={form.duration} onChange={e => setForm({ ...form, duration: parseInt(e.target.value) })} className="w-full bg-[var(--bg-card2)] border border-[var(--border)] rounded-2xl p-5 text-sm font-black focus:outline-none focus:border-accent transition-all shadow-inner cursor-pointer appearance-none">
                                         <option value={30}>30 Minutes</option>
                                         <option value={45}>45 Minutes</option>
                                         <option value={60}>60 Minutes</option>
@@ -201,9 +201,9 @@ export default function StaffLiveClasses() {
                                 </div>
                             </div>
 
-                            <div className="pt-6">
-                                <button type="submit" className="w-full py-5 bg-accent text-white rounded-2xl font-black text-xs tracking-[6px] uppercase hover:scale-[1.01] shadow-2xl shadow-accent/30 transition-all">
-                                    Seal & Broadcast Session
+                            <div className="pt-8">
+                                <button type="submit" className="w-full py-6 bg-accent text-white rounded-[25px] font-black text-[11px] tracking-[8px] uppercase hover:scale-[1.01] active:scale-95 shadow-[0_20px_40px_-5px_var(--accent)] transition-all">
+                                    Broadcast to Academy
                                 </button>
                             </div>
                         </form>

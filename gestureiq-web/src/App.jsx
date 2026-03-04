@@ -6,6 +6,7 @@ import { ProtectedRoute, AdminRoute } from './components/ProtectedRoutes';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Profile from './pages/Profile';
 import Detect from './pages/Detect';
 import Learn from './pages/Learn';
 import About from './pages/About';
@@ -18,8 +19,18 @@ import MudraContentEditor from './pages/admin/MudraContentEditor';
 import StaffApprovals from './pages/admin/StaffApprovals';
 import StudentManagement from './pages/admin/StudentManagement';
 import AdminLiveMonitoring from './pages/admin/AdminLiveMonitoring';
-import StaffLiveClasses from './pages/staff/LiveClasses';
 import StudentLiveClasses from './pages/student/LiveClasses';
+import StaffLayout from './components/staff/StaffLayout';
+import StaffDashboard from './pages/staff/StaffDashboard';
+import CreateClass from './pages/staff/CreateClass';
+import LiveClassConduct from './pages/staff/LiveClassConduct';
+import MyStudents from './pages/staff/MyStudents';
+import MyClasses from './pages/staff/MyClasses';
+import ClassReport from './pages/staff/ClassReport';
+import Assignments from './pages/staff/Assignments';
+import Announcements from './pages/staff/Announcements';
+import StaffProfile from './pages/staff/StaffProfile';
+import StudentEnrollment from './pages/staff/StudentEnrollment';
 
 export default function App() {
   return (
@@ -38,6 +49,7 @@ export default function App() {
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
                     <Route path="/dashboard" element={<ProtectedRoute role="student"><StudentDashboard /></ProtectedRoute>} />
+                    <Route path="/profile" element={<ProtectedRoute role="student"><Profile /></ProtectedRoute>} />
                     <Route path="/detect" element={<ProtectedRoute role="student"><Detect /></ProtectedRoute>} />
                     <Route path="/learn" element={<ProtectedRoute role="student"><Learn /></ProtectedRoute>} />
                     <Route path="/live-classes" element={<ProtectedRoute role="student"><StudentLiveClasses /></ProtectedRoute>} />
@@ -49,12 +61,21 @@ export default function App() {
               {/* Staff Routes */}
               <Route path="/staff/*" element={
                 <ProtectedRoute role="staff">
-                  <>
-                    <Navbar />
+                  <StaffLayout>
                     <Routes>
-                      <Route path="/live-classes" element={<StaffLiveClasses />} />
+                      <Route path="/dashboard" element={<StaffDashboard />} />
+                      <Route path="/create-class" element={<CreateClass />} />
+                      <Route path="/live-now" element={<LiveClassConduct />} />
+                      <Route path="/students" element={<MyStudents />} />
+                      <Route path="/my-classes" element={<MyClasses />} />
+                      <Route path="/reports" element={<ClassReport />} />
+                      <Route path="/assignments" element={<Assignments />} />
+                      <Route path="/announcements" element={<Announcements />} />
+                      <Route path="/profile" element={<StaffProfile />} />
+                      <Route path="/enrollment" element={<StudentEnrollment />} />
+                      <Route path="/settings" element={<div className="p-10 text-gray-500 uppercase tracking-widest text-xs">Settings Coming Soon...</div>} />
                     </Routes>
-                  </>
+                  </StaffLayout>
                 </ProtectedRoute>
               } />
 

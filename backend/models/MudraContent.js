@@ -6,6 +6,7 @@ const MudraContentSchema = new mongoose.Schema({
     images: [{ type: String }],
     primaryVideo: { type: String, default: "" },
     videos: [{ type: String }],
+    handType: { type: String, enum: ['single', 'double'], default: 'single' },
     description: {
         meaning: { type: String, default: "" },
         fingerPosition: { type: String, default: "" },

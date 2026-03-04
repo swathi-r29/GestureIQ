@@ -152,7 +152,8 @@ const MudraContent = require('../models/MudraContent');
 // Multer Storage Configuration
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        const mudraName = req.body.mudraName;
+        // Try to get mudraName from body or query
+        const mudraName = req.body.mudraName || req.query.mudraName || 'unknown';
         const type = file.mimetype.startsWith('image') ? 'images' : 'videos';
         const dir = path.join(__dirname, `../uploads/mudras/${mudraName}/${type}/`);
         fs.mkdirSync(dir, { recursive: true });
@@ -171,18 +172,66 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
 });
 
+// @route   GET api/admin/mudra/list
+// @desc    Get all mudras with basic info
+router.get('/mudra/list', adminAuth, async (req, res) => {
+    try {
+        const mudras = await MudraContent.find().select('mudraName handType images videos primaryImage');
+        const formatted = mudras.map(m => {
+            const primaryImage = m.primaryImage || (m.images && m.images.length > 0 ? m.images[0] : "");
+            return {
+                mudraName: m.mudraName,
+                handType: m.handType,
+                hasImage: !!primaryImage,
+                imageCount: m.images ? m.images.length : 0,
+                videoCount: m.videos ? m.videos.length : 0,
+                primaryImage: primaryImage
+            };
+        });
+        res.json(formatted);
+    } catch (err) {
+        console.error('API Error [/mudra/list]:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   POST api/admin/mudra/create
+// @desc    Create a new mudra entry
+router.post('/mudra/create', adminAuth, async (req, res) => {
+    try {
+        const { mudraName, handType } = req.body;
+        let mudra = await MudraContent.findOne({ mudraName: mudraName.toLowerCase() });
+        if (mudra) {
+            return res.status(400).json({ msg: 'Mudra already exists' });
+        }
+        mudra = new MudraContent({
+            mudraName: mudraName.toLowerCase(),
+            handType: handType || 'single'
+        });
+        await mudra.save();
+        res.json(mudra);
+    } catch (err) {
+        console.error('API Error [/mudra/create]:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
 // @route   GET api/admin/mudra/content/:mudraName
 // @desc    Get content for a specific mudra
 router.get('/mudra/content/:mudraName', adminAuth, async (req, res) => {
     try {
         let content = await MudraContent.findOne({ mudraName: req.params.mudraName });
         if (!content) {
-            // Create default content if not found
-            content = new MudraContent({ mudraName: req.params.mudraName });
+            // Check if it's one of the default 28 or let it be created as single by default
+            content = new MudraContent({
+                mudraName: req.params.mudraName,
+                handType: 'single' // Default for legacy/default list
+            });
             await content.save();
         }
         res.json(content);
     } catch (err) {
+        console.error('API Error [/mudra/content/:mudraName]:', err);
         res.status(500).send('Server Error');
     }
 });
@@ -298,6 +347,7 @@ router.get('/staff/pending', adminAuth, async (req, res) => {
         const pending = await User.find({ role: 'staff', status: 'pending' }).select('-password');
         res.json(pending);
     } catch (err) {
+        console.error('API Error [/staff/pending]:', err);
         res.status(500).send('Server Error');
     }
 });
