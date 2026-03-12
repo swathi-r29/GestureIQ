@@ -16,6 +16,10 @@ module.exports = function (req, res, next) {
         req.user = decoded.user;
         next();
     } catch (err) {
-        res.status(401).json({ msg: 'Token is not valid' });
+        console.error('[Auth Standard Exception]', err.message);
+        if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+            return res.status(401).json({ msg: 'Token is not valid or expired' });
+        }
+        res.status(500).json({ msg: 'Internal server error during authentication' });
     }
 };

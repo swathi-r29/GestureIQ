@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
     Video,
@@ -6,16 +7,17 @@ import {
     Clock,
     Play,
     Users,
-    CheckCircle2,
     ChevronRight,
     Search,
-    Info
+    Info,
+    AlertCircle
 } from 'lucide-react';
 
 export default function StudentLiveClasses() {
     const [upcoming, setUpcoming] = useState([]);
     const [active, setActive] = useState([]);
     const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
 
     useEffect(() => {
         fetchClasses();
@@ -27,8 +29,8 @@ export default function StudentLiveClasses() {
         try {
             const token = localStorage.getItem('token');
             const [upcomingRes, activeRes] = await Promise.all([
-                axios.get('/api/live/upcoming', { headers: { 'x-auth-token': token } }),
-                axios.get('/api/live/active', { headers: { 'x-auth-token': token } })
+                axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/classes/upcoming`, { headers: { 'x-auth-token': token } }),
+                axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/classes/active`, { headers: { 'x-auth-token': token } })
             ]);
             setUpcoming(upcomingRes.data);
             setActive(activeRes.data);
@@ -39,25 +41,16 @@ export default function StudentLiveClasses() {
         }
     };
 
-    const handleJoin = async (id) => {
-        try {
-            const token = localStorage.getItem('token');
-            const res = await axios.post(`/api/live/join/${id}`, {}, {
-                headers: { 'x-auth-token': token }
-            });
-            window.open(res.data.meetingLink, '_blank');
-            fetchClasses(); // Refresh to show joined status if needed
-        } catch (err) {
-            alert('Could not join class');
-        }
+    const handleJoinClick = (classId) => {
+        navigate(`/class/join/${classId}`);
     };
 
     return (
-        <div className="max-w-6xl mx-auto px-6 py-12 space-y-16 animate-fadeIn text-[var(--text)]">
+        <div className="max-w-6xl mx-auto px-6 py-12 space-y-16 animate-fade-in" style={{ color: 'var(--text)' }}>
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div>
                     <h1 className="text-4xl font-black tracking-tighter mb-2">Live Classrooms</h1>
-                    <p className="text-xs tracking-[6px] uppercase opacity-40 font-bold">Learn from masters in real-time</p>
+                    <p className="text-[10px] tracking-[6px] uppercase opacity-40 font-bold" style={{ color: 'var(--text-muted)' }}>Learn from masters in real-time</p>
                 </div>
             </div>
 
@@ -71,7 +64,9 @@ export default function StudentLiveClasses() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {active.map(c => (
-                            <div key={c._id} className="p-8 rounded-3xl border-2 border-red-500/20 bg-red-500/5 relative overflow-hidden group hover:border-red-500 transition-all">
+                            <div key={c._id} className="p-8 rounded-3xl border-2 border-red-500/20 bg-red-500/5 relative overflow-hidden group hover:border-red-500 transition-all cursor-pointer" 
+                                 onClick={() => handleJoinClick(c.classId)}
+                                 style={{ backgroundColor: 'var(--bg-card)' }}>
                                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                                     <Video size={64} />
                                 </div>
@@ -79,13 +74,13 @@ export default function StudentLiveClasses() {
                                     <div>
                                         <div className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">Active Session</div>
                                         <h3 className="text-2xl font-black tracking-tight">{c.title}</h3>
-                                        <p className="text-[10px] opacity-60 font-medium uppercase tracking-widest mt-1 flex items-center gap-2">
-                                            Hosted by <span className="text-[var(--accent)]">{c.hostId?.name}</span> • {c.hostId?.institution_name}
+                                        <p className="text-[10px] opacity-60 font-medium uppercase tracking-widest mt-1">
+                                            Hosted by <span style={{ color: 'var(--accent)' }}>{c.staffId?.name}</span>
                                         </p>
                                     </div>
                                     <p className="text-xs opacity-50 italic line-clamp-2">"{c.description}"</p>
 
-                                    <button onClick={() => handleJoin(c._id)} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] tracking-[4px] uppercase flex items-center justify-center gap-3 hover:bg-red-700 transition-all shadow-xl shadow-red-900/20">
+                                    <button className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] tracking-[4px] uppercase flex items-center justify-center gap-3 hover:bg-red-700 transition-all shadow-xl shadow-red-900/20">
                                         <Play size={14} fill="currentColor" /> Enter Classroom
                                     </button>
                                 </div>
@@ -103,25 +98,27 @@ export default function StudentLiveClasses() {
                 </div>
 
                 {loading ? (
-                    <div className="py-20 text-center opacity-30 tracking-[10px] uppercase text-[10px] animate-pulse">Syncing Calendar Feeds...</div>
+                    <div className="py-20 text-center animate-pulse text-[10px] tracking-[5px] uppercase opacity-30">Syncing Calendar Feeds...</div>
                 ) : upcoming.length === 0 ? (
-                    <div className="py-20 text-center rounded-3xl border-2 border-dashed border-[var(--border)] bg-[var(--bg-card)]">
+                    <div className="py-20 text-center rounded-3xl border-2 border-dashed border-[var(--border)]" style={{ backgroundColor: 'var(--bg-card)' }}>
                         <p className="text-[10px] opacity-30 uppercase tracking-[4px] font-bold">No upcoming classes scheduled</p>
-                        <p className="text-[8px] opacity-20 uppercase tracking-[2px] mt-2 italic">Check back later for new sessions</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 gap-4">
                         {upcoming.map(c => (
-                            <div key={c._id} className="p-6 rounded-2xl border bg-[var(--bg-card2)] border-[var(--border)] flex flex-col md:flex-row items-start md:items-center justify-between group hover:bg-[var(--bg-card)] transition-all">
+                            <div key={c._id} 
+                                 onClick={() => handleJoinClick(c.classId)}
+                                 className="p-6 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between group hover:shadow-lg transition-all cursor-pointer"
+                                 style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
                                 <div className="flex gap-6 items-center">
-                                    <div className="w-14 h-14 rounded-2xl bg-accent/5 border border-accent/10 flex flex-col items-center justify-center text-accent">
-                                        <span className="text-[10px] font-black uppercase">{new Date(c.startTime).toLocaleString('default', { month: 'short' })}</span>
-                                        <span className="text-lg font-black leading-none">{new Date(c.startTime).getDate()}</span>
+                                    <div className="w-14 h-14 rounded-2xl bg-accent/5 border flex flex-col items-center justify-center" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
+                                        <span className="text-[10px] font-black uppercase">{new Date(c.scheduledAt).toLocaleString('default', { month: 'short' })}</span>
+                                        <span className="text-lg font-black leading-none">{new Date(c.scheduledAt).getDate()}</span>
                                     </div>
                                     <div>
                                         <h4 className="font-bold text-sm">{c.title}</h4>
                                         <div className="flex items-center gap-3 mt-1">
-                                            <span className="text-[9px] uppercase tracking-widest opacity-40 font-bold">{new Date(c.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            <span className="text-[9px] uppercase tracking-widest opacity-40 font-bold">{new Date(c.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                             <span className="text-[9px] uppercase tracking-widest opacity-40 font-bold">•</span>
                                             <span className="text-[9px] uppercase tracking-widest opacity-40 font-bold">{c.duration} Mins</span>
                                         </div>
@@ -131,11 +128,11 @@ export default function StudentLiveClasses() {
                                 <div className="mt-4 md:mt-0 flex items-center gap-10">
                                     <div className="text-right hidden md:block">
                                         <div className="text-[9px] tracking-widest uppercase opacity-30 font-bold">Instructor</div>
-                                        <div className="text-[10px] font-black uppercase">{c.hostId?.name}</div>
+                                        <div className="text-[10px] font-black uppercase">{c.staffId?.name}</div>
                                     </div>
-                                    <button disabled className="px-6 py-2.5 border border-[var(--border)] rounded-xl text-[9px] font-black tracking-widest uppercase opacity-30">
-                                        Closed
-                                    </button>
+                                    <div className="px-6 py-2.5 border rounded-xl text-[9px] font-black tracking-widest uppercase opacity-70 group-hover:bg-accent group-hover:text-white transition-all" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                                        View Details
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -144,8 +141,8 @@ export default function StudentLiveClasses() {
             </div>
 
             {/* INFORMATION BANNER */}
-            <div className="p-8 rounded-3xl bg-accent/5 border border-accent/10 flex items-start gap-6">
-                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center text-accent shrink-0">
+            <div className="p-8 rounded-3xl bg-black/5 border border-dashed flex items-start gap-6" style={{ borderColor: 'var(--border)' }}>
+                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center" style={{ color: 'var(--accent)' }}>
                     <Info size={24} />
                 </div>
                 <div>

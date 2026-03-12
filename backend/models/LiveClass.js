@@ -1,52 +1,23 @@
 const mongoose = require('mongoose');
 
 const LiveClassSchema = new mongoose.Schema({
-    title: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    description: {
-        type: String,
-        trim: true
-    },
-    startTime: {
-        type: Date,
-        required: true
-    },
-    duration: {
-        type: Number,
-        required: true, // in minutes
-        default: 60
-    },
-    hostId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    status: {
-        type: String,
-        enum: ['scheduled', 'active', 'completed', 'cancelled'],
-        default: 'scheduled'
-    },
-    meetingLink: {
-        type: String,
-        required: true
-    },
-    attendees: [{
-        studentId: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User'
-        },
-        joinedAt: {
-            type: Date,
-            default: Date.now
-        }
-    }],
-    createdAt: {
-        type: Date,
-        default: Date.now
-    }
+  classId: { type: String, unique: true },
+  staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  title: String,
+  description: String,
+  scheduledAt: Date,
+  duration: Number,
+  maxStudents: Number,
+  mudrasList: [String],
+  language: String,
+  status: {
+    type: String,
+    enum: ['scheduled', 'live', 'ended'],
+    default: 'scheduled'
+  },
+  joinLink: String,
+  studentsEnrolled: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  createdAt: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model('LiveClass', LiveClassSchema);

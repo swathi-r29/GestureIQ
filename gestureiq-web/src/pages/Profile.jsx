@@ -96,6 +96,10 @@ export default function Profile() {
                                 <Calendar size={14} style={{ color: 'var(--accent)' }} className="shrink-0" />
                                 <div className="text-xs" style={{ color: 'var(--text)' }}>Joined: {new Date(userData.createdAt).toLocaleDateString()}</div>
                             </div>
+                            <div className="flex items-center gap-3">
+                                <Shield size={14} style={{ color: 'var(--accent)' }} className="shrink-0" />
+                                <div className="text-xs font-bold" style={{ color: 'var(--text)' }}>Institution: {userData.institution_name || 'Individual'}</div>
+                            </div>
                         </div>
                     </div>
 

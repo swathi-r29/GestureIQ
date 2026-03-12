@@ -183,25 +183,17 @@ export default function MudraContentList() {
                                             style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
                                             {hasImage ? (
                                                 <div className="w-full h-full relative overflow-hidden pointer-events-none">
-                                                    {/* Blurred Background */}
-                                                    <div
-                                                        className="absolute inset-0 scale-110 blur-xl opacity-30 saturate-150"
-                                                        style={{
-                                                            backgroundImage: `url(http://localhost:5000/uploads/mudras/${name}/images/${m.primaryImage})`,
-                                                            backgroundSize: 'cover',
-                                                            backgroundPosition: 'center'
-                                                        }}
-                                                    />
-                                                    <img
-                                                        src={`http://localhost:5000/uploads/mudras/${name}/images/${m.primaryImage}`}
-                                                        onError={(e) => {
-                                                            if (!e.target.src.includes('/undefined/')) {
-                                                                e.target.src = `http://localhost:5000/uploads/mudras/undefined/images/${m.primaryImage}`;
-                                                            }
-                                                        }}
-                                                        alt={name}
-                                                        className="relative z-10 w-full h-full object-contain drop-shadow-md"
-                                                    />
+                                                    {(() => {
+                                                        const displayImage = m.primaryImage;
+                                                        const imageUrl = `http://localhost:5000/uploads/mudras/${name}/images/${displayImage}`;
+                                                        return (
+                                                            <>
+                                                                <div className="absolute inset-0 scale-110 blur-xl opacity-30 saturate-150"
+                                                                    style={{ backgroundImage: `url(${imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                                                                <img src={imageUrl} alt={name} className="relative z-10 w-full h-full object-contain drop-shadow-md" />
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             ) : (
                                                 <div className="text-center">

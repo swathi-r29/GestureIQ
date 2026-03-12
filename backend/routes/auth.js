@@ -21,7 +21,8 @@ router.post('/register/student', async (req, res) => {
       password: hashedPassword,
       role: 'student',
       age,
-      experience_level
+      experience_level,
+      institution_name: req.body.institution_name
     });
     await user.save();
 
@@ -83,7 +84,10 @@ router.post('/login', async (req, res) => {
     if (!isMatch) return res.status(400).json({ msg: 'Invalid credentials' });
 
     // Check for staff approval
-    if (user.role === 'staff' && user.status !== 'approved') {
+    const isStaff = user.role === 'staff';
+    const isApproved = user.status === 'approved' || user.status === 'active';
+
+    if (isStaff && !isApproved) {
       let msg = 'Your account is pending approval by an administrator.';
       if (user.status === 'rejected') msg = `Your account was rejected. Reason: ${user.rejectionReason || 'No reason provided'}`;
       if (user.status === 'suspended') msg = 'Your account has been suspended.';

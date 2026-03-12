@@ -35,9 +35,18 @@ router.get('/mudra/content/:mudraName', auth, async (req, res) => {
 // Get user progress
 router.get('/progress', auth, async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      console.error('Auth middleware error: req.user or req.user.id missing');
+      return res.status(401).json({ msg: 'Authorization denied' });
+    }
     const user = await User.findById(req.user.id).select('-password');
+    if (!user) {
+      console.warn(`User with ID ${req.user.id} not found in database`);
+      return res.status(404).json({ msg: 'User not found' });
+    }
     res.json(user);
-  } catch {
+  } catch (err) {
+    console.error('Database Error in [/progress]:', err);
     res.status(500).json({ msg: 'Server error' });
   }
 });
@@ -102,11 +111,24 @@ router.get('/dashboard', auth, async (req, res) => {
       ? user.progress.detectedMudras[masteredMudrasCount - 1]
       : 'None yet';
 
+    const LiveClass = require('../models/LiveClass');
+    const nextClass = await LiveClass.findOne({
+      status: 'scheduled',
+      scheduledAt: { $gte: new Date() }
+    }).populate('staffId', 'name institution_name');
+
+    // Only return if it matches student's institution
+    const dashboardNextClass = (nextClass && nextClass.staffId && nextClass.staffId.institution_name && user.institution_name &&
+                                 nextClass.staffId.institution_name.toLowerCase() === user.institution_name.toLowerCase()) 
+      ? nextClass 
+      : null;
+
     res.json({
       user: {
         name: user.name,
         role: user.role,
-        experience_level: user.experience_level
+        experience_level: user.experience_level,
+        institution_name: user.institution_name
       },
       stats: {
         mastered: masteredMudrasCount,
@@ -115,7 +137,8 @@ router.get('/dashboard', auth, async (req, res) => {
         currentLevel: calculatedLevel,
         lastPracticedMudra,
         practiceStreak
-      }
+      },
+      nextClass: dashboardNextClass
     });
 
   } catch (err) {

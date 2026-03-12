@@ -22,15 +22,19 @@ import AdminLiveMonitoring from './pages/admin/AdminLiveMonitoring';
 import StudentLiveClasses from './pages/student/LiveClasses';
 import StaffLayout from './components/staff/StaffLayout';
 import StaffDashboard from './pages/staff/StaffDashboard';
-import CreateClass from './pages/staff/CreateClass';
-import LiveClassConduct from './pages/staff/LiveClassConduct';
-import MyStudents from './pages/staff/MyStudents';
-import MyClasses from './pages/staff/MyClasses';
-import ClassReport from './pages/staff/ClassReport';
+import StaffCreateClass from './pages/staff/StaffCreateClass';
+import StaffConductClass from './pages/staff/StaffConductClass';
+import StaffMyClasses from './pages/staff/StaffMyClasses';
+import StaffReports from './pages/staff/StaffReports';
+import StaffStudents from './pages/staff/StaffStudents';
+import StaffLogin from './pages/staff/StaffLogin';
+import StaffProfile from './pages/staff/StaffProfile';
+import ClassJoin from './pages/ClassJoin';
+import StudentLiveClass from './pages/StudentLiveClass';
+import StudentEnrollment from './pages/staff/StudentEnrollment';
 import Assignments from './pages/staff/Assignments';
 import Announcements from './pages/staff/Announcements';
-import StaffProfile from './pages/staff/StaffProfile';
-import StudentEnrollment from './pages/staff/StudentEnrollment';
+import StaffLiveClasses from './pages/staff/LiveClasses';
 
 export default function App() {
   return (
@@ -53,26 +57,30 @@ export default function App() {
                     <Route path="/detect" element={<ProtectedRoute role="student"><Detect /></ProtectedRoute>} />
                     <Route path="/learn" element={<ProtectedRoute role="student"><Learn /></ProtectedRoute>} />
                     <Route path="/live-classes" element={<ProtectedRoute role="student"><StudentLiveClasses /></ProtectedRoute>} />
+                    <Route path="/class/join/:classId" element={<ClassJoin />} />
+                    <Route path="/class/live/:classId" element={<ProtectedRoute role="student"><StudentLiveClass /></ProtectedRoute>} />
                     <Route path="/about" element={<About />} />
                   </Routes>
                 </>
               } />
 
               {/* Staff Routes */}
+              <Route path="/staff/login" element={<StaffLogin />} />
               <Route path="/staff/*" element={
                 <ProtectedRoute role="staff">
                   <StaffLayout>
                     <Routes>
                       <Route path="/dashboard" element={<StaffDashboard />} />
-                      <Route path="/create-class" element={<CreateClass />} />
-                      <Route path="/live-now" element={<LiveClassConduct />} />
-                      <Route path="/students" element={<MyStudents />} />
-                      <Route path="/my-classes" element={<MyClasses />} />
-                      <Route path="/reports" element={<ClassReport />} />
+                      <Route path="/class/create" element={<StaffCreateClass />} />
+                      <Route path="/class/conduct/:classId" element={<StaffConductClass />} />
+                      <Route path="/classes" element={<StaffMyClasses />} />
+                      <Route path="/live-now" element={<StaffLiveClasses />} />
+                      <Route path="/reports" element={<StaffReports />} />
+                      <Route path="/students" element={<StaffStudents />} />
+                      <Route path="/enrollment" element={<StudentEnrollment />} />
                       <Route path="/assignments" element={<Assignments />} />
                       <Route path="/announcements" element={<Announcements />} />
                       <Route path="/profile" element={<StaffProfile />} />
-                      <Route path="/enrollment" element={<StudentEnrollment />} />
                       <Route path="/settings" element={<div className="p-10 text-gray-500 uppercase tracking-widest text-xs">Settings Coming Soon...</div>} />
                     </Routes>
                   </StaffLayout>

@@ -12,6 +12,10 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #8B1A1A; border-radius: 2px; }
 
+.mirror {
+  transform: scaleX(-1);
+}
+
 .light {
   --bg: #FAF6F0;
   --bg-card: #FFFFFF;

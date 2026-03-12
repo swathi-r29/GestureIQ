@@ -34,9 +34,10 @@ export default function Register() {
                 payload.age = form.age;
                 payload.experience_level = form.experience_level;
             } else {
-                payload.institution_name = form.institution_name;
                 payload.contact_number = form.contact_number;
             }
+            // All roles can have an institution
+            payload.institution_name = form.institution_name;
 
             const res = await axios.post(`/api/auth/register/${form.role}`, payload);
 
@@ -140,6 +141,10 @@ export default function Register() {
                                         <option value="Intermediate">Intermediate</option>
                                         <option value="Advanced">Advanced</option>
                                     </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] tracking-[4px] uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Institution Name</label>
+                                    <input type="text" value={form.institution_name} onChange={e => setForm({ ...form, institution_name: e.target.value })} required className="w-full rounded px-4 py-3 text-sm border focus:outline-none transition-colors" style={inputStyle} placeholder="E.g. Sastra Academy" />
                                 </div>
                             </>
                         ) : (
