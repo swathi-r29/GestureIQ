@@ -185,7 +185,7 @@ export default function MudraContentList() {
                                                 <div className="w-full h-full relative overflow-hidden pointer-events-none">
                                                     {(() => {
                                                         const displayImage = m.primaryImage;
-                                                        const imageUrl = `http://localhost:5000/uploads/mudras/${name}/images/${displayImage}`;
+                                                        const imageUrl = `/uploads/mudras/${name}/images/${displayImage}`;
                                                         return (
                                                             <>
                                                                 <div className="absolute inset-0 scale-110 blur-xl opacity-30 saturate-150"

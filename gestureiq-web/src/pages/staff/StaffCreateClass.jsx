@@ -75,14 +75,21 @@ const StaffCreateClass = () => {
     }
   };
 
+  const getJoinLink = (classId) => {
+    const host = import.meta.env.VITE_NETWORK_IP || window.location.hostname;
+    return `${window.location.protocol}//${host}${window.location.port ? ':' + window.location.port : ''}/class/join/${classId}`;
+  };
+
   const copyLink = () => {
     if (success) {
-      navigator.clipboard.writeText(success.joinLink);
+      const link = getJoinLink(success.classId);
+      navigator.clipboard.writeText(link);
       alert('Link copied to clipboard!');
     }
   };
 
   if (success) {
+    const classLink = getJoinLink(success.classId);
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="max-w-md w-full p-8 rounded-2xl border text-center space-y-6" 
@@ -96,7 +103,7 @@ const StaffCreateClass = () => {
           <div className="p-4 rounded-xl bg-black/5 border border-dashed text-left" style={{ borderColor: 'var(--border)' }}>
             <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Class Join Link</p>
             <div className="flex items-center justify-between space-x-2">
-              <code className="text-xs truncate" style={{ color: 'var(--accent)' }}>{success.joinLink}</code>
+              <code className="text-xs truncate" style={{ color: 'var(--accent)' }}>{classLink}</code>
               <button onClick={copyLink} className="p-2 hover:bg-black/10 rounded-lg">
                 <Copy className="w-4 h-4" />
               </button>

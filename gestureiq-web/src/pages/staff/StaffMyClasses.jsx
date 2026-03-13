@@ -41,7 +41,9 @@ const StaffMyClasses = () => {
     }
   };
 
-  const handleCopyLink = (link) => {
+  const handleCopyLink = (classId) => {
+    const host = import.meta.env.VITE_NETWORK_IP || window.location.hostname;
+    const link = `${window.location.protocol}//${host}${window.location.port ? ':' + window.location.port : ''}/class/join/${classId}`;
     navigator.clipboard.writeText(link);
     alert('Link copied!');
   };
@@ -180,7 +182,7 @@ const StaffMyClasses = () => {
                       <span>Start Class</span>
                     </button>
                     <button 
-                      onClick={() => handleCopyLink(item.joinLink)}
+                      onClick={() => handleCopyLink(item.classId)}
                       className="p-2.5 rounded-xl border flex items-center justify-center transition-all hover:bg-black/5"
                       style={{ borderColor: 'var(--border)' }}
                     >

@@ -1,0 +1,44 @@
+{
+  "mrigashira": {
+    "_id": "69a55bd23fd6b585bebe3054",
+    "mudraName": "mrigashira",
+    "primaryImage": "mrigashira2_1772475463186.jpg",
+    "images": [
+      "mrigashira2_1772475463186.jpg",
+      "mrigashira_1772475561490.jpg"
+    ],
+    "primaryVideo": "",
+    "videos": [],
+    "description": {
+      "meaning": "",
+      "fingerPosition": "",
+      "usage": "",
+      "culturalSignificance": "",
+      "steps": []
+    },
+    "updatedAt": "2026-03-02T18:19:21.794Z",
+    "__v": 4,
+    "handType": "single"
+  },
+  "sarpashira": {
+    "_id": "69a55bd23fd6b585bebe3050",
+    "mudraName": "sarpashira",
+    "primaryImage": "sarapashira_1772476817537.jpg",
+    "images": [
+      "sarapashira_1772476817537.jpg",
+      "sarapashira2_1772476823107.jpg"
+    ],
+    "primaryVideo": "",
+    "videos": [],
+    "description": {
+      "meaning": "",
+      "fingerPosition": "",
+      "usage": "",
+      "culturalSignificance": "",
+      "steps": []
+    },
+    "updatedAt": "2026-03-02T18:40:23.190Z",
+    "__v": 2,
+    "handType": "single"
+  }
+}

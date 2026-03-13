@@ -40,6 +40,8 @@ export default function MudraContentEditor() {
     });
 
     useEffect(() => {
+        setContent(null);
+        setLoading(true);
         fetchContent();
     }, [mudraName]);
 
@@ -184,9 +186,9 @@ export default function MudraContentEditor() {
                                 <ImageIcon size={16} /> Current Image Gallery
                             </h3>
                             <div className="grid grid-cols-2 gap-4">
-                                {content?.images?.map(img => (
+                                {content && content.mudraName === mudraName ? content.images?.map(img => (
                                     <div key={img} className="relative aspect-square rounded-2xl overflow-hidden border group" style={{ borderColor: 'var(--border)' }}>
-                                        <img src={`http://localhost:5000/uploads/mudras/${mudraName}/images/${img}`} className="w-full h-full object-cover" />
+                                        <img src={`/uploads/mudras/${mudraName}/images/${img}`} className="w-full h-full object-cover" />
                                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                                             {content.primaryImage === img ? (
                                                 <div className="px-3 py-1 bg-green-500 text-white text-[8px] tracking-[2px] uppercase font-bold rounded-lg border-2 border-white/20">Primary</div>
@@ -196,7 +198,7 @@ export default function MudraContentEditor() {
                                             <button onClick={() => handleDelete('image', img)} className="p-2 bg-red-600/80 hover:bg-red-600 rounded-lg text-white transition-all"><Trash2 size={16} /></button>
                                         </div>
                                     </div>
-                                ))}
+                                )) : null}
                                 {content?.images?.length === 0 && <div className="col-span-2 py-20 text-center opacity-20 italic">No images in gallery</div>}
                             </div>
                         </div>
@@ -330,7 +332,7 @@ export default function MudraContentEditor() {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-10 bg-black/90 backdrop-blur-sm animate-fadeIn">
                     <button onClick={() => setPreviewVideo(null)} className="absolute top-10 right-10 text-white/50 hover:text-white"><X size={32} /></button>
                     <div className="w-full max-w-5xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl">
-                        <video src={`http://localhost:5000/uploads/mudras/${mudraName}/videos/${previewVideo}`} controls autoPlay className="w-full h-full" />
+                        <video src={`/uploads/mudras/${mudraName}/videos/${previewVideo}`} controls autoPlay className="w-full h-full" />
                     </div>
                 </div>
             )}

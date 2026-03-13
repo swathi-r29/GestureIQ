@@ -48,7 +48,6 @@ const StaffSidebar = () => {
         {
             title: 'Management',
             items: [
-                { name: 'Assignments', icon: ClipboardList, path: '/staff/assignments' },
                 { name: 'Announcements', icon: Megaphone, path: '/staff/announcements' },
                 { name: 'Reports', icon: BarChart3, path: '/staff/reports' },
             ]

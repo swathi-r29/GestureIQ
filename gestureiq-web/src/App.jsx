@@ -32,7 +32,6 @@ import StaffProfile from './pages/staff/StaffProfile';
 import ClassJoin from './pages/ClassJoin';
 import StudentLiveClass from './pages/StudentLiveClass';
 import StudentEnrollment from './pages/staff/StudentEnrollment';
-import Assignments from './pages/staff/Assignments';
 import Announcements from './pages/staff/Announcements';
 import StaffLiveClasses from './pages/staff/LiveClasses';
 
@@ -78,7 +77,6 @@ export default function App() {
                       <Route path="/reports" element={<StaffReports />} />
                       <Route path="/students" element={<StaffStudents />} />
                       <Route path="/enrollment" element={<StudentEnrollment />} />
-                      <Route path="/assignments" element={<Assignments />} />
                       <Route path="/announcements" element={<Announcements />} />
                       <Route path="/profile" element={<StaffProfile />} />
                       <Route path="/settings" element={<div className="p-10 text-gray-500 uppercase tracking-widest text-xs">Settings Coming Soon...</div>} />

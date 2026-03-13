@@ -7,7 +7,46 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+const allowedOrigins = [
+    process.env.CLIENT_URL,
+    // HTTP variants (legacy / localhost direct access)
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    // HTTPS variants — required now that Vite runs with basicSsl
+    'https://localhost:5173',
+    'https://localhost:5174',
+    'https://127.0.0.1:5173',
+    'https://127.0.0.1:5174',
+    // Network IP — required for mobile access on same WiFi
+    'http://10.161.112.28:5173',
+    'https://10.161.112.28:5173',
+    'http://10.161.112.28:5174',
+    'https://10.161.112.28:5174',
+];
+
+app.use(cors({ 
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true); // allow server-to-server / curl
+
+        // Exact match
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+
+        // Allow any localhost / 127.0.0.1 port (dev flexibility)
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+
+        // Allow any local network IP (192.168.x.x or 10.x.x.x)
+        if (/^https?:\/\/(192\.168\.|10\.)\d+\.\d+\.\d+(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+
+        callback(new Error('Not allowed by CORS'));
+    }, 
+    credentials: true 
+}));
 app.use(express.json());
 
 // Routes
@@ -32,18 +71,25 @@ const connectDB = async () => {
         console.log('✅ MongoDB Connected');
     } catch (err) {
         console.error('❌ MongoDB Connection Error:', err.message);
-        // Do not exit process in dev, let it retry or handle gracefully
     }
 };
 
 connectDB();
+
+mongoose.connection.on('connected', () => {
+    console.log('✨ Mongoose default connection open');
+});
 
 mongoose.connection.on('error', err => {
     console.error('❌ MongoDB Runtime Error:', err);
 });
 
 mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️ MongoDB Disconnected. Attempting to reconnect...');
+    console.warn('⚠️ MongoDB Disconnected. Checking connectivity...');
+});
+
+mongoose.connection.on('reconnected', () => {
+    console.log('🔄 MongoDB Reconnected');
 });
 
 const PORT = process.env.PORT || 5000;
@@ -52,7 +98,11 @@ const server = http.createServer(app);
 const { Server } = require('socket.io');
 
 const io = new Server(server, {
-    cors: { origin: process.env.CLIENT_URL || 'http://localhost:5173' }
+    cors: { 
+        origin: '*',
+        methods: ["GET", "POST"],
+        credentials: false
+    }
 });
 
 // Track socket to room/identity mapping for cleanup
@@ -70,7 +120,6 @@ io.on('connection', (socket) => {
         socketRegistry.set(socket.id, { classId, userId });
         
         console.log(`User ${userId} (${userName}) joined room ${classId}`);
-        // Notify others (especially the teacher) that a new student joined
         socket.to(classId).emit('participant_joined', { 
             id: socket.id, 
             userId: userId, 
@@ -79,12 +128,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on('student_score_update', (data) => {
-        // data: { classId, studentId, studentName, mudra, score, attempts }
         io.to(data.classId).emit('score_update', data);
     });
 
     socket.on('staff_change_mudra', (data) => {
-        // data: { classId, newMudra }
         io.to(data.classId).emit('mudra_changed', data.newMudra);
     });
 
@@ -92,9 +139,8 @@ io.on('connection', (socket) => {
         io.to(classId).emit('class_ended_broadcast');
     });
 
-    // WebRTC Signaling for Teacher Broadcast
+    // WebRTC Signaling
     socket.on('webrtc_offer', (data) => {
-        // data: { classId, to, offer }
         if (data.to) {
             io.to(data.to).emit('teacher_broadcast_offer', {
                 from: socket.id,
@@ -109,7 +155,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('webrtc_answer', (data) => {
-        // data: { to, answer }
         io.to(data.to).emit('webrtc_answer_response', {
             from: socket.id,
             answer: data.answer
@@ -117,7 +162,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('webrtc_ice_candidate', (data) => {
-        // data: { classId, to, candidate }
         if (data.to) {
             io.to(data.to).emit('ice_candidate_received', { 
                 from: socket.id,
@@ -145,4 +189,4 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));
