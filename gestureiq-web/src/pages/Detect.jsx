@@ -19,7 +19,7 @@ const MUDRAS = [
     { folder: "tripataka",    name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                         level: "Basic"        },
     { folder: "ardhapataka",  name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",              level: "Basic"        },
     { folder: "kartarimukha", name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                  level: "Basic"        },
-    { folder: "mayura",       name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches index fingertip, others spread",              level: "Basic"        },
+    { folder: "mayura",       name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic"        },
     { folder: "ardhachandra", name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                 level: "Basic"        },
     { folder: "arala",        name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                 level: "Intermediate" },
     { folder: "shukatunda",   name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",                level: "Intermediate" },
@@ -257,6 +257,7 @@ export default function Detect() {
     const accuracy    = displayData.accuracy   || 0;
     const isDetected  = displayData.detected;
     const corrections = displayData.corrections || [];
+    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith("Wrong mudra"));
 
     return (
         <div className={`max-w-6xl mx-auto px-6 py-10 transition-all duration-700 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
@@ -323,8 +324,15 @@ export default function Detect() {
                             )}
                         </div>
                         {isDetected && (
-                            <div className={`absolute top-12 left-1/2 -translate-x-1/2 z-10 px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${corrections.length === 0 && accuracy > 75 ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
-                                {corrections.length === 0 && accuracy > 75 ? '✓ Good Form' : '↻ Adjust Position'}
+                            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 w-full max-w-[85%]">
+                                <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${corrections.length === 0 && accuracy > 75 ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
+                                    {corrections.length === 0 && accuracy > 75 ? '✓ Good Form' : '↻ Adjust Position'}
+                                </div>
+                                {wrongMudraMsg && (
+                                    <div className="px-4 py-2 mt-1 rounded-lg text-[10px] md:text-xs tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
+                                        ⚠️ {wrongMudraMsg}
+                                    </div>
+                                )}
                             </div>
                         )}
                         {holdState === 'idle' && holdProgress > 0 && (

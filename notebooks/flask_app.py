@@ -185,7 +185,6 @@ SKIP_CORRECTION_FINGERS = {
     "chandrakala": {"index", "middle", "ring", "pinky"},
     "pataka":      {"thumb"},
     "katakamukha": {"ring", "pinky"},
-    "padmakosha":  {"thumb", "index", "middle", "ring", "pinky"},
     "bhramara":    {"ring", "pinky"},
 }
 
@@ -258,14 +257,19 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         if finger in skip_fingers:
             continue
 
+        target_straight = ref_angle >= 120
+
         threshold = (
-            STRAIGHT_FINGER_THRESHOLD if (mudra_key in STRAIGHT_FINGER_MUDRAS and finger != "thumb")
+            STRAIGHT_FINGER_THRESHOLD if (mudra_key in STRAIGHT_FINGER_MUDRAS and finger != "thumb" and target_straight)
             else CORRECTION_THRESHOLDS.get(finger, 25)
         )
 
+        # Tighter threshold for Padmakosha — cup shape must be precise
+        if mudra_key == "padmakosha":
+            threshold = 15
+
         if abs_dev > threshold:
             finger_label = "little" if finger == "pinky" else finger
-            target_straight = ref_angle >= 120
             more_open = actual_angle > ref_angle
 
             if target_straight:
@@ -294,6 +298,27 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                  err = 30
                  total_error += err
                  deviations.append((err, "Press your thumb against your index finger"))
+
+        if mudra_key == "mayura":
+            t = landmarks_ref.landmark[4]
+            r = landmarks_ref.landmark[16] # ring tip
+            dist = math.sqrt((t.x-r.x)**2 + (t.y-r.y)**2)
+            if dist > 0.12:
+                err = 40
+                total_error += err
+                deviations.append((err, "Bring your thumb and ring fingertips together"))
+
+        if mudra_key == "tripataka":
+            if current_angles.get("pinky", 170) < 130:
+                err = 30
+                total_error += err
+                deviations.append((err, "Keep your little finger straight"))
+
+        if mudra_key == "ardhapataka":
+            if current_angles.get("pinky", 50) > 130:
+                err = 30
+                total_error += err
+                deviations.append((err, "Bend your little finger completely"))
 
     deviations.sort(key=lambda x: x[0], reverse=True)
     # Increase divisor from 6.5 to 10.0 for more leniency
@@ -339,6 +364,13 @@ def run_madm(landmarks, target_mudra=""):
         corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, landmarks)
 
         total_accuracy = float("{:.1f}".format((confidence * 0.4) + (art_accuracy * 0.6)))
+
+        # Dynamic Penalty: If a target is specified and mudra does not match, scale down
+        # the accuracy dynamically so it never stays stuck exactly on "50.0"
+        if eval_mudra and str(prediction).lower().strip() != str(eval_mudra).lower().strip():
+            # Cut accuracy mechanically, but keep it below 50 so feedback shows "Try again"
+            total_accuracy = min(total_accuracy * 0.55, 49.0)
+            corrections.insert(0, f"Wrong mudra — you are showing {prediction}, target is {eval_mudra}")
 
         # Update global mudra state
         current_mudra["name"]        = str(prediction)
@@ -452,6 +484,13 @@ def mudra_data():
             eval_mudra   = target if target else prediction
             corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, last_landmarks)
             total_accuracy = (confidence * 0.4) + (float(art_accuracy) * 0.6)
+            
+            # Dynamic Penalty: Scale down instead of capping exactly at 50
+            if eval_mudra and str(prediction).lower().strip() != str(eval_mudra).lower().strip():
+                # Cuts the accuracy smoothly but keeps it below 50 so it's forced into the 'Try again' zone
+                total_accuracy = min(total_accuracy * 0.55, 49.0)
+                corrections.insert(0, f"Wrong mudra — you are showing {prediction}, target is {eval_mudra}")
+                
             accuracy = float("{:.1f}".format(total_accuracy))
             feedback = (
                 "Correct! Great form." if accuracy >= 75

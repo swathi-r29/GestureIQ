@@ -18,7 +18,7 @@ const MUDRAS = [
     { name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                         level: "Basic",        folder: "tripataka"    },
     { name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",              level: "Basic",        folder: "ardhapataka"  },
     { name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                  level: "Basic",        folder: "kartarimukha" },
-    { name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches index fingertip, others spread",              level: "Basic",        folder: "mayura"       },
+    { name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic",        folder: "mayura"       },
     { name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                 level: "Basic",        folder: "ardhachandra" },
     { name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                 level: "Intermediate", folder: "arala"        },
     { name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",                level: "Intermediate", folder: "shukatunda"   },
@@ -49,7 +49,7 @@ const VOICE_INSTRUCTIONS = {
     tripataka:    "Keep index, middle, and little fingers straight. Bend your ring finger down toward your palm.",
     ardhapataka:  "Extend index and middle fingers straight. Bend your ring and little fingers down.",
     kartarimukha: "Extend index and middle fingers and spread them apart like scissors. Fold the others.",
-    mayura:       "Touch your thumb tip to your index fingertip. Spread the remaining three fingers wide.",
+    mayura:       "Touch your thumb tip to your ring fingertip. Spread the remaining three fingers wide.",
     ardhachandra: "Open all fingers wide and extend your thumb outward to the side. Like a half moon.",
     arala:        "Bend only your index finger inward. Keep all other fingers straight and upright.",
     shukatunda:   "Press your thumb against your ring finger. Keep the other three fingers straight.",
@@ -293,6 +293,7 @@ export default function Learn() {
     const accuracy    = detected.accuracy    || 0;
     const corrections = detected.corrections || [];
     const isCorrect   = detected.detected && accuracy > 65 && corrections.length === 0;
+    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith("Wrong mudra"));
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
@@ -594,8 +595,15 @@ export default function Learn() {
 
                                         {/* Status badge */}
                                         {detected.detected && (
-                                            <div className={`absolute top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${isCorrect ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
-                                                {isCorrect ? '✓ Correct Form' : '↻ Adjust'}
+                                            <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-[85%] z-20">
+                                                <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${isCorrect ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
+                                                    {isCorrect ? '✓ Correct Form' : '↻ Adjust'}
+                                                </div>
+                                                {wrongMudraMsg && (
+                                                    <div className="px-4 py-2 mt-1 rounded-lg text-[10px] md:text-xs tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
+                                                        ⚠️ {wrongMudraMsg}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
 
