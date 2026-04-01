@@ -12,9 +12,10 @@ import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import HandVisualiser from '../components/HandVisualiser';
+import HoldDetectionRing from '../components/HoldDetectionRing';
 import { io } from 'socket.io-client';
-import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+const { Hands, HAND_CONNECTIONS } = window;
+const { drawConnectors, drawLandmarks } = window;
 
 const MUDRAS = [
     { folder: "pataka",       name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic"        },
@@ -308,7 +309,10 @@ export default function Detect() {
 
     // ── Progress ──────────────────────────────────────────────
     const fetchProgress = async () => {
-        try { const res = await axios.get('/api/user/progress'); setProgress(res.data.progress); } catch { }
+        try { 
+            const res = await axios.get('/api/user/progress'); 
+            setProgress(res.data.progress); 
+        } catch { }
     };
 
     const saveProgress = async (mudraName) => {
@@ -632,5 +636,5 @@ export default function Detect() {
             )}
         </div>
     );
-//>>>>>>> Stashed changes
+
 }

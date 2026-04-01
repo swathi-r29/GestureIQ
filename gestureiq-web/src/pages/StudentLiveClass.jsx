@@ -9,8 +9,8 @@ import {
     Camera, Activity, CheckCircle, AlertCircle, Clock,
     Award, LogOut, Zap, Target, RefreshCw, VideoOff
 } from 'lucide-react';
-import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+const { Hands, HAND_CONNECTIONS } = window;
+const { drawConnectors, drawLandmarks } = window;
 
 const FLASK_URL = import.meta.env.VITE_FLASK_URL || '';
 

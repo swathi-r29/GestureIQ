@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "@fontsource/crimson-text": "^5.2.7",
-    "@mediapipe/drawing_utils": "^0.3.1675466124",
-    "@mediapipe/hands": "^0.4.1675469240",
     "@tensorflow/tfjs": "^4.22.0",
     "axios": "^1.13.6",
     "lucide-react": "^0.575.0",

@@ -241,7 +241,7 @@ MUDRA_MEANINGS = {
 #   chandrakala   → index+thumb open (C-shape), middle+ring+pinky curled
 #   padmakosha    → all fingers gently curved (cup / mango hold)
 #   sarpasheersha → all fingers close together, gently curved (~140°)
-#   mrugasheersha → index+middle open, ring+pinky+thumb bent inward
+#   mrugasheersha → thumb+pinky open, index+middle+ring bent inward (deer head)
 #   simhamukha    → index+pinky open, middle+ring bent, thumb bent
 #   kangula       → ring FULLY bent, index+middle+pinky gently curved
 #   alapadma      → all 5 fingers fully spread + gently curved
@@ -255,92 +255,36 @@ MUDRA_MEANINGS = {
 #   trishoola     → index+middle+ring open (3 fingers), thumb+pinky curled
 # =============================================================================
 MUDRA_REFERENCE_ANGLES = {
-    # pataakam — all 4 fully open (175°), thumb slightly bent inward (~70°)
-    "pataka":       {"thumb":  70, "index": 175, "middle": 175, "ring": 175, "pinky": 175},
-
-    # tripataakam — index+middle+pinky open, ring FULLY bent (~40°), thumb bent inward
-    "tripataka":    {"thumb":  70, "index": 175, "middle": 175, "ring":  40, "pinky": 175},
-
-    # ardhapataakam — index+middle open, ring+pinky HALF bent (~90°), thumb inward
-    "ardhapataka":  {"thumb":  75, "index": 175, "middle": 175, "ring":  90, "pinky":  90},
-
-    # kartari mukha — index+middle open & spread, ring+pinky bent, thumb bent
-    "kartarimukha": {"thumb":  80, "index": 175, "middle": 175, "ring":  50, "pinky":  50},
-
-    # mayura — all open, thumb bends to touch ring (ring ~120°)
-    "mayura":       {"thumb": 100, "index": 175, "middle": 175, "ring": 120, "pinky": 175},
-
-    # ardha chandra — all fingers fully open fan, thumb extended wide (~170°)
-    "ardhachandra": {"thumb": 170, "index": 175, "middle": 175, "ring": 175, "pinky": 175},
-
-    # araala — index BENT sharply (~70°), others straight, thumb extended
-    "arala":        {"thumb": 155, "index":  70, "middle": 175, "ring": 175, "pinky": 175},
-
-    # shuka tundam — ring bent (~70°, thumb presses ring), others open
-    "shukatunda":   {"thumb":  90, "index": 175, "middle": 175, "ring":  70, "pinky": 175},
-
-    # mushti — ALL fully curled (~35°), tight fist
-    "mushti":       {"thumb":  55, "index":  35, "middle":  35, "ring":  35, "pinky":  35},
-
-    # shikharam — fist + thumb fully extended up (~175°)
-    "shikhara":     {"thumb": 175, "index":  35, "middle":  35, "ring":  35, "pinky":  35},
-
-    # kapitham — all curled mid (~60°), thumb mid
-    "kapittha":     {"thumb":  80, "index":  60, "middle":  60, "ring":  60, "pinky":  60},
-
-    # katakaa mukha — 3-finger pinch (thumb+index+middle ~100°), ring+pinky open
-    "katakamukha":  {"thumb": 100, "index": 100, "middle": 100, "ring": 175, "pinky": 175},
-
-    # suchi — index fully open (~175°), others curled (~50°), thumb mid
-    "suchi":        {"thumb": 110, "index": 175, "middle":  50, "ring":  50, "pinky":  50},
-
-    # chandrakala — index open (~175°), thumb open (~160°), middle+ring+pinky curled (~60°)
-    "chandrakala":  {"thumb": 160, "index": 175, "middle":  60, "ring":  60, "pinky":  60},
-
-    # padmakosha — all fingers gently curved, like holding a mango (~110°)
-    "padmakosha":   {"thumb": 110, "index": 110, "middle": 110, "ring": 110, "pinky": 110},
-
-    # sarpasheersha — all gently curved together (~140°), fingers close/touching
-    "sarpashira":   {"thumb": 140, "index": 140, "middle": 140, "ring": 140, "pinky": 140},
-
-    # mrugasheersha — index+middle open, ring+pinky+thumb curled inward (~55°)
-    "mrigashira":   {"thumb":  55, "index": 175, "middle": 175, "ring":  55, "pinky":  55},
-
-    # simhamukha — index+pinky open, middle+ring bent (~100°), thumb bent
-    "simhamukha":   {"thumb":  90, "index": 175, "middle": 100, "ring": 100, "pinky": 175},
-
-    # kangula — ring FULLY bent (~45°), index+middle+pinky gently curved (~130°)
-    "kangula":      {"thumb": 120, "index": 130, "middle": 130, "ring":  45, "pinky": 130},
-
-    # alapadma — all 5 fully spread and gently curved (~120°)
-    "alapadma":     {"thumb": 120, "index": 120, "middle": 120, "ring": 120, "pinky": 120},
-
-    # chatura — index+middle+ring open (~175°), pinky slightly bent (~130°), thumb curled (~60°)
-    "chatura":      {"thumb":  60, "index": 175, "middle": 175, "ring": 175, "pinky": 130},
-
-    # bhramara — index+thumb tips touch (both ~60°), middle bent (~70°), ring+pinky open
-    "bhramara":     {"thumb":  60, "index":  60, "middle":  70, "ring": 175, "pinky": 175},
-
-    # hamsasya — all 5 tips pinch to one point (all ~55°)
-    "hamsasya":     {"thumb":  55, "index":  55, "middle":  55, "ring":  55, "pinky":  55},
-
-    # hamsapaksha — gentle wave spread, fingers at slightly different angles
-    "hamsapaksha":  {"thumb": 120, "index": 140, "middle": 130, "ring": 120, "pinky": 110},
-
-    # samdamsha — index+middle tight pinch (~60°), ring+pinky curled (~50°)
-    "sandamsha":    {"thumb":  75, "index":  60, "middle":  60, "ring":  50, "pinky":  50},
-
-    # mukula — all 5 tips meet in a bud (all ~60°)
-    "mukula":       {"thumb":  60, "index":  60, "middle":  60, "ring":  60, "pinky":  60},
-
-    # tamarachooda — fist + thumb up + pinky up (~175°), index+middle+ring curled
-    "tamrachuda":   {"thumb": 175, "index":  35, "middle":  35, "ring":  35, "pinky": 175},
-
-    # trishoola — index+middle+ring open (~175°), thumb+pinky curled (~55°)
-    "trishula":     {"thumb":  55, "index": 175, "middle": 175, "ring": 175, "pinky":  55},
-
-    "palli":        {"thumb":  45, "index": 175, "middle": 175, "ring":  45, "pinky":  45},
-    "vyaaghr":      {"thumb": 175, "index": 175, "middle":  55, "ring":  55, "pinky": 175},
+    "alapadma":     {'thumb': 156.4, 'index': 130.2, 'middle': 131.7, 'ring': 122.9, 'pinky': 118.5},
+    "arala":        {'thumb': 155.8, 'index':  70.2, 'middle': 174.5, 'ring': 173.2, 'pinky': 171.2},
+    "ardhachandra": {'thumb': 170.1, 'index': 175.2, 'middle': 176.4, 'ring': 174.9, 'pinky': 170.2},
+    "ardhapataka":  {'thumb':  75.2, 'index': 174.9, 'middle': 174.2, 'ring':  89.5, 'pinky':  91.2},
+    "bhramara":     {'thumb':  59.8, 'index':  58.7, 'middle':  70.4, 'ring': 175.1, 'pinky': 174.2},
+    "chandrakala":  {'thumb': 161.2, 'index': 175.4, 'middle':  60.1, 'ring':  59.8, 'pinky':  61.2},
+    "chatura":      {'thumb':  61.5, 'index': 175.2, 'middle': 174.9, 'ring': 174.2, 'pinky': 129.5},
+    "hamsapaksha":  {'thumb': 121.2, 'index': 140.4, 'middle': 131.2, 'ring': 122.5, 'pinky': 111.4},
+    "hamsasya":     {'thumb':  54.8, 'index':  55.2, 'middle':  56.1, 'ring':  54.9, 'pinky':  55.4},
+    "kangula":      {'thumb': 160.5, 'index': 165.2, 'middle': 165.4, 'ring':  44.8, 'pinky': 165.2},
+    "kapittha":     {'thumb': 106.6, 'index':  97.2, 'middle':  76.5, 'ring':  78.4, 'pinky':  91.1},
+    "kartarimukha": {'thumb':  80.2, 'index': 175.1, 'middle': 174.4, 'ring':  51.2, 'pinky':  49.8},
+    "katakamukha":  {'thumb': 100.4, 'index': 101.2, 'middle': 102.5, 'ring': 174.5, 'pinky': 173.2},
+    "mayura":       {'thumb': 101.2, 'index': 175.4, 'middle': 174.5, 'ring': 120.4, 'pinky': 175.2},
+    "mrigashira":   {'thumb': 175.1, 'index':  70.2, 'middle':  70.4, 'ring':  70.1, 'pinky': 175.2},
+    "mukula":       {'thumb':  59.8, 'index':  60.2, 'middle':  61.4, 'ring':  59.5, 'pinky':  61.2},
+    "mushti":       {'thumb': 161.0, 'index': 125.6, 'middle':  81.9, 'ring':  84.2, 'pinky':  95.8},
+    "padmakosha":   {'thumb': 111.2, 'index': 110.5, 'middle': 112.4, 'ring': 111.2, 'pinky': 110.8},
+    "palli":        {'thumb':  44.2, 'index': 174.5, 'middle': 174.2, 'ring':  45.1, 'pinky':  46.2},
+    "pataka":       {'thumb':  70.4, 'index': 175.1, 'middle': 175.4, 'ring': 174.2, 'pinky': 174.8},
+    "sandamsha":    {'thumb':  74.8, 'index':  61.2, 'middle':  59.5, 'ring':  49.8, 'pinky':  51.2},
+    "sarpashira":   {'thumb': 141.2, 'index': 140.5, 'middle': 141.6, 'ring': 139.8, 'pinky': 142.1},
+    "shikhara":     {'thumb': 175.4, 'index':  34.8, 'middle':  35.1, 'ring':  36.2, 'pinky':  34.9},
+    "shukatunda":   {'thumb':  89.2, 'index': 175.4, 'middle': 174.9, 'ring':  69.5, 'pinky': 174.2},
+    "simhamukha":   {'thumb':  90.2, 'index': 175.1, 'middle': 101.4, 'ring': 102.5, 'pinky': 175.4},
+    "suchi":        {'thumb': 109.5, 'index': 175.1, 'middle':  51.2, 'ring':  50.4, 'pinky':  51.2},
+    "tamrachuda":   {'thumb': 174.8, 'index':  34.5, 'middle':  35.2, 'ring':  36.1, 'pinky': 175.2},
+    "tripataka":    {'thumb':  70.2, 'index': 175.1, 'middle': 174.5, 'ring':  39.8, 'pinky': 174.8},
+    "trishula":     {'thumb':  54.5, 'index': 175.1, 'middle': 174.5, 'ring': 174.2, 'pinky':  55.2},
+    "vyaaghr":      {'thumb': 175.1, 'index': 174.8, 'middle':  54.7, 'ring':  56.2, 'pinky': 174.5},
 }
 
 # =============================================================================
@@ -397,26 +341,27 @@ def dist_lm(lm, i, j):
 
 def get_finger_angles_dict(landmarks):
     """
-    Computes a blended PIP+DIP extension angle for each finger.
+    Computes finger angles consistent with the feature extraction used for training.
     Used for the Correction Engine and Hybrid Override logic.
     """
-    joints = {
-        "thumb":  (1, 2, 3, 4),
-        "index":  (5, 6, 7, 8),
-        "middle": (9, 10, 11, 12),
-        "ring":   (13, 14, 15, 16),
-        "pinky":  (17, 18, 19, 20)
+    # Indices must match utils/feature_engineering.py exactly
+    res = {
+        "thumb":  get_angle([landmarks[1].x, landmarks[1].y, landmarks[1].z],
+                            [landmarks[2].x, landmarks[2].y, landmarks[2].z],
+                            [landmarks[3].x, landmarks[3].y, landmarks[3].z]),
+        "index":  get_angle([landmarks[5].x, landmarks[5].y, landmarks[5].z],
+                            [landmarks[6].x, landmarks[6].y, landmarks[6].z],
+                            [landmarks[7].x, landmarks[7].y, landmarks[7].z]),
+        "middle": get_angle([landmarks[9].x, landmarks[9].y, landmarks[9].z],
+                            [landmarks[10].x, landmarks[10].y, landmarks[10].z],
+                            [landmarks[11].x, landmarks[11].y, landmarks[11].z]),
+        "ring":   get_angle([landmarks[13].x, landmarks[13].y, landmarks[13].z],
+                            [landmarks[14].x, landmarks[14].y, landmarks[14].z],
+                            [landmarks[15].x, landmarks[15].y, landmarks[15].z]),
+        "pinky":  get_angle([landmarks[17].x, landmarks[17].y, landmarks[17].z],
+                            [landmarks[18].x, landmarks[18].y, landmarks[18].z],
+                            [landmarks[19].x, landmarks[19].y, landmarks[19].z])
     }
-    res = {}
-    for n, (m, p, d, t) in joints.items():
-        p_m = [landmarks[m].x, landmarks[m].y, landmarks[m].z]
-        p_p = [landmarks[p].x, landmarks[p].y, landmarks[p].z]
-        p_d = [landmarks[d].x, landmarks[d].y, landmarks[d].z]
-        p_t = [landmarks[t].x, landmarks[t].y, landmarks[t].z]
-        
-        a1 = get_angle(p_m, p_p, p_d)
-        a2 = get_angle(p_p, p_d, p_t)
-        res[n] = (a1 * 0.6) + (a2 * 0.4)
     return res
 
 # =============================================================================
@@ -684,23 +629,20 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                 deviations.append((50, "Bend your thumb inward toward your palm"))
 
         # ── KANGULA ───────────────────────────────────────────────────────────
-        # Ring FULLY bent (~45°). Index+middle+pinky gently curved (~130°).
+        # Ring FULLY bent (~45°). Index+middle+pinky extended (~165°).
         elif mudra_key == "kangula":
             ring_a = current_angles.get("ring", 45)
             if ring_a > 85:
-                total_error += 75
-                deviations.append((75, "Bend your ring finger fully inward toward your palm"))
-            if dist_lm(lm, 16, 0) > 0.20:
-                total_error += 40
-                deviations.append((40, "Curl your ring finger more toward your palm"))
+                total_error += 85
+                deviations.append((85, "Bend your ring finger fully inward toward your palm"))
+            if dist_lm(lm, 16, 0) > 0.22:
+                total_error += 45
+                deviations.append((45, "Curl your ring finger all the way to your palm for Kangula"))
             for f in ["index", "middle", "pinky"]:
-                a = current_angles.get(f, 130)
-                if a > 162:
-                    total_error += 30
-                    deviations.append((30, f"Curve your {f} finger slightly inward"))
-                elif a < 85:
-                    total_error += 40
-                    deviations.append((40, f"Uncurl your {f} finger — only slightly curved for Kangula"))
+                a = current_angles.get(f, 165)
+                if a < 110:
+                    total_error += 50
+                    deviations.append((50, f"Straighten your {f} finger for Kangula"))
 
         # ── SARPASHIRA ────────────────────────────────────────────────────────
         # All fingers gently curved together (~140°), touching, uniform
@@ -940,19 +882,20 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                     deviations.append((40, f"Curl your {f} finger inward for Suchi"))
 
         # ── MRIGASHIRA ────────────────────────────────────────────────────────
-        # Index+middle open. Ring+pinky+thumb bent inward.
+        # Thumb+pinky straight. Index+middle+ring bent.
         elif mudra_key == "mrigashira":
-            for f in ["index", "middle"]:
+            for f in ["thumb", "pinky"]:
                 if current_angles.get(f, 175) < 140:
+                    total_error += 55
+                    deviations.append((55, f"Straighten your {f} finger for Mrigashira"))
+            for f in ["index", "middle", "ring"]:
+                if current_angles.get(f, 70) > 110:
                     total_error += 45
-                    deviations.append((45, f"Straighten your {f} finger for Mrigashira"))
-            for f in ["ring", "pinky"]:
-                if current_angles.get(f, 55) > 100:
-                    total_error += 40
-                    deviations.append((40, f"Curl your {f} finger inward for Mrigashira"))
-            if dist_lm(lm, 4, 0) > 0.28:
-                total_error += 30
-                deviations.append((30, "Tuck your thumb inward toward your palm"))
+                    deviations.append((45, f"Curl your {f} finger inward for Mrigashira"))
+            # Ring finger often needs a bit more help to differentiate from Pataka
+            if current_angles.get("ring", 70) > 130:
+                total_error += 100
+                deviations.append((100, "Bend your ring finger more for Mrigashira"))
 
         # ── SIMHAMUKHA ────────────────────────────────────────────────────────
         # Index+pinky open. Middle+ring bent. Thumb bent.
@@ -1149,8 +1092,21 @@ def run_madm(mp_landmarks, target_mudra=""):
 
         lm_wrapper = LMWrapper(smooth_lm)
 
-        if not target_mudra:
-            # ── HYBRID OVERRIDES (Only if ML confidence is low) ──────────────────
+        if target_mudra:
+            # ── TARGET-PRIORITY HYBRID LOGIC ──────────────────────────────────
+            # If a specific mudra is being practiced, prioritize its geometry.
+            # This handles cases where ML confidence is low but finger angles match.
+            target_key = target_mudra.lower().strip()
+            if target_key in MUDRA_REFERENCE_ANGLES:
+                _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper)
+                if geom_acc > 70:
+                    if stable_name != target_key:
+                        print(f"[HYBRID] Force Matching Target: ML={stable_name}({smooth_conf:.1f}%) -> Target={target_key}({geom_acc:.1f}%)")
+                    stable_name = target_key
+                    smooth_conf = max(smooth_conf, geom_acc)
+                    is_stable   = True
+        else:
+            # ── GLOBAL HYBRID OVERRIDES (Only if ML confidence is low) ─────────
             if smooth_conf < 60:
                 best_geom_acc  = 0
                 best_geom_name = ""
@@ -1248,7 +1204,7 @@ def run_madm(mp_landmarks, target_mudra=""):
             raw_conf >= 20
         )
         if wrong_mudra:
-            corrections.insert(0, f"Wrong mudra — you are showing {top_name}, target is {eval_mudra}")
+            corrections.insert(0, f"Wrong mudra — you are showing {stable_name}, target is {eval_mudra}")
 
         stability_factor = 1.0 if is_stable else 0.80
         # Re-balanced weights: 70% ML, 30% Geometry

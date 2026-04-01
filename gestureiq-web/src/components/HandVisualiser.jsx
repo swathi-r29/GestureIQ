@@ -405,5 +405,5 @@ export default function HandVisualiser({ targetMudra = "", apiBase = import.meta
       </div>
     </div>
   );
-//>>>>>>> Stashed changes
+
 }

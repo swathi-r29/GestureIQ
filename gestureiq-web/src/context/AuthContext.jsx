@@ -16,7 +16,21 @@ export function AuthProvider({ children }) {
       const userData = JSON.parse(localStorage.getItem('user'));
       setUser(userData);
     }
+    
+    // Global Axios Response Interceptor to handle 401s (Expired Tokens)
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          logout();
+          window.location.href = '/login'; // Force redirect to login
+        }
+        return Promise.reject(error);
+      }
+    );
+
     setLoading(false);
+    return () => axios.interceptors.response.eject(interceptor);
   }, [token]);
 
   const login = (token, user) => {

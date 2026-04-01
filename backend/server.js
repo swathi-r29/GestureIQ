@@ -29,7 +29,7 @@ const allowedOrigins = [
     'https://10.161.112.28:5174',
 ];
 
-app.use(cors({ 
+app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true); // allow server-to-server / curl
 
@@ -47,8 +47,8 @@ app.use(cors({
         }
 
         callback(new Error('Not allowed by CORS'));
-    }, 
-    credentials: true 
+    },
+    credentials: true
 }));
 app.use(express.json());
 
@@ -61,7 +61,7 @@ app.use('/api/staff', require('./routes/staffRoutes'));
 app.use('/api/student', require('./routes/studentRoutes'));
 
 // Static files (for mudra images/videos)
-const path = require('path');
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // MongoDB connection
@@ -101,7 +101,7 @@ const server = http.createServer(app);
 const { Server } = require('socket.io');
 
 const io = new Server(server, {
-    cors: { 
+    cors: {
         origin: '*',
         methods: ["GET", "POST"],
         credentials: false
@@ -123,18 +123,18 @@ io.on('connection', (socket) => {
         socketRegistry.set(socket.id, { classId, userId, name });
 
         console.log(`[Socket] User ${name} (${userId}) joined room ${classId}`);
-        
+
         // Notify others in room
         socket.to(classId).emit('participant_joined', {
-            id:     socket.id,
+            id: socket.id,
             userId: userId,
-            name:   name
+            name: name
         });
     });
 
     socket.on('start_live_session', (classId) => {
         console.log(`[Socket] Class ${classId} starting LIVE`);
-        
+
         // 1. Update classes_db.json (Sync for Dashboard)
         try {
             const dbPath = path.join(__dirname, 'classes_db.json');
@@ -164,7 +164,7 @@ io.on('connection', (socket) => {
     socket.on('set_target_mudra', (data) => {
         const { classId, target } = data;
         if (!classId) return;
-        
+
         console.log(`[Socket] Room ${classId} target mudra -> ${target}`);
         io.to(classId).emit('target_changed', { target });
     });
@@ -186,12 +186,12 @@ io.on('connection', (socket) => {
     socket.on('webrtc_offer', (data) => {
         if (data.to) {
             io.to(data.to).emit('teacher_broadcast_offer', {
-                from:  socket.id,
+                from: socket.id,
                 offer: data.offer
             });
         } else {
             socket.to(data.classId).emit('teacher_broadcast_offer', {
-                from:  socket.id,
+                from: socket.id,
                 offer: data.offer
             });
         }
@@ -199,7 +199,7 @@ io.on('connection', (socket) => {
 
     socket.on('webrtc_answer', (data) => {
         io.to(data.to).emit('webrtc_answer_response', {
-            from:   socket.id,
+            from: socket.id,
             answer: data.answer
         });
     });
@@ -207,12 +207,12 @@ io.on('connection', (socket) => {
     socket.on('webrtc_ice_candidate', (data) => {
         if (data.to) {
             io.to(data.to).emit('ice_candidate_received', {
-                from:      socket.id,
+                from: socket.id,
                 candidate: data.candidate
             });
         } else {
             socket.to(data.classId).emit('ice_candidate_received', {
-                from:      socket.id,
+                from: socket.id,
                 candidate: data.candidate
             });
         }
@@ -223,7 +223,7 @@ io.on('connection', (socket) => {
         if (registry) {
             console.log(`User ${registry.userId} left room ${registry.classId}`);
             socket.to(registry.classId).emit('participant_left', {
-                id:     socket.id,
+                id: socket.id,
                 userId: registry.userId
             });
             socketRegistry.delete(socket.id);

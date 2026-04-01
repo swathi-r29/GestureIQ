@@ -23,6 +23,7 @@ export default defineConfig({
       }
     })
   ],
+
   server: {
     host: true,
     proxy: {
@@ -37,6 +38,11 @@ export default defineConfig({
         secure: false
       },
       '/api/landmarks': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/api/detect_landmarks': {
         target: 'http://127.0.0.1:5001',
         changeOrigin: true,
         secure: false
