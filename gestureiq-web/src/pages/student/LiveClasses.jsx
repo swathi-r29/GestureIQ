@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { getSocket } from '../../utils/socket';
 import {
     Video,
     Calendar,
@@ -23,8 +24,18 @@ export default function StudentLiveClasses() {
 
     useEffect(() => {
         fetchClasses();
-        const interval = setInterval(fetchClasses, 30000);
-        return () => clearInterval(interval);
+        
+        // Instant Visibility: Listen for global class start event
+        const socket = getSocket();
+        socket.on('class_started', (data) => {
+            console.log('[Dashboard] New class live:', data.classId);
+            fetchClasses();
+        });
+
+        // Cleanup
+        return () => {
+            socket.off('class_started');
+        };
     }, []);
 
     const fetchClasses = async () => {

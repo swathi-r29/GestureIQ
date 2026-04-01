@@ -102,10 +102,14 @@ HOLD_FRAMES     = 8
 COOLDOWN_FRAMES = 20
 
 landmark_history  = deque(maxlen=2)
-hold_frame_buffer = deque(maxlen=HOLD_FRAMES)
-cooldown_counter  = 0
-hold_triggered    = False
+hold_frame_buffer    = deque(maxlen=HOLD_FRAMES)
+cooldown_counter     = 0
+hold_triggered       = False
 last_auto_evaluation = {}
+
+# ── Temporal Stability Buffer ───────────────────────────────────────────────
+detection_history = deque(maxlen=3)
+last_stable_name = ""
 
 # ── Per-frame smoothing buffer for finger angles ──────────────────────────────
 angle_buffer = deque(maxlen=5)
@@ -1102,13 +1106,26 @@ def is_hand_held(landmarks):
 # CORE MADM PIPELINE
 # =============================================================================
 def run_madm(mp_landmarks, target_mudra=""):
-    global last_landmarks
+    global last_landmarks, last_stable_name
 
     try:
-        lm_list        = mp_landmarks.landmark
-        last_landmarks = mp_landmarks
+        # 1. Adapt input (MediaPipe object OR JSON list)
+        if hasattr(mp_landmarks, 'landmark'):
+            lm_list = mp_landmarks.landmark
+            last_landmarks = mp_landmarks
+        else:
+            # mp_landmarks is the JSON list from frontend
+            lm_list = [LM(p['x'], p['y'], p['z']) for p in mp_landmarks]
+            # Mock a MediaPipe-like container for internal tracking if needed
+            last_landmarks = type('obj', (object,), {'landmark': lm_list})
 
-        smoothed_arr = ema_smooth_landmarks(lm_list)
+        # 2. Wrist Center Normalization (Accuracy Fix)
+        # Centering ensures position-independence for the AI model
+        wrist = lm_list[0]
+        normalized_lm = [LM(p.x - wrist.x, p.y - wrist.y, p.z - wrist.z) for p in lm_list]
+        
+        # 3. EMA Landmark Smoothing
+        smoothed_arr = ema_smooth_landmarks(normalized_lm)
         smooth_lm    = [LM(smoothed_arr[i, 0], smoothed_arr[i, 1], smoothed_arr[i, 2])
                         for i in range(21)]
 
@@ -1259,9 +1276,16 @@ def run_madm(mp_landmarks, target_mudra=""):
             "Try Again — adjust your hand position."
         )
 
+        # ── FLICKER FILTER (Temporal Buffer) ─────────────────────────
+        detection_history.append(stable_name)
+        if len(detection_history) == 3 and len(set(detection_history)) == 1:
+            last_stable_name = stable_name
+        
+        final_name = last_stable_name if last_stable_name else stable_name
+
         result = {
             "detected":      True,
-            "name":          stable_name,
+            "name":          final_name,
             "confidence":    round(smooth_conf, 1),
             "accuracy":      total_accuracy,
             "corrections":   corrections,
@@ -1430,8 +1454,44 @@ def detect_frame():
 
         return jsonify(mudra_result)
 
+        return jsonify(mudra_result)
+
     except Exception as e:
         print(f"[detect_frame] Error: {e}")
+        return jsonify({"error": str(e), "detected": False}), 500
+
+@app.route('/api/detect_landmarks', methods=['POST'])
+def detect_landmarks():
+    """ 
+    Modern endpoint for client-side extracted landmarks. 
+    Eliminates base64 image lag.
+    """
+    global current_mudra
+    try:
+        body = request.get_json(force=True)
+        if not body or 'landmarks' not in body:
+            return jsonify({"error": "No landmarks"}), 400
+
+        target = body.get('targetMudra', '').lower().strip()
+        landmarks = body['landmarks']
+
+        # Ensure we have 21 landmarks
+        if len(landmarks) != 21:
+             return jsonify({"error": "Invalid landmark count"}), 400
+
+        # Run MADM pipeline
+        mudra_result = run_madm(landmarks, target)
+        
+        # Merge with Navarasa state (Navarasa is still camera-feed dependent or can be disabled for this route)
+        mudra_result.update(current_navarasa)
+        
+        # Update global state
+        current_mudra.update(mudra_result)
+        
+        return jsonify(mudra_result)
+    except Exception as e:
+        print(f"[detect_landmarks] Error: {e}")
+        import traceback; traceback.print_exc()
         return jsonify({"error": str(e), "detected": False}), 500
 
 @app.route('/api/landmarks')

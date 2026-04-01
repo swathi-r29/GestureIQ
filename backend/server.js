@@ -3,6 +3,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const fs = require('fs');
+const path = require('path');
 
 dotenv.config();
 
@@ -112,57 +114,64 @@ const socketRegistry = new Map();
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
-    socket.on('join_class_room', (data) => {
-        const classId  = typeof data === 'string' ? data : data.classId;
-        const userName = typeof data === 'object' ? (data.name || 'Student') : 'Student';
-        const userId   = typeof data === 'object' ? (data.userId || socket.id) : socket.id;
-
-        // Prevent duplicate joins — leave old rooms first
-        const existing = socketRegistry.get(socket.id);
-        if (existing && existing.classId === classId) {
-            console.log(`User ${userId} already in room ${classId} — skipping duplicate join`);
-            return;
-        }
-
-        socket.join(classId);
-        socketRegistry.set(socket.id, { classId, userId, name: userName });
-
-        console.log(`User ${userId} (${userName}) joined room ${classId}`);
-
-        // Only emit participant_joined if this is a student (not teacher rejoining)
-        if (userId !== socket.id) {
-            socket.to(classId).emit('participant_joined', {
-                id:     socket.id,
-                userId: userId,
-                name:   userName
-            });
-        }
-    });
-
-    socket.on('student_join_class', (data) => {
+    // ── Live Class Handshake ───────────────────────────────────
+    socket.on('join_class', (data) => {
         const { classId, userId, name } = data;
+        if (!classId) return;
+
         socket.join(classId);
         socketRegistry.set(socket.id, { classId, userId, name });
+
+        console.log(`[Socket] User ${name} (${userId}) joined room ${classId}`);
+        
+        // Notify others in room
         socket.to(classId).emit('participant_joined', {
             id:     socket.id,
             userId: userId,
-            name:   name || 'Student'
+            name:   name
         });
-        console.log(`Student ${name} (${userId}) joined room ${classId}`);
     });
 
-    socket.on('class_started', (classId) => {
-        socket.to(classId).emit('class_started');
+    socket.on('start_live_session', (classId) => {
+        console.log(`[Socket] Class ${classId} starting LIVE`);
+        
+        // 1. Update classes_db.json (Sync for Dashboard)
+        try {
+            const dbPath = path.join(__dirname, 'classes_db.json');
+            if (fs.existsSync(dbPath)) {
+                let classes = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+                let updated = false;
+                classes = classes.map(c => {
+                    if (c.classId === classId) {
+                        updated = true;
+                        return { ...c, status: 'live', isLive: true };
+                    }
+                    return c;
+                });
+                if (updated) {
+                    fs.writeFileSync(dbPath, JSON.stringify(classes, null, 2));
+                    console.log(`[Socket] classes_db.json updated for class ${classId}`);
+                }
+            }
+        } catch (err) {
+            console.error('[Socket] JSON DB update error:', err);
+        }
+
+        // 2. Global Broadcast to all students (even those not in the room)
+        io.emit('class_started', { classId });
+    });
+
+    socket.on('set_target_mudra', (data) => {
+        const { classId, target } = data;
+        if (!classId) return;
+        
+        console.log(`[Socket] Room ${classId} target mudra -> ${target}`);
+        io.to(classId).emit('target_changed', { target });
     });
 
     socket.on('modules_changed', (data) => {
         const { classId, modules } = data;
         socket.to(classId).emit('modules_changed', { modules });
-    });
-
-    socket.on('staff_change_mudra', (data) => {
-        const { classId, newMudra } = data;
-        socket.to(classId).emit('mudra_changed', { mudra: newMudra });
     });
 
     socket.on('student_score_update', (data) => {

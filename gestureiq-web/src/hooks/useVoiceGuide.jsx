@@ -290,19 +290,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         if (!unlockedRef.current) return;  // must be unlocked first
         if (!message) return;
 
-        // Cancel lower-priority ongoing speech
-        if (isSpeakingRef.current && priority <= currentPrioRef.current) return;
-        if (isSpeakingRef.current && priority > currentPrioRef.current) {
-            window.speechSynthesis.cancel();
-            isSpeakingRef.current = false;
-            clearTimeout(watchdogRef.current);
-        }
+        // NEW: Always cancel existing speech to prevent queue backup and lag
+        window.speechSynthesis.cancel();
 
         const lang = langRef.current;
         const utt  = new SpeechSynthesisUtterance(message);
         utt.lang   = langCode(lang);
-        utt.rate   = lang === 'ta' ? 0.85 : 0.88;
-        utt.pitch  = 1.05;
+        utt.rate   = 0.9;   // Optimized for natural teacher speed
+        utt.pitch  = 1.0;   // Neutral pitch
         utt.volume = 1.0;
 
         const voice = getBestVoice(lang);

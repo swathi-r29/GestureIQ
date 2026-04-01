@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { io } from 'socket.io-client';
+import { getSocket } from '../../utils/socket';
 import {
   Video,
   Users,
@@ -12,6 +12,62 @@ import {
   Send,
   UserCheck
 } from 'lucide-react';
+
+// ── SKELETON RENDERER ───────────────────────────────────────
+const SkeletonOverlay = ({ landmarks, color = '#10B981' }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !landmarks) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Clear
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Joint connections (simplified for overview)
+    const connections = [
+      [0,1],[1,2],[2,3],[3,4],        // Thumb
+      [0,5],[5,6],[6,7],[7,8],        // Index
+      [0,9],[9,10],[10,11],[11,12],   // Middle
+      [0,13],[13,14],[14,15],[15,16], // Ring
+      [0,17],[17,18],[18,19],[19,20]  // Little
+    ];
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+
+    connections.forEach(([s, e]) => {
+      const start = landmarks[s];
+      const end = landmarks[e];
+      if (start && end) {
+        ctx.beginPath();
+        ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
+        ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
+        ctx.stroke();
+      }
+    });
+
+    // Draw points
+    ctx.fillStyle = '#fff';
+    landmarks.forEach(pt => {
+      ctx.beginPath();
+      ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, [landmarks, color]);
+
+  return (
+    <canvas 
+      ref={canvasRef} 
+      width={320} 
+      height={180} 
+      className="absolute inset-0 w-full h-full pointer-events-none z-10"
+      style={{ transform: 'scaleX(-1)' }}
+    />
+  );
+};
 
 const StaffConductClass = () => {
   const { classId } = useParams();
@@ -60,26 +116,27 @@ const StaffConductClass = () => {
       setClassData(res.data);
       setCurrentMudra(res.data.mudrasList?.[0] || '');
 
-      // Single socket connection
-      const s = io('/', {
-        path: '/socket.io',
-        secure: false,
-        rejectUnauthorized: false
-      });
+      // Single socket connection via utility
+      const s = getSocket();
       socketRef.current = s;
 
-      s.emit('join_class_room', { classId, name: 'Teacher', isTeacher: true });
+      const join = () => {
+        s.emit('join_class', { classId, name: 'Teacher', userId: 'teacher', isTeacher: true });
+      };
+      
+      join();
+      s.on('reconnect', join);
 
-      // Start class in DB and notify students
+      // Start class in DB and notify students (global broadcast)
       await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/${classId}/start`,
         {},
         { headers: { 'x-auth-token': token } }
       );
-      s.emit('class_started', classId);
+      s.emit('start_live_session', classId);
 
       // Set initial target mudra
-      s.emit('staff_change_mudra', { classId, newMudra: res.data.mudrasList?.[0] || '' });
+      s.emit('set_target_mudra', { classId, target: res.data.mudrasList?.[0] || '' });
 
       // Student joins
       s.on('participant_joined', (data) => {
@@ -133,17 +190,16 @@ const StaffConductClass = () => {
   const updateStudentData = (data) => {
     setStudents(prev => {
       const updated = { ...prev };
-      const status = data.score >= 75 ? 'Good' : data.score >= 50 ? 'Developing' : 'Needs Help';
-      const currentAttempts = updated[data.studentId]?.attempts || 0;
+      const status = data.score >= 75 ? 'Excellent' : data.score >= 50 ? 'Good' : 'Practicing';
       updated[data.studentId] = {
         ...updated[data.studentId],
-        name:     data.studentName || updated[data.studentId]?.name || 'Student',
-        score:    parseInt(data.score) || 0,
-        attempts: data.score > 0 ? currentAttempts + 1 : currentAttempts,
-        mudra:    data.mudra || '',
+        name:      data.studentName || updated[data.studentId]?.name || 'Student',
+        score:     data.score || 0,
+        mudra:     data.mudra || '',
         status,
-        lastSeen: Date.now(),
-        frame:    data.frame || updated[data.studentId]?.frame || null
+        lastSeen:  Date.now(),
+        frame:     data.frame || updated[data.studentId]?.frame || null,
+        landmarks: data.landmarks || updated[data.studentId]?.landmarks || null
       };
       return updated;
     });
@@ -170,7 +226,7 @@ const StaffConductClass = () => {
   const handleMudraChange = (newMudra) => {
     setCurrentMudra(newMudra);
     if (socketRef.current) {
-      socketRef.current.emit('staff_change_mudra', { classId, newMudra });
+      socketRef.current.emit('set_target_mudra', { classId, target: newMudra });
     }
   };
 
@@ -391,8 +447,8 @@ const StaffConductClass = () => {
         <div className="flex-1 p-6 overflow-y-auto" style={{ backgroundColor: 'var(--bg)' }}>
           {Object.keys(students).length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {Object.entries(students).map(([id, data]) => (
-                <div key={id}
+              {Object.values(students).map((data) => (
+                <div key={data.studentId}
                   className={`p-5 rounded-2xl border-4 transition-all duration-300 ${
                     data.score >= 75 ? 'border-green-500 shadow-lg shadow-green-500/10' :
                     data.score >= 50 ? 'border-yellow-500 shadow-lg shadow-yellow-500/10' :
@@ -403,6 +459,13 @@ const StaffConductClass = () => {
                   {/* Student video / frame */}
                   <div className="w-full aspect-video rounded-xl bg-black/80 mb-4 overflow-hidden relative flex items-center justify-center border shadow-inner"
                     style={{ borderColor: 'var(--border)' }}>
+                    {data.landmarks ? (
+                      <SkeletonOverlay 
+                        landmarks={data.landmarks} 
+                        color={data.score >= 75 ? '#10B981' : data.score >= 50 ? '#F59E0B' : '#EF4444'} 
+                      />
+                    ) : null}
+
                     {data.frame ? (
                       <img src={data.frame}
                         className="w-full h-full object-cover"
@@ -412,7 +475,7 @@ const StaffConductClass = () => {
                       <div className="flex flex-col items-center opacity-30">
                         <Users className="w-8 h-8 mb-2 text-white" />
                         <span className="text-[10px] font-bold uppercase tracking-widest text-white">
-                          {data.status}
+                          {data.status || 'Active'}
                         </span>
                       </div>
                     )}

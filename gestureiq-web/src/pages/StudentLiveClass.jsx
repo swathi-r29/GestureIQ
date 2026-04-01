@@ -4,10 +4,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
+import { getSocket } from '../utils/socket';
 import {
     Camera, Activity, CheckCircle, AlertCircle, Clock,
     Award, LogOut, Zap, Target, RefreshCw, VideoOff
 } from 'lucide-react';
+import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
 const FLASK_URL = import.meta.env.VITE_FLASK_URL || '';
 
@@ -59,6 +62,11 @@ const StudentLiveClass = () => {
     const lastVoiceRef     = useRef(0);
     const socketRef        = useRef(null);
     const classDataRef     = useRef(null); // ref for use inside interval
+    
+    // MediaPipe Refs
+    const handsRef = useRef(null);
+    const landmarksRef = useRef(null);
+    const requestRef = useRef(null);
 
     // Keep classDataRef in sync
     useEffect(() => {
@@ -75,27 +83,27 @@ const StudentLiveClass = () => {
                 setClassData(res.data);
                 classDataRef.current = res.data;
 
-                // Connect socket
-                const { io: socketIO } = await import('socket.io-client');
-                const sock = socketIO('/', {
-                    path: '/socket.io',
-                    secure: false,
-                    rejectUnauthorized: false
-                });
+                // Connect socket via utility
+                const sock = getSocket();
                 socketRef.current = sock;
 
-                sock.emit('student_join_class', {
-                    classId,
-                    userId: user?.id || user?._id || 'unknown',
-                    name:   user?.name || 'Student'
-                });
+                const join = () => {
+                    sock.emit('join_class', {
+                        classId,
+                        userId: user?.id || user?._id || 'unknown',
+                        name:   user?.name || 'Student'
+                    });
+                };
+
+                join();
+                sock.on('reconnect', join); // Automatic room recovery
 
                 sock.on('modules_changed', (data) => {
                     setActiveModules(data.modules || data);
                 });
 
-                sock.on('mudra_changed', (data) => {
-                    setClassData(prev => prev ? { ...prev, targetMudra: data.mudra } : prev);
+                sock.on('target_changed', (data) => {
+                    setClassData(prev => prev ? { ...prev, targetMudra: data.target || data.mudra } : prev);
                 });
 
                 sock.on('class_ended_broadcast', () => {
@@ -123,6 +131,47 @@ const StudentLiveClass = () => {
             if (socketRef.current)         socketRef.current.disconnect();
         };
     }, [classId]);
+
+    // ── 1b. MediaPipe: Hands Setup ─────────────────────────────
+    useEffect(() => {
+        handsRef.current = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        handsRef.current.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        handsRef.current.onResults((results) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                landmarksRef.current = landmarks;
+                
+                // Draw skeleton
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
+                drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 2, radius: 2 });
+            } else {
+                landmarksRef.current = null;
+            }
+            ctx.restore();
+        });
+
+        return () => {
+            if (handsRef.current) handsRef.current.close();
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
+    }, []);
 
     // ── 2. Stop webcam ────────────────────────────────────────
     const stopWebcam = useCallback(() => {
@@ -185,14 +234,20 @@ const StudentLiveClass = () => {
             if (!frame) return;
 
             const currentClassData = classDataRef.current;
+            const landmarks = landmarksRef.current;
 
-            const res = await fetch(`${FLASK_URL}/api/detect_frame`, {
+            if (!landmarks) {
+                setFeedback('Hand not detected. Center it in camera.');
+                return;
+            }
+
+            const res = await fetch(`${FLASK_URL}/api/detect_landmarks`, {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body:    JSON.stringify({
                     classId,
                     studentId:   user?.id || user?._id || 'unknown',
-                    frame,
+                    landmarks:   landmarks,
                     targetMudra: currentClassData?.targetMudra || ''
                 })
             });
@@ -225,16 +280,23 @@ const StudentLiveClass = () => {
                 announce.fromResult(data);
             }
 
-            // Send score to teacher dashboard
-            if (socketRef.current) {
-                socketRef.current.emit('student_score_update', {
-                    classId,
-                    studentId:   user?.id || user?._id || 'unknown',
-                    studentName: user?.name || 'Student',
-                    mudra:       data.name  || 'None',
-                    score:       data.accuracy || 0,
-                    frame:       frame
-                });
+            // ── Throttled Telemetry to Teacher (Skeleton Monitoring) ───
+            // ── Throttled Telemetry to Teacher (Skeleton Monitoring) ───
+            if (socketRef.current && (!isTryAgain || Date.now() - lastVoiceRef.current > 100)) {
+                // Throttle: 100ms ensures smooth movement without server lag
+                const lastEmit = socketRef.current._lastLiveEmit || 0;
+                const currentTime = Date.now();
+                if (currentTime - lastEmit > 100) {
+                    socketRef.current._lastLiveEmit = currentTime;
+                    socketRef.current.emit('student_score_update', {
+                        classId,
+                        studentId:   user?.id || user?._id || 'unknown',
+                        studentName: user?.name || 'Student',
+                        mudra:       data.name  || 'None',
+                        score:       data.accuracy || 0,
+                        landmarks:   landmarksRef.current // Real-time skeleton data
+                    });
+                }
             }
         } catch (err) {
             console.error('[detect_frame] Error:', err);
@@ -265,7 +327,10 @@ const StudentLiveClass = () => {
             // Start detection after webcam is ready
             setTimeout(() => {
                 if (!detectIntervalRef.current) {
-                    detectIntervalRef.current = setInterval(detectMudra, 800);
+                    if (videoRef.current && videoRef.current.readyState >= 2) {
+                        handsRef.current.send({ image: videoRef.current });
+                    }
+                    detectIntervalRef.current = setInterval(detectMudra, 200); // 5 FPS for sync
                 }
             }, 500);
         }, 300);
@@ -501,10 +566,12 @@ const StudentLiveClass = () => {
 
                 {/* LEFT: Student Webcam */}
                 <div className="flex-1 relative bg-neutral-950 flex items-center justify-center p-6">
-                    <canvas ref={canvasRef} className="hidden" />
                     <div className="relative w-full max-w-3xl aspect-video rounded-3xl overflow-hidden border-2 border-white/10 bg-neutral-900 shadow-2xl">
                         <video ref={videoRef} autoPlay playsInline muted
-                            className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+                            className="absolute inset-0 w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+                        <canvas ref={canvasRef} 
+                            className="absolute inset-0 w-full h-full pointer-events-none z-10" 
+                            width={1280} height={720} />
 
                         {/* Detected badge */}
                         {detectedMudra && (

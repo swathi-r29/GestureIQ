@@ -12,8 +12,9 @@ import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import HandVisualiser from '../components/HandVisualiser';
-import HoldDetectionRing from '../components/HoldDetectionRing';
 import { io } from 'socket.io-client';
+import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
 const MUDRAS = [
     { folder: "pataka",       name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic"        },
@@ -90,14 +91,57 @@ export default function Detect() {
     const canvasRef           = useRef(null);
     const streamRef           = useRef(null);
     const isDetectingRef      = useRef(false);
+    const handsRef            = useRef(null);
+    const landmarksRef        = useRef(null);
+    const requestRef          = useRef(null);
     // Voice stability: only announce correction after seeing it 2x in a row
 
     // ── Init ──────────────────────────────────────────────────
+    // ── Init MediaPipe ───────────────────────────────────────
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
+        
+        handsRef.current = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        handsRef.current.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        handsRef.current.onResults((results) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            
+            // Clear and draw
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                landmarksRef.current = landmarks;
+                
+                // Draw skeleton
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
+                drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1, radius: 2 });
+            } else {
+                landmarksRef.current = null;
+            }
+            ctx.restore();
+        });
+
         setTimeout(() => setVisible(true), 100);
         fetchProgress();
-        return () => stop();
+        return () => {
+            stop();
+            if (handsRef.current) handsRef.current.close();
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
     }, [user, navigate]);
 
     // ── Socket: auto_evaluation from Flask ────────────────────
@@ -138,8 +182,10 @@ export default function Detect() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
             streamRef.current = stream;
             setCameraOn(true);
+            unlock(); // FIX: Audio Unlock on user interaction
             if (voiceEnabled) announce.cameraActive();
-        } catch {
+        } catch (err) {
+            console.error("Webcam Error:", err);
             alert('Camera access denied. Please allow camera permission and use HTTPS.');
         }
     };
@@ -172,27 +218,42 @@ export default function Detect() {
             videoRef.current.srcObject = streamRef.current;
             videoRef.current.play().catch(() => {});
             if (selectedMudra) getSocket().emit('set_free_practice_target', { target: selectedMudra });
+            
+            // Start MediaPipe processing loop
+            const process = async () => {
+                if (videoRef.current && videoRef.current.readyState >= 2) {
+                    await handsRef.current.send({ image: videoRef.current });
+                }
+                requestRef.current = requestAnimationFrame(process);
+            };
+            requestRef.current = requestAnimationFrame(process);
         }
         if (!cameraOn) {
             holdStartRef.current = null;
             manualHoldPct.current = 0;
             savedRef.current = false;
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
             stop();
         }
     }, [cameraOn]);
 
-    // ── Detection polling 600ms ───────────────────────────────
+    // ── Detection polling (Landmarks JSON) ───────────────────
     useEffect(() => {
         if (!cameraOn) return;
         const interval = setInterval(async () => {
             if (isDetectingRef.current) return;
+            const landmarks = landmarksRef.current;
+            if (!landmarks) return;
+
             isDetectingRef.current = true;
             try {
-                const frame = captureFrame();
-                if (!frame) return;
-                const res  = await fetch('/api/detect_frame', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ frame, targetMudra: selectedMudra || '' })
+                const res  = await fetch('/api/detect_landmarks', {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        landmarks, 
+                        targetMudra: selectedMudra || '' 
+                    })
                 });
                 const data = await res.json();
                 if (holdState !== 'evaluating') setDetected(data);
@@ -200,7 +261,6 @@ export default function Detect() {
                 const accuracy    = data.accuracy    || 0;
                 const confidence  = data.confidence  || 0;
                 const corrections = data.corrections || [];
-                // 70/70 Rule: Must have both high confidence and high accuracy
                 const isGood      = data.detected && confidence >= 70 && accuracy >= 70 && corrections.length === 0;
 
                 if (voiceEnabled && holdState === 'idle') {
@@ -223,9 +283,11 @@ export default function Detect() {
                         if (holdState === 'idle') setHoldProgress(0);
                     }
                 }
-            } catch { }
+            } catch (err) { 
+                console.error("Landmark API error:", err);
+            }
             finally { isDetectingRef.current = false; }
-        }, 600);
+        }, 150); // Polling faster now (150ms) since payload is small
         return () => { clearInterval(interval); holdStartRef.current = null; };
     }, [cameraOn, voiceEnabled, selectedMudra, holdState]);
 
@@ -363,7 +425,9 @@ export default function Detect() {
                                 </div>
                             )}
 
-                            <canvas ref={canvasRef} className="hidden" />
+                            <canvas ref={canvasRef} 
+                                width="640" height="480"
+                                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} />
                             <video ref={videoRef} autoPlay playsInline muted
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
 
@@ -393,10 +457,9 @@ export default function Detect() {
                                     <button onClick={() => {
                                             const next = !voiceEnabled;
                                             setVoiceEnabled(next);
-                                            if (next) unlock();
                                         }}
-                                        className="px-4 py-2 rounded text-white text-[10px] tracking-widest uppercase flex items-center gap-2 border border-white/10 transition-all"
-                                        style={{ backgroundColor: voiceEnabled ? 'var(--copper)' : 'rgba(255,255,255,0.05)' }}>
+                                        className="px-4 py-2 rounded text-white text-100% tracking-widest uppercase flex items-center gap-2 border border-white/10 transition-all font-bold"
+                                        style={{ backgroundColor: voiceEnabled ? '#b87333' : 'rgba(255,255,255,0.05)' }}>
                                         {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
                                     </button>
                                 </div>
