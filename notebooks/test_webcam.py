@@ -11,7 +11,8 @@ from utils.feature_engineering import extract_features
 
 # CONFIGURATION
 TARGET_MUDRA = "pataka" # Set target for validation (all lowercase)
-MODEL_PATH = "e:/GestureIQ/models/mudra_model.pkl"
+#MODEL_PATH = "e:/GestureIQ/models/mudra_model.pkl"
+MODEL_PATH = "D:\GestureIQ\models\mudra_model.pkl"
 
 # Load model
 if not os.path.exists(MODEL_PATH):
