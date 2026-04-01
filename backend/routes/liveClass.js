@@ -1,3 +1,4 @@
+
 const express = require('express');
 const router = express.Router();
 const LiveClass = require('../models/LiveClass');
@@ -140,4 +141,5 @@ router.post('/modules/:classId', auth, async (req, res) => {
     res.json(activeModules[req.params.classId]);
 });
 
+>>>>>>> Stashed changes
 module.exports = router;

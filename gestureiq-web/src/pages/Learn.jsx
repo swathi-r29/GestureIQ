@@ -1,3 +1,4 @@
+
 // src/pages/Learn.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE ROLE: GUIDED LEARNING MODULE
@@ -180,14 +181,10 @@ export default function Learn() {
     const [voiceEnabled,    setVoiceEnabled]    = useState(false);
     const [holdProgress,    setHoldProgress]    = useState(0);
     const [practiceStep,    setPracticeStep]    = useState(0);
-    const [isFrozen,        setIsFrozen]        = useState(false);
-    const [frozenFrame,     setFrozenFrame]     = useState(null);
     const [show3D,          setShow3D]          = useState(true);
 
     const holdStartRef        = useRef(null);
     const masteredRef         = useRef(false);
-    const lastVoiceTimeRef    = useRef(0);
-    const attemptsRef         = useRef(0);
     const videoRef            = useRef(null);
     const canvasRef           = useRef(null);
     const streamRef           = useRef(null);
@@ -288,12 +285,12 @@ export default function Learn() {
 
                 const accuracy    = data.accuracy    || 0;
                 const corrections = data.corrections || [];
-                // Relaxed: 60% accuracy is now considered correct enough to start the hold timer
-                const isCorrect   = data.detected && accuracy >= 60;
+                const isCorrect   = data.detected && accuracy >= 65 && (accuracy > 70 || corrections.length === 0);
 
                 if (isCorrect) {
                     if (!holdStartRef.current) {
                         holdStartRef.current = Date.now();
+                        // voice handled by announce.fromResult(data) below
                     }
                     const elapsed = Date.now() - holdStartRef.current;
                     setHoldProgress(Math.min(100, (elapsed / HOLD_DURATION_MS) * 100));
@@ -303,25 +300,8 @@ export default function Learn() {
                     }
                 } else {
                     if (holdStartRef.current) { holdStartRef.current = null; setHoldProgress(0); }
-                }
-
-                // --- ATTEMPTS TRACKING ---
-                if (data.detected && !masteredRef.current) {
-                    attemptsRef.current++;
-                }
-
-                // --- TIERED VOICE FEEDBACK with 2s DEBOUNCE ---
-                if (voiceEnabled && data.detected && !masteredRef.current) {
-                    const now = Date.now();
-                    if (now - lastVoiceTimeRef.current > 2000) {
-                        if (accuracy > 75) {
-                            announce.correct();
-                        } else if (accuracy > 60) {
-                            announce.almost();
-                        } else {
-                            announce.fromResult(data);
-                        }
-                        lastVoiceTimeRef.current = now;
+                    if (voiceEnabled) {
+                        announce.fromResult(data);
                     }
                 }
             } catch { }
@@ -354,43 +334,24 @@ export default function Learn() {
         try {
             const token = localStorage.getItem('token');
             const score = Math.round(currentAccuracy);
-            
-            // FREEZE FRAME SNAPSHOT
-            const snapshot = captureFrame();
-            setFrozenFrame(snapshot);
-            setIsFrozen(true);
-            
             setSessionScore(score);
             const res = await axios.post('/api/user/progress/update', { mudraName: folder, score }, { headers: { 'x-auth-token': token } });
-            
             setProgress(res.data.detectedMudras || []);
             setBestScores(res.data.mudraScores  || {});
             setSessionComplete(true);
-            
-            // Stop Webcam and reset detection refs
             stopWebcam();
             setHoldProgress(0);
-            
-            if (voiceEnabled) {
-                announce.mastered({ 
-                    mudra: selectedMudra.name, 
-                    score, 
-                    attempts: attemptsRef.current 
-                });
-            }
-        } catch (err) { console.error('Failed to update progress', err); }
+            if (voiceEnabled) announce.mastered(selectedMudra.name);
+        } catch { console.error('Failed to update progress'); }
     };
 
     const enterPractice = (mudra) => {
         setSelectedMudra(mudra);
         setSessionComplete(false);
-        setIsFrozen(false);
-        setFrozenFrame(null);
         setDetected({ name: '', confidence: 0, detected: false });
         setHoldProgress(0);
         holdStartRef.current = null;
         masteredRef.current  = false;
-        attemptsRef.current  = 0;
         setPracticeStep(0);
         setStage(STAGES.PRACTICE);
     };
@@ -400,13 +361,6 @@ export default function Learn() {
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         if (currentIndex < levelMudras.length - 1) enterPractice(levelMudras[currentIndex + 1]);
         else setStage(STAGES.MUDRA_LIST);
-    };
-
-    const getConfidenceLabel = (score) => {
-        if (score > 85) return { text: "Excellent",      color: "#4ade80" };
-        if (score > 75) return { text: "Very Good",      color: "#34d399" };
-        if (score > 60) return { text: "Good",           color: "#fbbf24" };
-        return { text: "Keep Practicing", color: "#f87171" };
     };
 
     const accuracy      = detected.accuracy    || 0;
@@ -688,45 +642,12 @@ export default function Learn() {
                         <div className="flex flex-col">
                             <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner" style={{ borderColor: 'var(--border)', height: '520px' }}>
                                 <canvas ref={canvasRef} className="hidden" />
-                                
-                                {isFrozen && frozenFrame ? (
-                                    <div className="w-full h-full relative animate-fade-in">
-                                        <img src={frozenFrame} alt="Mudra Mastery Snapshot" className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
-                                        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
-                                        
-                                        {/* SUCCESS OVERLAY */}
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 z-30">
-                                            <div className="mb-6 animate-bounce text-6xl">🏆</div>
-                                            <h2 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase">{selectedMudra.name} Mastered!</h2>
-                                            <div className="w-24 h-1 bg-accent mb-6 rounded-full" />
-                                            
-                                            <div className="grid grid-cols-2 gap-4 w-full max-w-sm mb-8">
-                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10">
-                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Score</div>
-                                                    <div className="text-3xl font-black text-white">{sessionScore}%</div>
-                                                </div>
-                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10">
-                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Level</div>
-                                                    <div className="text-xl font-black uppercase" style={{ color: getConfidenceLabel(sessionScore).color }}>
-                                                        {getConfidenceLabel(sessionScore).text}
-                                                    </div>
-                                                </div>
-                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10 col-span-2">
-                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Total Attempts</div>
-                                                    <div className="text-xl font-bold text-white">{attemptsRef.current} Precision Frames</div>
-                                                </div>
-                                            </div>
-
-                                            <p className="text-white/70 text-xs tracking-widest italic mb-2">"{selectedMudra.meaning}"</p>
-                                            <p className="text-white/40 text-[10px] leading-relaxed max-w-xs">{selectedMudra.usage}</p>
-                                        </div>
-                                    </div>
-                                ) : cameraOn ? (
+                                {cameraOn ? (
                                     <>
                                         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
 
                                         {/* Accuracy overlay */}
-                                        <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex flex-col items-end gap-1 z-20">
+                                        <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex flex-col items-end gap-1">
                                             <span className="text-[8px] tracking-[3px] uppercase text-white/50">Accuracy</span>
                                             <span className="text-2xl font-mono font-bold"
                                                 style={{ color: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
@@ -740,7 +661,7 @@ export default function Learn() {
 
                                         {/* Hold progress */}
                                         {holdProgress > 0 && (
-                                            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-500/30 flex flex-col items-center gap-1 z-20">
+                                            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-500/30 flex flex-col items-center gap-1">
                                                 <span className="text-[8px] tracking-[3px] uppercase text-green-400">Hold</span>
                                                 <div className="w-full h-2 bg-white/10 rounded-full mt-1">
                                                     <div className="h-full rounded-full transition-all duration-200 bg-green-400" style={{ width: `${holdProgress}%` }} />
@@ -766,7 +687,7 @@ export default function Learn() {
                                         )}
 
                                         {/* Bottom bar */}
-                                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between z-20">
+                                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
                                             <div>
                                                 <span className="text-[8px] tracking-[3px] uppercase text-white/40 block mb-0.5">Target</span>
                                                 <span className="text-white font-bold text-sm">{selectedMudra.name}</span>
@@ -779,30 +700,40 @@ export default function Learn() {
                                     </>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center text-center p-10">
-                                        <div className="mb-6 text-5xl">{['📖', '🤚', '🎯'][practiceStep]}</div>
-                                        <h3 className="text-white text-lg font-bold mb-2">{PRACTICE_STEPS[practiceStep].title}</h3>
-                                        <p className="text-white/40 text-xs tracking-widest max-w-[220px] mb-8 leading-relaxed">{PRACTICE_STEPS[practiceStep].desc}</p>
-                                        <div className="flex gap-3">
-                                            {practiceStep > 0 && (
-                                                <button onClick={() => setPracticeStep(p => p - 1)}
-                                                    className="px-5 py-2.5 rounded-lg border text-[10px] tracking-widest uppercase text-white/60 border-white/20 hover:bg-white/5 transition-all">
-                                                    Back
-                                                </button>
-                                            )}
-                                            {practiceStep < 2 ? (
-                                                <button onClick={() => setPracticeStep(p => p + 1)}
-                                                    className="px-8 py-2.5 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all"
-                                                    style={{ backgroundColor: 'var(--accent)' }}>
-                                                    Next →
-                                                </button>
-                                            ) : (
-                                                <button onClick={startWebcam}
-                                                    className="px-10 py-3 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all shadow-lg shadow-accent/20"
-                                                    style={{ backgroundColor: 'var(--accent)' }}>
-                                                    ▶ Start Camera
-                                                </button>
-                                            )}
-                                        </div>
+                                        {!sessionComplete ? (
+                                            <>
+                                                <div className="mb-6 text-5xl">{['📖', '🤚', '🎯'][practiceStep]}</div>
+                                                <h3 className="text-white text-lg font-bold mb-2">{PRACTICE_STEPS[practiceStep].title}</h3>
+                                                <p className="text-white/40 text-xs tracking-widest max-w-[220px] mb-8 leading-relaxed">{PRACTICE_STEPS[practiceStep].desc}</p>
+                                                <div className="flex gap-3">
+                                                    {practiceStep > 0 && (
+                                                        <button onClick={() => setPracticeStep(p => p - 1)}
+                                                            className="px-5 py-2.5 rounded-lg border text-[10px] tracking-widest uppercase text-white/60 border-white/20 hover:bg-white/5 transition-all">
+                                                            Back
+                                                        </button>
+                                                    )}
+                                                    {practiceStep < 2 ? (
+                                                        <button onClick={() => setPracticeStep(p => p + 1)}
+                                                            className="px-8 py-2.5 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all"
+                                                            style={{ backgroundColor: 'var(--accent)' }}>
+                                                            Next →
+                                                        </button>
+                                                    ) : (
+                                                        <button onClick={startWebcam}
+                                                            className="px-10 py-3 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all shadow-lg shadow-accent/20"
+                                                            style={{ backgroundColor: 'var(--accent)' }}>
+                                                            ▶ Start Camera
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="flex flex-col items-center gap-4">
+                                                <div className="text-5xl">🏆</div>
+                                                <h3 className="text-white text-xl font-bold">Mudra Mastered!</h3>
+                                                <p className="text-white/40 text-xs tracking-widest">Score: {sessionScore}%</p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -834,4 +765,5 @@ export default function Learn() {
             )}
         </div>
     );
+//>>>>>>> Stashed changes
 }

@@ -1514,3 +1514,4 @@ if __name__ == '__main__':
     print("Modules: Mudra detection + Navarasa detection")
     socketio.run(app, host='0.0.0.0', port=5001, debug=False,
                  allow_unsafe_werkzeug=True)
+

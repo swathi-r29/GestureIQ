@@ -1,3 +1,4 @@
+
 // src/pages/Detect.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE ROLE: STANDALONE FREE-PRACTICE DETECTOR
@@ -568,4 +569,5 @@ export default function Detect() {
             )}
         </div>
     );
+//>>>>>>> Stashed changes
 }
