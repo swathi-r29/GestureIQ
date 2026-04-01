@@ -1,7 +1,7 @@
 // src/pages/Learn.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE ROLE: GUIDED LEARNING MODULE
-// Updated: HandVisualiser 3D panel added in PRACTICE stage (right side)
+// Updated: Natural voice + 6-language support + HandVisualiser 3D panel
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -10,38 +10,38 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import HandVisualiser from '../components/HandVisualiser';
-import { BookOpen, Camera, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
-import { useVoiceGuide } from '../hooks/useVoiceGuide';
+import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
+import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
 const MUDRAS = [
-    { name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",             level: "Basic",        folder: "pataka"       },
-    { name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                         level: "Basic",        folder: "tripataka"    },
-    { name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",              level: "Basic",        folder: "ardhapataka"  },
-    { name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                  level: "Basic",        folder: "kartarimukha" },
+    { name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic",        folder: "pataka"       },
+    { name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                        level: "Basic",        folder: "tripataka"    },
+    { name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",             level: "Basic",        folder: "ardhapataka"  },
+    { name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                 level: "Basic",        folder: "kartarimukha" },
     { name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic",        folder: "mayura"       },
-    { name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                 level: "Basic",        folder: "ardhachandra" },
-    { name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                 level: "Intermediate", folder: "arala"        },
-    { name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",                level: "Intermediate", folder: "shukatunda"   },
-    { name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",            level: "Intermediate", folder: "mushti"       },
-    { name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                           level: "Intermediate", folder: "shikhara"     },
-    { name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                     level: "Intermediate", folder: "kapittha"     },
-    { name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                        level: "Intermediate", folder: "katakamukha"  },
-    { name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                         level: "Basic",        folder: "suchi"        },
-    { name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                       level: "Intermediate", folder: "chandrakala"  },
-    { name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                  level: "Intermediate", folder: "padmakosha"   },
-    { name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                  level: "Advanced",     folder: "sarpashira"   },
-    { name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",         level: "Advanced",     folder: "mrigashira"   },
-    { name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                       level: "Advanced",     folder: "simhamukha"   },
-    { name: "Kangula",      meaning: "Bell",                usage: "Bell fruit, fruit, drop of water",                 fingers: "Four fingers together, thumb bent across",                  level: "Advanced",     folder: "kangula"      },
-    { name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                   level: "Advanced",     folder: "alapadma"     },
-    { name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                   level: "Advanced",     folder: "chatura"      },
-    { name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",        level: "Advanced",     folder: "bhramara"     },
-    { name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                         level: "Advanced",     folder: "hamsasya"     },
-    { name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                     level: "Advanced",     folder: "hamsapaksha"  },
-    { name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                           level: "Advanced",     folder: "sandamsha"    },
-    { name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                          level: "Advanced",     folder: "mukula"       },
-    { name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                  level: "Advanced",     folder: "tamrachuda"   },
-    { name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",         level: "Advanced",     folder: "trishula"     },
+    { name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                level: "Basic",        folder: "ardhachandra" },
+    { name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                level: "Intermediate", folder: "arala"        },
+    { name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",               level: "Intermediate", folder: "shukatunda"   },
+    { name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",           level: "Intermediate", folder: "mushti"       },
+    { name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                          level: "Intermediate", folder: "shikhara"     },
+    { name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                    level: "Intermediate", folder: "kapittha"     },
+    { name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                       level: "Intermediate", folder: "katakamukha"  },
+    { name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                        level: "Basic",        folder: "suchi"        },
+    { name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                      level: "Intermediate", folder: "chandrakala"  },
+    { name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                 level: "Intermediate", folder: "padmakosha"   },
+    { name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                 level: "Advanced",     folder: "sarpashira"   },
+    { name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",        level: "Advanced",     folder: "mrigashira"   },
+    { name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                      level: "Advanced",     folder: "simhamukha"   },
+    { name: "Kangula",      meaning: "Bell",                usage: "Bell fruit, fruit, drop of water",                 fingers: "Four fingers together, thumb bent across",                 level: "Advanced",     folder: "kangula"      },
+    { name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                  level: "Advanced",     folder: "alapadma"     },
+    { name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                  level: "Advanced",     folder: "chatura"      },
+    { name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",       level: "Advanced",     folder: "bhramara"     },
+    { name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                        level: "Advanced",     folder: "hamsasya"     },
+    { name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                    level: "Advanced",     folder: "hamsapaksha"  },
+    { name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                          level: "Advanced",     folder: "sandamsha"    },
+    { name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                         level: "Advanced",     folder: "mukula"       },
+    { name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                 level: "Advanced",     folder: "tamrachuda"   },
+    { name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",        level: "Advanced",     folder: "trishula"     },
 ];
 
 const VOICE_INSTRUCTIONS = {
@@ -67,7 +67,7 @@ const VOICE_INSTRUCTIONS = {
     alapadma:     "Spread all five fingers as wide as possible, curving them slightly outward. A full lotus bloom.",
     chatura:      "Bend all four fingers together. Tuck your thumb flat against your palm on the side.",
     bhramara:     "Touch your index finger to your thumb. Bend your middle finger. Raise ring and little finger.",
-    hamsasya:     "Touch your thumb and index finger together to form a circle. Spread the other three fingers straight and wide.",
+    hamsasya:     "Bring all five fingertips together touching at one point. Like a swan beak.",
     hamsapaksha:  "Spread your fingers slightly apart in a gentle wave, like a swan wing.",
     sandamsha:    "Pinch your index and middle fingers firmly together. Keep the others curled.",
     mukula:       "Bring all five fingertips to meet at one point at the top. Like a closed flower bud.",
@@ -75,18 +75,95 @@ const VOICE_INSTRUCTIONS = {
     trishula:     "Raise your index, middle, and ring fingers straight up. Keep thumb and little finger closed.",
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VOICE_INSTRUCTIONS_TRANSLATED
+// Same instructions translated for each language.
+// Used by "Repeat Instructions" button and auto-start announce.
+// ─────────────────────────────────────────────────────────────────────────────
+const VOICE_INSTRUCTIONS_TA = {
+    pataka:       "நான்கு விரல்களையும் நேராக நீட்டுங்கள். கட்டை விரலை மட்டும் உள்ளே மடக்குங்கள். கொடி போல தட்டையாக பிடியுங்கள்.",
+    tripataka:    "ஆட்காட்டி, நடு, சிறு விரல்களை நேராக வையுங்கள். மோதிர விரலை மட்டும் கீழே மடக்குங்கள்.",
+    ardhapataka:  "ஆட்காட்டி, நடு விரல்களை நேராக வையுங்கள். மோதிர, சிறு விரல்களை மடக்குங்கள்.",
+    kartarimukha: "ஆட்காட்டி, நடு விரல்களை கத்தரி போல விரித்து நேராக வையுங்கள். மற்றவற்றை மடக்குங்கள்.",
+    mayura:       "கட்டை விரல் நுனியை மோதிர விரல் நுனியில் தொடுங்கள். மற்ற மூன்று விரல்களை விரிக்குங்கள்.",
+    ardhachandra: "அனைத்து விரல்களையும் திறந்து விரிக்குங்கள். கட்டை விரலை பக்கவாட்டில் நீட்டுங்கள். பாதி சந்திரன் போல.",
+    arala:        "ஆட்காட்டி விரலை மட்டும் உள்ளே மடக்குங்கள். மற்ற விரல்களை நேராக வையுங்கள்.",
+    shukatunda:   "கட்டை விரலை மோதிர விரலில் அழுத்துங்கள். மற்ற மூன்று விரல்களை நேராக வையுங்கள்.",
+    mushti:       "நான்கு விரல்களையும் மடித்து கட்டை விரலை அவற்றின் மேல் வையுங்கள்.",
+    shikhara:     "முஷ்டி பிடியுங்கள். கட்டை விரலை மட்டும் மேலே நிமிர்த்துங்கள்.",
+    kapittha:     "ஆட்காட்டி விரலை மடக்குங்கள். கட்டை விரலை அதன் பக்கத்தில் அழுத்துங்கள். மற்றவை மடக்கியிருக்கட்டும்.",
+    katakamukha:  "கட்டை, ஆட்காட்டி, நடு விரல்களால் வட்டம் போல பிடியுங்கள். மற்றவற்றை தளர்த்துங்கள்.",
+    suchi:        "ஆட்காட்டி விரலை ஊசி போல நேராக மேலே நீட்டுங்கள். மற்ற விரல்களை மடக்குங்கள்.",
+    chandrakala:  "கட்டை விரல், ஆட்காட்டி விரலை சந்திர வளைவு போல வளைக்குங்கள்.",
+    padmakosha:   "ஐந்து விரல்களையும் பந்து பிடிப்பது போல வளைத்து கோப்பை வடிவம் செய்யுங்கள். தாமரை அரும்பு போல.",
+    sarpashira:   "அனைத்து விரல்களையும் இறுக்கமாக சேர்த்து பிடியுங்கள். கையை கீழே வளைக்குங்கள். பாம்பு தலை போல.",
+    mrigashira:   "கட்டை விரல், மோதிர, சிறு விரல்களை சேர்த்து தொடுங்கள். ஆட்காட்டி, நடு விரல்களை நேராக மேலே வையுங்கள்.",
+    simhamukha:   "கட்டை, ஆட்காட்டி, நடு விரல்களை சிங்கத்தின் பிடரி போல விரிக்குங்கள். மற்றவற்றை மடக்குங்கள்.",
+    kangula:      "நான்கு விரல்களை சேர்த்து நேராக வையுங்கள். கட்டை விரலை உள்ளங்கை குறுக்கே வளைக்குங்கள்.",
+    alapadma:     "ஐந்து விரல்களையும் முழுவதும் விரித்து, சற்று வெளியே வளைக்குங்கள். முழு மலர்ந்த தாமரை போல.",
+    chatura:      "நான்கு விரல்களை மடக்குங்கள். கட்டை விரலை பக்கத்தில் தட்டையாக வையுங்கள்.",
+    bhramara:     "ஆட்காட்டி விரலை கட்டை விரலில் தொடுங்கள். நடு விரலை மடக்குங்கள். மோதிர, சிறு விரல்களை மேலே வையுங்கள்.",
+    hamsasya:     "ஐந்து விரல் நுனிகளையும் ஒரே இடத்தில் சேர்க்குங்கள். அன்னத்தின் வாய் போல.",
+    hamsapaksha:  "விரல்களை சற்று விரித்து மென்மையான அலை வடிவில் வையுங்கள். அன்னத்தின் இறகு போல.",
+    sandamsha:    "ஆட்காட்டி, நடு விரல்களை இறுக்கமாக சேர்த்து நிப்பி போல பிடியுங்கள்.",
+    mukula:       "ஐந்து விரல் நுனிகளையும் மேலே ஒரு இடத்தில் சேர்க்குங்கள். மூடிய மொட்டு போல.",
+    tamrachuda:   "முஷ்டி பிடியுங்கள். கட்டை விரலை மேலே, சிறு விரலை மேலே தூக்குங்கள். சேவல் தலை முடி போல.",
+    trishula:     "ஆட்காட்டி, நடு, மோதிர விரல்களை மேலே நேராக நீட்டுங்கள். கட்டை, சிறு விரல்களை மடக்குங்கள்.",
+};
+
+const VOICE_INSTRUCTIONS_HI = {
+    pataka:       "चारों उंगलियां सीधी रखें। केवल अंगूठा अंदर की ओर मोड़ें। झंडे की तरह सपाट रखें।",
+    tripataka:    "तर्जनी, मध्यमा, कनिष्ठा सीधी रखें। केवल अनामिका को नीचे मोड़ें।",
+    ardhapataka:  "तर्जनी और मध्यमा सीधी रखें। अनामिका और कनिष्ठा को मोड़ें।",
+    kartarimukha: "तर्जनी और मध्यमा को कैंची की तरह फैलाएं। बाकी उंगलियां मोड़ें।",
+    mayura:       "अंगूठे की नोक को अनामिका की नोक से छुएं। बाकी तीन उंगलियां फैलाएं।",
+    ardhachandra: "सभी उंगलियां खोलें। अंगूठा बगल में फैलाएं। अर्धचंद्र की तरह।",
+    arala:        "केवल तर्जनी को अंदर मोड़ें। बाकी उंगलियां सीधी रखें।",
+    shukatunda:   "अंगूठा अनामिका पर दबाएं। बाकी तीन उंगलियां सीधी रखें।",
+    mushti:       "चारों उंगलियां मुट्ठी में बंद करें। अंगूठा ऊपर से रखें।",
+    shikhara:     "मुट्ठी बनाएं। केवल अंगूठा ऊपर उठाएं।",
+    kapittha:     "तर्जनी मोड़ें। अंगूठे को उसके पास दबाएं। बाकी मुड़ी रहें।",
+    katakamukha:  "अंगूठा, तर्जनी, मध्यमा से गोल बनाएं। बाकी ढीली रखें।",
+    suchi:        "तर्जनी सुई की तरह सीधे ऊपर करें। बाकी उंगलियां मोड़ें।",
+    chandrakala:  "अंगूठा और तर्जनी को अर्धचंद्र आकार में मोड़ें।",
+    padmakosha:   "पांचों उंगलियां गेंद पकड़ने की तरह मोड़ें। कमल कली की तरह।",
+    sarpashira:   "सभी उंगलियां कसकर एक साथ रखें। हाथ नीचे मोड़ें। सांप के सिर की तरह।",
+    mrigashira:   "अंगूठा, अनामिका, कनिष्ठा एक साथ छुएं। तर्जनी, मध्यमा ऊपर सीधी रखें।",
+    simhamukha:   "अंगूठा, तर्जनी, मध्यमा शेर की अयाल की तरह फैलाएं। बाकी मोड़ें।",
+    kangula:      "चार उंगलियां एक साथ सीधी रखें। अंगूठा हथेली पर रखें।",
+    alapadma:     "पांचों उंगलियां जितना हो सके फैलाएं, थोड़ा बाहर मोड़ें। खिला कमल।",
+    chatura:      "चारों उंगलियां मोड़ें। अंगूठा बगल में सपाट रखें।",
+    bhramara:     "तर्जनी अंगूठे से छुएं। मध्यमा मोड़ें। अनामिका, कनिष्ठा ऊपर रखें।",
+    hamsasya:     "पांचों उंगलियों की नोकें एक बिंदु पर मिलाएं। हंस की चोंच।",
+    hamsapaksha:  "उंगलियां थोड़ी फैलाएं, लहर जैसी। हंस के पंख की तरह।",
+    sandamsha:    "तर्जनी और मध्यमा कसकर मिलाएं। चिमटे की तरह।",
+    mukula:       "पांचों उंगलियों की नोकें ऊपर एक साथ मिलाएं। बंद कली की तरह।",
+    tamrachuda:   "मुट्ठी बनाएं। अंगूठा और कनिष्ठा ऊपर उठाएं। मुर्गे की कलगी।",
+    trishula:     "तर्जनी, मध्यमा, अनामिका ऊपर सीधी उठाएं। अंगूठा, कनिष्ठा मोड़ें।",
+};
+
+// Helper to get instruction in current language
+const getVoiceInstruction = (folder, lang) => {
+    if (lang === 'ta' && VOICE_INSTRUCTIONS_TA[folder]) return VOICE_INSTRUCTIONS_TA[folder];
+    if (lang === 'hi' && VOICE_INSTRUCTIONS_HI[folder]) return VOICE_INSTRUCTIONS_HI[folder];
+    return VOICE_INSTRUCTIONS[folder] || '';
+};
+
 const HOLD_DURATION_MS = 2000;
 const STAGES = { SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
 const LEVEL_CONFIG = {
     'Basic':        { title: 'The Foundations', icon: '✦' },
     'Intermediate': { title: 'The Expressions', icon: '❦' },
-    'Advanced':     { title: 'The Mastery',     icon: '✧' }
+    'Advanced':     { title: 'The Mastery',     icon: '✧' },
 };
 
 export default function Learn() {
     const { user }   = useAuth();
     const navigate   = useNavigate();
-    const { speak, stop, test, announce } = useVoiceGuide();
+
+    // ── Language + Voice ──────────────────────────────────────
+    const [lang, setLang] = useState('en');
+    const { speak, stop, test, unlock, announce } = useVoiceGuide({ language: lang });
 
     const [stage,           setStage]           = useState(STAGES.SELECT_LEVEL);
     const [selectedLevel,   setSelectedLevel]   = useState(null);
@@ -94,7 +171,7 @@ export default function Learn() {
     const [progress,        setProgress]        = useState([]);
     const [bestScores,      setBestScores]      = useState({});
     const [cameraOn,        setCameraOn]        = useState(false);
-    const [detected,        setDetected]        = useState({ name: "", confidence: 0, detected: false });
+    const [detected,        setDetected]        = useState({ name: '', confidence: 0, detected: false });
     const [loading,         setLoading]         = useState(true);
     const [mudraContent,    setMudraContent]    = useState(null);
     const [contentLoading,  setContentLoading]  = useState(false);
@@ -103,23 +180,27 @@ export default function Learn() {
     const [voiceEnabled,    setVoiceEnabled]    = useState(false);
     const [holdProgress,    setHoldProgress]    = useState(0);
     const [practiceStep,    setPracticeStep]    = useState(0);
+    const [isFrozen,        setIsFrozen]        = useState(false);
+    const [frozenFrame,     setFrozenFrame]     = useState(null);
     const [show3D,          setShow3D]          = useState(true);
 
-    const holdStartRef   = useRef(null);
-    const masteredRef    = useRef(false);
-    const videoRef       = useRef(null);
-    const canvasRef      = useRef(null);
-    const streamRef      = useRef(null);
-    const isDetectingRef = useRef(false);
+    const holdStartRef        = useRef(null);
+    const masteredRef         = useRef(false);
+    const lastVoiceTimeRef    = useRef(0);
+    const attemptsRef         = useRef(0);
+    const videoRef            = useRef(null);
+    const canvasRef           = useRef(null);
+    const streamRef           = useRef(null);
+    const isDetectingRef      = useRef(false);
 
     const PRACTICE_STEPS = [
-        { title: "Study the Position",  desc: "Look at the reference image carefully. Read the finger instructions below." },
-        { title: "Prepare Your Hand",   desc: "Get your hand ready in front of you. Good lighting helps accuracy."        },
-        { title: "Start Live Practice", desc: "The AI will watch your hand and guide you in real time."                   }
+        { title: 'Study the Position',  desc: 'Look at the reference image carefully. Read the finger instructions below.' },
+        { title: 'Prepare Your Hand',   desc: 'Get your hand ready in front of you. Good lighting helps accuracy.'        },
+        { title: 'Start Live Practice', desc: 'The AI will watch your hand and guide you in real time.'                   },
     ];
 
-    const getLevelMudras    = (lvl) => MUDRAS.filter(m => m.level === lvl);
-    const getLevelProgress  = (lvl) => getLevelMudras(lvl).filter(m => progress.includes(m.folder));
+    const getLevelMudras   = (lvl) => MUDRAS.filter(m => m.level === lvl);
+    const getLevelProgress = (lvl) => getLevelMudras(lvl).filter(m => progress.includes(m.folder));
 
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
@@ -134,16 +215,15 @@ export default function Learn() {
     useEffect(() => {
         if (stage === STAGES.PRACTICE && selectedMudra && voiceEnabled) {
             setTimeout(() => {
-                announce.start(selectedMudra.name);
-                setTimeout(() => {
-                    const inst = VOICE_INSTRUCTIONS[selectedMudra.folder];
-                    if (inst) speak(inst, { priority: true, minInterval: 0 });
-                }, 3000);
+                // announce.start() uses getInstruction() internally — handles
+                // all 6 languages with native-script mudra names automatically.
+                // No direct window.speechSynthesis needed.
+                announce.start(selectedMudra.folder);
             }, 500);
         }
     }, [stage, selectedMudra]);
 
-    // ── Webcam ───────────────────────────────────────────────
+    // ── Webcam ────────────────────────────────────────────────
     const startWebcam = useCallback(async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
@@ -164,11 +244,17 @@ export default function Learn() {
     const captureFrame = useCallback(() => {
         const video = videoRef.current, canvas = canvasRef.current;
         if (!video || !canvas || video.readyState < video.HAVE_ENOUGH_DATA) return null;
-        canvas.width = video.videoWidth || 640;
+        canvas.width  = video.videoWidth  || 640;
         canvas.height = video.videoHeight || 480;
         const ctx = canvas.getContext('2d');
-        // Removed mirroring: classifier models usually expect raw sensor orientation
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // CRITICAL FIX: Mirror the frame before sending to Flask.
+        // The video displays with scaleX(-1) so the student sees a mirrored view.
+        // We must send a mirrored frame to Flask so MediaPipe sees the same
+        // hand orientation as the training data (front-camera = mirrored).
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.restore();
         return canvas.toDataURL('image/jpeg', 0.6);
     }, []);
 
@@ -178,11 +264,11 @@ export default function Learn() {
             videoRef.current.play().catch(() => {});
         }
         if (cameraOn && selectedMudra && voiceEnabled) {
-            setTimeout(() => speak("Camera is active. Hold your hand clearly in view and match the reference image.", { priority: true }), 1000);
+            setTimeout(() => announce.cameraActive(), 1000);
         }
     }, [cameraOn]);
 
-    // ── Detection polling ────────────────────────────────────
+    // ── Detection polling ─────────────────────────────────────
     useEffect(() => {
         if (stage !== STAGES.PRACTICE || !cameraOn || !selectedMudra) return;
         masteredRef.current = false;
@@ -202,12 +288,12 @@ export default function Learn() {
 
                 const accuracy    = data.accuracy    || 0;
                 const corrections = data.corrections || [];
-                const isCorrect   = data.detected && accuracy >= 65 && (accuracy > 70 || corrections.length === 0);
+                // Relaxed: 60% accuracy is now considered correct enough to start the hold timer
+                const isCorrect   = data.detected && accuracy >= 60;
 
                 if (isCorrect) {
                     if (!holdStartRef.current) {
                         holdStartRef.current = Date.now();
-                        if (voiceEnabled) speak("Good! Now hold this position.", { priority: true });
                     }
                     const elapsed = Date.now() - holdStartRef.current;
                     setHoldProgress(Math.min(100, (elapsed / HOLD_DURATION_MS) * 100));
@@ -217,18 +303,25 @@ export default function Learn() {
                     }
                 } else {
                     if (holdStartRef.current) { holdStartRef.current = null; setHoldProgress(0); }
-                    if (voiceEnabled) {
-                        // Only announce if benchmarks are low to avoid spam
-                        if (!data.detected) {
-                            // If landmarks are missing entirely
-                            announce.noHand();
-                        } else if (accuracy < 40) {
-                            // Hand is seen but very far off
-                            if (corrections.length > 0) announce.correction(corrections[0]);
-                        } else if (accuracy >= 40 && accuracy < 65) {
-                            // Close, but need adjustment
-                            announce.hold(); 
+                }
+
+                // --- ATTEMPTS TRACKING ---
+                if (data.detected && !masteredRef.current) {
+                    attemptsRef.current++;
+                }
+
+                // --- TIERED VOICE FEEDBACK with 2s DEBOUNCE ---
+                if (voiceEnabled && data.detected && !masteredRef.current) {
+                    const now = Date.now();
+                    if (now - lastVoiceTimeRef.current > 2000) {
+                        if (accuracy > 75) {
+                            announce.correct();
+                        } else if (accuracy > 60) {
+                            announce.almost();
+                        } else {
+                            announce.fromResult(data);
                         }
+                        lastVoiceTimeRef.current = now;
                     }
                 }
             } catch { }
@@ -238,7 +331,7 @@ export default function Learn() {
         return () => { clearInterval(interval); holdStartRef.current = null; setHoldProgress(0); };
     }, [stage, cameraOn, selectedMudra, voiceEnabled, captureFrame]);
 
-    // ── Data fetching ────────────────────────────────────────
+    // ── Data fetching ─────────────────────────────────────────
     const fetchProgress = async () => {
         try {
             const token = localStorage.getItem('token');
@@ -261,39 +354,65 @@ export default function Learn() {
         try {
             const token = localStorage.getItem('token');
             const score = Math.round(currentAccuracy);
+            
+            // FREEZE FRAME SNAPSHOT
+            const snapshot = captureFrame();
+            setFrozenFrame(snapshot);
+            setIsFrozen(true);
+            
             setSessionScore(score);
             const res = await axios.post('/api/user/progress/update', { mudraName: folder, score }, { headers: { 'x-auth-token': token } });
+            
             setProgress(res.data.detectedMudras || []);
             setBestScores(res.data.mudraScores  || {});
             setSessionComplete(true);
+            
+            // Stop Webcam and reset detection refs
             stopWebcam();
             setHoldProgress(0);
-            if (voiceEnabled) announce.mastered(selectedMudra.name);
-        } catch { console.error('Failed to update progress'); }
+            
+            if (voiceEnabled) {
+                announce.mastered({ 
+                    mudra: selectedMudra.name, 
+                    score, 
+                    attempts: attemptsRef.current 
+                });
+            }
+        } catch (err) { console.error('Failed to update progress', err); }
     };
 
     const enterPractice = (mudra) => {
         setSelectedMudra(mudra);
         setSessionComplete(false);
-        setDetected({ name: "", confidence: 0, detected: false });
+        setIsFrozen(false);
+        setFrozenFrame(null);
+        setDetected({ name: '', confidence: 0, detected: false });
         setHoldProgress(0);
         holdStartRef.current = null;
         masteredRef.current  = false;
+        attemptsRef.current  = 0;
         setPracticeStep(0);
         setStage(STAGES.PRACTICE);
     };
 
     const nextMudra = () => {
-        const levelMudras    = getLevelMudras(selectedLevel);
-        const currentIndex   = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
+        const levelMudras  = getLevelMudras(selectedLevel);
+        const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         if (currentIndex < levelMudras.length - 1) enterPractice(levelMudras[currentIndex + 1]);
         else setStage(STAGES.MUDRA_LIST);
     };
 
-    const accuracy    = detected.accuracy    || 0;
-    const corrections = detected.corrections || [];
-    const isCorrect   = detected.detected && accuracy > 65 && corrections.length === 0;
-    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith("Wrong mudra"));
+    const getConfidenceLabel = (score) => {
+        if (score > 85) return { text: "Excellent",      color: "#4ade80" };
+        if (score > 75) return { text: "Very Good",      color: "#34d399" };
+        if (score > 60) return { text: "Good",           color: "#fbbf24" };
+        return { text: "Keep Practicing", color: "#f87171" };
+    };
+
+    const accuracy      = detected.accuracy    || 0;
+    const corrections   = detected.corrections || [];
+    const isCorrect     = detected.detected && accuracy > 65 && corrections.length === 0;
+    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith('Wrong mudra'));
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
@@ -317,11 +436,11 @@ export default function Learn() {
                             const config         = LEVEL_CONFIG[lvl];
                             const levelMudras    = getLevelMudras(lvl);
                             const completedCount = getLevelProgress(lvl).length;
-                            let isLocked = false, lockReason = "";
+                            let isLocked = false, lockReason = '';
                             if (lvl === 'Intermediate' && getLevelProgress('Basic').length < 5)
-                                { isLocked = true; lockReason = "Master 5 Basic Mudras to unlock"; }
+                                { isLocked = true; lockReason = 'Master 5 Basic Mudras to unlock'; }
                             else if (lvl === 'Advanced' && getLevelProgress('Intermediate').length < getLevelMudras('Intermediate').length)
-                                { isLocked = true; lockReason = "Master all Intermediate Mudras to unlock"; }
+                                { isLocked = true; lockReason = 'Master all Intermediate Mudras to unlock'; }
                             return (
                                 <div key={lvl}
                                     onClick={() => { if (!isLocked) { setSelectedLevel(lvl); setStage(STAGES.MUDRA_LIST); } }}
@@ -409,19 +528,29 @@ export default function Learn() {
                                 className="px-3 py-1.5 rounded border text-[9px] tracking-[3px] uppercase transition-all"
                                 style={{
                                     backgroundColor: show3D ? 'rgba(139,92,246,0.15)' : 'transparent',
-                                    borderColor: show3D ? 'rgba(139,92,246,0.5)' : 'var(--border)',
-                                    color: show3D ? '#a78bfa' : 'var(--text-muted)',
+                                    borderColor:     show3D ? 'rgba(139,92,246,0.5)'  : 'var(--border)',
+                                    color:           show3D ? '#a78bfa'               : 'var(--text-muted)',
                                 }}>
                                 {show3D ? '◈ 3D On' : '◈ 3D Off'}
                             </button>
-                            <button onClick={test} className="px-3 py-1.5 rounded text-[9px] tracking-widest uppercase border transition-all"
-                                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>Test Voice</button>
-                            <button onClick={() => setVoiceEnabled(v => !v)}
+                            <button onClick={test}
+                                className="px-3 py-1.5 rounded text-[9px] tracking-widest uppercase border transition-all"
+                                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+                                Test Voice
+                            </button>
+                            {/* ── LANGUAGE SELECTOR ── */}
+                            <LanguageSelector lang={lang} onChange={setLang} compact />
+                            <button onClick={() => {
+                                    const next = !voiceEnabled;
+                                    setVoiceEnabled(next);
+                                    // CHROME AUTOPLAY FIX: unlock speech engine on user click
+                                    if (next) unlock();
+                                }}
                                 className="px-4 py-2 rounded text-[10px] tracking-widest uppercase font-bold border transition-all"
                                 style={{
                                     backgroundColor: voiceEnabled ? 'var(--copper)' : 'transparent',
-                                    borderColor: voiceEnabled ? 'var(--copper)' : 'var(--border)',
-                                    color: voiceEnabled ? 'white' : 'var(--text-muted)'
+                                    borderColor:     voiceEnabled ? 'var(--copper)' : 'var(--border)',
+                                    color:           voiceEnabled ? 'white'         : 'var(--text-muted)',
                                 }}>
                                 {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
                             </button>
@@ -433,11 +562,11 @@ export default function Learn() {
                         <div className="flex items-center gap-3 mb-8">
                             {PRACTICE_STEPS.map((s, i) => (
                                 <div key={i} className="flex items-center gap-2">
-                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all`}
+                                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all"
                                         style={{
                                             backgroundColor: practiceStep >= i ? 'var(--accent)' : 'transparent',
                                             borderColor:     practiceStep >= i ? 'var(--accent)' : 'var(--border)',
-                                            color:           practiceStep >= i ? 'white' : 'var(--text-muted)'
+                                            color:           practiceStep >= i ? 'white'         : 'var(--text-muted)',
                                         }}>{i + 1}</div>
                                     <span className="text-[9px] tracking-widest uppercase hidden md:block"
                                         style={{ color: practiceStep === i ? 'var(--text)' : 'var(--text-muted)' }}>{s.title}</span>
@@ -447,10 +576,10 @@ export default function Learn() {
                         </div>
                     )}
 
-                    {/* ── MAIN PRACTICE GRID ── */}
+                    {/* Main practice grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 min-h-[600px]">
 
-                        {/* LEFT: Reference image + Info */}
+                        {/* LEFT: Reference + Info */}
                         <div className="flex flex-col gap-6">
 
                             {/* Reference image */}
@@ -477,20 +606,14 @@ export default function Learn() {
                                 )}
                             </div>
 
-                            {/* 3D Joint Visualiser (below reference image) */}
+                            {/* 3D Joint Visualiser */}
                             {show3D && cameraOn && (
                                 <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                                    <div className="text-[9px] tracking-[5px] uppercase mb-3 flex items-center gap-2"
-                                        style={{ color: 'var(--text-muted)' }}>
+                                    <div className="text-[9px] tracking-[5px] uppercase mb-3 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
                                         <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Angle Analysis
-                                        <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>
-                                            Gold = {selectedMudra.name} reference
-                                        </span>
+                                        <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>Gold = {selectedMudra.name} reference</span>
                                     </div>
-                                    <HandVisualiser
-                                        targetMudra={selectedMudra.folder}
-                                        apiBase="http://localhost:5001"
-                                    />
+                                    <HandVisualiser targetMudra={selectedMudra.folder} apiBase={import.meta.env.VITE_FLASK_URL || ""} />
                                 </div>
                             )}
 
@@ -518,7 +641,9 @@ export default function Learn() {
                                         {VOICE_INSTRUCTIONS[selectedMudra.folder] || selectedMudra.fingers}
                                     </p>
                                     {voiceEnabled && (
-                                        <button onClick={() => { const inst = VOICE_INSTRUCTIONS[selectedMudra.folder]; if (inst) speak(inst, { priority: true }); }}
+                                        <button onClick={() => {
+                                            announce.start(selectedMudra.folder);
+                                        }}
                                             className="mt-3 text-[9px] tracking-[3px] uppercase font-bold px-3 py-1.5 rounded border transition-all"
                                             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
                                             🔊 Repeat Instructions
@@ -561,14 +686,47 @@ export default function Learn() {
 
                         {/* RIGHT: Camera */}
                         <div className="flex flex-col">
-                            <div className="w-full flex-1 min-h-[420px] rounded-xl overflow-hidden border relative bg-black shadow-inner" style={{ borderColor: 'var(--border)' }}>
+                            <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner" style={{ borderColor: 'var(--border)', height: '520px' }}>
                                 <canvas ref={canvasRef} className="hidden" />
-                                {cameraOn ? (
+                                
+                                {isFrozen && frozenFrame ? (
+                                    <div className="w-full h-full relative animate-fade-in">
+                                        <img src={frozenFrame} alt="Mudra Mastery Snapshot" className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+                                        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+                                        
+                                        {/* SUCCESS OVERLAY */}
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 z-30">
+                                            <div className="mb-6 animate-bounce text-6xl">🏆</div>
+                                            <h2 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase">{selectedMudra.name} Mastered!</h2>
+                                            <div className="w-24 h-1 bg-accent mb-6 rounded-full" />
+                                            
+                                            <div className="grid grid-cols-2 gap-4 w-full max-w-sm mb-8">
+                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10">
+                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Score</div>
+                                                    <div className="text-3xl font-black text-white">{sessionScore}%</div>
+                                                </div>
+                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10">
+                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Level</div>
+                                                    <div className="text-xl font-black uppercase" style={{ color: getConfidenceLabel(sessionScore).color }}>
+                                                        {getConfidenceLabel(sessionScore).text}
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10 col-span-2">
+                                                    <div className="text-[9px] tracking-[3px] uppercase text-white/50 mb-1">Total Attempts</div>
+                                                    <div className="text-xl font-bold text-white">{attemptsRef.current} Precision Frames</div>
+                                                </div>
+                                            </div>
+
+                                            <p className="text-white/70 text-xs tracking-widest italic mb-2">"{selectedMudra.meaning}"</p>
+                                            <p className="text-white/40 text-[10px] leading-relaxed max-w-xs">{selectedMudra.usage}</p>
+                                        </div>
+                                    </div>
+                                ) : cameraOn ? (
                                     <>
                                         <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
 
                                         {/* Accuracy overlay */}
-                                        <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex flex-col items-end gap-1">
+                                        <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex flex-col items-end gap-1 z-20">
                                             <span className="text-[8px] tracking-[3px] uppercase text-white/50">Accuracy</span>
                                             <span className="text-2xl font-mono font-bold"
                                                 style={{ color: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
@@ -582,7 +740,7 @@ export default function Learn() {
 
                                         {/* Hold progress */}
                                         {holdProgress > 0 && (
-                                            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-500/30 flex flex-col items-center gap-1">
+                                            <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-500/30 flex flex-col items-center gap-1 z-20">
                                                 <span className="text-[8px] tracking-[3px] uppercase text-green-400">Hold</span>
                                                 <div className="w-full h-2 bg-white/10 rounded-full mt-1">
                                                     <div className="h-full rounded-full transition-all duration-200 bg-green-400" style={{ width: `${holdProgress}%` }} />
@@ -593,14 +751,14 @@ export default function Learn() {
                                             </div>
                                         )}
 
-                                        {/* Status badge */}
+                                        {/* Status badge + wrong mudra */}
                                         {detected.detected && (
                                             <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-[85%] z-20">
                                                 <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${isCorrect ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
                                                     {isCorrect ? '✓ Correct Form' : '↻ Adjust'}
                                                 </div>
                                                 {wrongMudraMsg && (
-                                                    <div className="px-4 py-2 mt-1 rounded-lg text-[10px] md:text-xs tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
+                                                    <div className="px-4 py-2 mt-1 rounded-lg text-[10px] tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
                                                         ⚠️ {wrongMudraMsg}
                                                     </div>
                                                 )}
@@ -608,7 +766,7 @@ export default function Learn() {
                                         )}
 
                                         {/* Bottom bar */}
-                                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
+                                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between z-20">
                                             <div>
                                                 <span className="text-[8px] tracking-[3px] uppercase text-white/40 block mb-0.5">Target</span>
                                                 <span className="text-white font-bold text-sm">{selectedMudra.name}</span>
@@ -620,47 +778,36 @@ export default function Learn() {
                                         </div>
                                     </>
                                 ) : (
-                                    /* Pre-camera guided flow */
                                     <div className="w-full h-full flex flex-col items-center justify-center text-center p-10">
-                                        {!sessionComplete ? (
-                                            <>
-                                                <div className="mb-6 text-5xl">{['📖', '🤚', '🎯'][practiceStep]}</div>
-                                                <h3 className="text-white text-lg font-bold mb-2">{PRACTICE_STEPS[practiceStep].title}</h3>
-                                                <p className="text-white/40 text-xs tracking-widest max-w-[220px] mb-8 leading-relaxed">{PRACTICE_STEPS[practiceStep].desc}</p>
-                                                <div className="flex gap-3">
-                                                    {practiceStep > 0 && (
-                                                        <button onClick={() => setPracticeStep(p => p - 1)}
-                                                            className="px-5 py-2.5 rounded-lg border text-[10px] tracking-widest uppercase text-white/60 border-white/20 hover:bg-white/5 transition-all">
-                                                            Back
-                                                        </button>
-                                                    )}
-                                                    {practiceStep < 2 ? (
-                                                        <button onClick={() => setPracticeStep(p => p + 1)}
-                                                            className="px-8 py-2.5 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all"
-                                                            style={{ backgroundColor: 'var(--accent)' }}>
-                                                            Next →
-                                                        </button>
-                                                    ) : (
-                                                        <button onClick={startWebcam}
-                                                            className="px-10 py-3 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all shadow-lg shadow-accent/20"
-                                                            style={{ backgroundColor: 'var(--accent)' }}>
-                                                            ▶ Start Camera
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <div className="flex flex-col items-center gap-4">
-                                                <div className="text-5xl">🏆</div>
-                                                <h3 className="text-white text-xl font-bold">Mudra Mastered!</h3>
-                                                <p className="text-white/40 text-xs tracking-widest">Score: {sessionScore}%</p>
-                                            </div>
-                                        )}
+                                        <div className="mb-6 text-5xl">{['📖', '🤚', '🎯'][practiceStep]}</div>
+                                        <h3 className="text-white text-lg font-bold mb-2">{PRACTICE_STEPS[practiceStep].title}</h3>
+                                        <p className="text-white/40 text-xs tracking-widest max-w-[220px] mb-8 leading-relaxed">{PRACTICE_STEPS[practiceStep].desc}</p>
+                                        <div className="flex gap-3">
+                                            {practiceStep > 0 && (
+                                                <button onClick={() => setPracticeStep(p => p - 1)}
+                                                    className="px-5 py-2.5 rounded-lg border text-[10px] tracking-widest uppercase text-white/60 border-white/20 hover:bg-white/5 transition-all">
+                                                    Back
+                                                </button>
+                                            )}
+                                            {practiceStep < 2 ? (
+                                                <button onClick={() => setPracticeStep(p => p + 1)}
+                                                    className="px-8 py-2.5 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all"
+                                                    style={{ backgroundColor: 'var(--accent)' }}>
+                                                    Next →
+                                                </button>
+                                            ) : (
+                                                <button onClick={startWebcam}
+                                                    className="px-10 py-3 rounded-lg text-white text-[10px] tracking-[4px] uppercase font-bold hover:scale-105 transition-all shadow-lg shadow-accent/20"
+                                                    style={{ backgroundColor: 'var(--accent)' }}>
+                                                    ▶ Start Camera
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Next / status button */}
+                            {/* Next / status */}
                             <div className="mt-6">
                                 {sessionComplete ? (
                                     <button onClick={nextMudra}

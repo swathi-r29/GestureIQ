@@ -45,7 +45,9 @@ router.get('/class/join/:classId', async (req, res) => {
             institutionName: liveClass.staffId.institution_name,
             scheduledAt: liveClass.scheduledAt,
             duration: liveClass.duration,
-            status: liveClass.status
+            status: liveClass.status,
+            targetMudra: liveClass.mudrasList?.[0] || '',
+            mudrasList: liveClass.mudrasList || []
         });
     } catch (err) {
         res.status(500).send('Server Error');

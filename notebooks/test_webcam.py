@@ -2,9 +2,23 @@ import cv2
 import mediapipe as mp
 import pickle
 import numpy as np
+import sys
+import os
+
+# Add root directory for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.feature_engineering import extract_features
+
+# CONFIGURATION
+TARGET_MUDRA = "pataka" # Set target for validation (all lowercase)
+MODEL_PATH = "e:/GestureIQ/models/mudra_model.pkl"
 
 # Load model
-with open("D:/GestureIQ/models/mudra_model.pkl", "rb") as f:
+if not os.path.exists(MODEL_PATH):
+    print(f"ERROR: Model not found at {MODEL_PATH}. Run train_mudra_model.py first.")
+    sys.exit(1)
+
+with open(MODEL_PATH, "rb") as f:    
     model = pickle.load(f)
 
 # MediaPipe setup
@@ -14,12 +28,17 @@ mp_draw = mp.solutions.drawing_utils
 
 # Webcam
 cap = cv2.VideoCapture(0)
+print(f"Target Mudra: {TARGET_MUDRA}")
 print("Press Q to quit")
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
+
+    # Flip frame for mirror effect
+    frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     result = hands.process(frame_rgb)
@@ -28,55 +47,38 @@ while True:
         landmarks = result.multi_hand_landmarks[0]
         mp_draw.draw_landmarks(frame, landmarks, mp_hands.HAND_CONNECTIONS)
 
-        row = []
-        for lm in landmarks.landmark:
-            row += [lm.x, lm.y, lm.z]
+        # 1. Extract 72 features using the SHARED module
+        features = extract_features(landmarks.landmark)
 
-        # Normalize relative to wrist
-        wrist_x, wrist_y, wrist_z = row[0], row[1], row[2]
-        norm_row = []
-        for i in range(0, len(row), 3):
-            norm_row += [row[i]-wrist_x, row[i+1]-wrist_y, row[i+2]-wrist_z]
-            
-        max_val = max(abs(x) for x in norm_row)
-        if max_val > 0:
-            norm_row = [x / max_val for x in norm_row]
-            
-        import math
-        def get_dist(p1_idx, p2_idx):
-            return math.sqrt(
-                (norm_row[p1_idx] - norm_row[p2_idx])**2 +
-                (norm_row[p1_idx+1] - norm_row[p2_idx+1])**2 +
-                (norm_row[p1_idx+2] - norm_row[p2_idx+2])**2
-            )
-            
-        distances = [
-            get_dist(12, 24), # Thumb to Index
-            get_dist(12, 36), # Thumb to Middle
-            get_dist(12, 48), # Thumb to Ring
-            get_dist(12, 60)  # Thumb to Pinky
-        ]
+        # 2. Predict mudra
+        features_arr = np.array([features])
+        prediction = model.predict(features_arr)[0]
         
-        straightness = [
-            get_dist(24, 15), # Index curl
-            get_dist(36, 27), # Middle curl
-            get_dist(48, 39), # Ring curl
-            get_dist(60, 51)  # Pinky curl
-        ]
-        
-        final_features = norm_row + distances + straightness
+        # Get confidence (max probability)
+        probs = model.predict_proba(features_arr)[0]
+        confidence = max(probs) * 100
 
-        prediction = model.predict([final_features])[0]
-        confidence = max(model.predict_proba([final_features])[0]) * 100
-
-        if confidence > 25:
-            cv2.putText(frame, f"{prediction} ({confidence:.1f}%)",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # UI Feedback Logic
+        if confidence > 35: # Threshold for reliable prediction
+            # Target validation
+            if prediction.lower() == TARGET_MUDRA.lower():
+                display_text = f"Correct Mudra: {prediction}"
+                color = (0, 255, 0) # Green
+            else:
+                display_text = f"Wrong Mudra - Detected: {prediction}"
+                color = (0, 0, 255) # Red
+                
+            cv2.putText(frame, f"{display_text} ({confidence:.1f}%)",
+                        (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
         else:
             cv2.putText(frame, "Detecting...",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-    cv2.imshow("GestureIQ - Mudra Detection", frame)
+    # UI Instructions
+    cv2.putText(frame, f"Target: {TARGET_MUDRA.upper()}", 
+                (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+    cv2.imshow("GestureIQ - Robust Mudra Detection", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 

@@ -1,3 +1,5 @@
+// src/pages/ClassJoin.jsx
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -52,8 +54,12 @@ const ClassJoin = () => {
     // Socket listener for class start
     let socket;
     if (inWaitingRoom) {
-      socket = io(import.meta.env.VITE_BACKEND_URL);
-      socket.emit('join_class_room', classId);
+      socket = io('/', {
+        path: '/socket.io',
+        secure: false,
+        rejectUnauthorized: false
+      });
+      socket.emit('join_class_room', { classId });
       socket.on('class_started', () => {
         navigate(`/class/live/${classId}`);
       });

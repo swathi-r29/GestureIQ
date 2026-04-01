@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Calendar, 
-  Clock, 
-  Users, 
-  MoreVertical, 
-  Play, 
-  Copy, 
-  Trash2, 
+import {
+  Calendar,
+  Clock,
+  Users,
+  MoreVertical,
+  Play,
+  Copy,
+  Trash2,
   Edit3,
   Search,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  FileText
 } from 'lucide-react';
 
 const StaffMyClasses = () => {
@@ -62,7 +63,7 @@ const StaffMyClasses = () => {
     }
   };
 
-  const filteredClasses = classes.filter(c => 
+  const filteredClasses = classes.filter(c =>
     c.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -73,7 +74,7 @@ const StaffMyClasses = () => {
           <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>My Classes</h1>
           <p style={{ color: 'var(--text-muted)' }}>Manage your scheduled and past teaching sessions</p>
         </div>
-        <button 
+        <button
           onClick={() => navigate('/staff/class/create')}
           className="px-6 py-3 rounded-xl font-bold text-white flex items-center space-x-2 transition-transform hover:scale-105"
           style={{ backgroundColor: 'var(--accent)' }}
@@ -90,7 +91,7 @@ const StaffMyClasses = () => {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className="flex-1 py-2 px-4 rounded-lg text-sm font-bold capitalize transition-all"
-            style={{ 
+            style={{
               backgroundColor: activeTab === tab ? 'var(--bg-card)' : 'transparent',
               color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
               boxShadow: activeTab === tab ? '0 4px 6px -1px rgb(0 0 0 / 0.1)' : 'none'
@@ -104,7 +105,7 @@ const StaffMyClasses = () => {
       {/* Search and Filters */}
       <div className="relative max-w-md">
         <Search className="absolute left-4 top-3.5 w-4 h-4 opacity-50" />
-        <input 
+        <input
           type="text"
           placeholder="Search by title..."
           value={searchTerm}
@@ -117,21 +118,20 @@ const StaffMyClasses = () => {
       {/* Class Grid */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1,2,3].map(i => (
+          {[1, 2, 3].map(i => (
             <div key={i} className="h-64 rounded-2xl animate-pulse" style={{ backgroundColor: 'var(--bg-card2)' }}></div>
           ))}
         </div>
       ) : filteredClasses.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredClasses.map((item) => (
-            <div key={item._id} className="group relative p-6 rounded-2xl border transition-all hover:shadow-xl" 
-                 style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              
+            <div key={item._id} className="group relative p-6 rounded-2xl border transition-all hover:shadow-xl"
+              style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+
               <div className="flex justify-between items-start mb-4">
-                <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  item.status === 'live' ? 'bg-red-500 text-white animate-pulse' : 
-                  item.status === 'ended' ? 'bg-gray-500/10 text-gray-500' : 'bg-blue-500/10 text-blue-500'
-                }`}>
+                <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${item.status === 'live' ? 'bg-red-500 text-white animate-pulse' :
+                    item.status === 'ended' ? 'bg-gray-500/10 text-gray-500' : 'bg-blue-500/10 text-blue-500'
+                  }`}>
                   {item.status}
                 </div>
                 <div className="dropdown relative group shadow-sm">
@@ -158,12 +158,12 @@ const StaffMyClasses = () => {
 
               {/* Mudras Badge Area */}
               <div className="flex flex-wrap gap-2 mb-6 h-12 overflow-hidden">
-                {item.mudrasList.slice(0, 3).map(m => (
+                {(item.mudrasList || []).slice(0, 3).map(m => (
                   <span key={m} className="px-2 py-1 rounded-md text-[10px] bg-black/5" style={{ color: 'var(--text-muted)' }}>
                     {m}
                   </span>
                 ))}
-                {item.mudrasList.length > 3 && (
+                {(item.mudrasList || []).length > 3 && (
                   <span className="px-2 py-1 rounded-md text-[10px] bg-black/5" style={{ color: 'var(--text-muted)' }}>
                     +{item.mudrasList.length - 3} more
                   </span>
@@ -173,7 +173,7 @@ const StaffMyClasses = () => {
               <div className="flex items-center gap-2">
                 {item.status === 'scheduled' && (
                   <>
-                    <button 
+                    <button
                       onClick={() => navigate(`/staff/class/conduct/${item.classId}`)}
                       className="flex-1 py-2.5 rounded-xl font-bold text-xs transition-all hover:opacity-90 flex items-center justify-center space-x-1"
                       style={{ backgroundColor: 'var(--accent)', color: 'white' }}
@@ -181,14 +181,14 @@ const StaffMyClasses = () => {
                       <Play className="w-3 h-3 fill-current" />
                       <span>Start Class</span>
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleCopyLink(item.classId)}
                       className="p-2.5 rounded-xl border flex items-center justify-center transition-all hover:bg-black/5"
                       style={{ borderColor: 'var(--border)' }}
                     >
                       <Copy className="w-4 h-4" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleCancel(item.classId)}
                       className="p-2.5 rounded-xl border flex items-center justify-center transition-all hover:bg-red-500/10 hover:border-red-500/20"
                       style={{ borderColor: 'var(--border)' }}
@@ -197,9 +197,9 @@ const StaffMyClasses = () => {
                     </button>
                   </>
                 )}
-                
+
                 {item.status === 'live' && (
-                  <button 
+                  <button
                     onClick={() => navigate(`/staff/class/conduct/${item.classId}`)}
                     className="w-full py-2.5 rounded-xl font-bold text-xs bg-red-500 text-white transition-all hover:brightness-110 flex items-center justify-center space-x-1"
                   >
@@ -209,8 +209,8 @@ const StaffMyClasses = () => {
                 )}
 
                 {item.status === 'ended' && (
-                  <button 
-                    onClick={() => navigate('/staff/reports')}
+                  <button
+                    onClick={() => navigate(`/staff/reports?session=${item._id}`)}
                     className="w-full py-2.5 rounded-xl font-bold text-xs border transition-all hover:bg-black/5 flex items-center justify-center space-x-1"
                     style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
                   >
@@ -227,7 +227,7 @@ const StaffMyClasses = () => {
           <AlertCircle className="w-16 h-16 mx-auto" />
           <p className="text-lg">No classes found in this category</p>
           {activeTab === 'scheduled' && (
-            <button 
+            <button
               onClick={() => navigate('/staff/class/create')}
               className="px-6 py-2 rounded-lg border font-bold"
               style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}

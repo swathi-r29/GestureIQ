@@ -6,9 +6,6 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig({
   plugins: [
     react(),
-    // basicSsl() provides automatic self-signed HTTPS — required for
-    // getUserMedia (camera) to work when accessing via a local network IP
-    // (e.g. http://192.168.x.x:5173 won't allow camera; https:// will).
     basicSsl(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -27,19 +24,49 @@ export default defineConfig({
     })
   ],
   server: {
-    
-    host: true,   // expose on local network
+    host: true,
     proxy: {
-      '/api/detect_frame': 'http://localhost:5001',
-      '/api/session_report': 'http://localhost:5001',
-      '/api': 'http://localhost:5000',
-      '/socket.io': {
-        target: 'http://localhost:5000',
-        ws: true
+      '/api/detect_frame': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
       },
-      '/video_feed': 'http://localhost:5001',
-      '/mudra_data': 'http://localhost:5001',
-      '/uploads': 'http://localhost:5000'
+      '/api/session_report': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/api/landmarks': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/socket.io': {
+        target: 'http://127.0.0.1:5000',
+        ws: true,
+        changeOrigin: true,
+        secure: false
+      },
+      '/video_feed': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/mudra_data': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        secure: false
+      },
+      '/uploads': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false
+      }
     }
   }
 })

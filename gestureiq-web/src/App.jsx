@@ -33,7 +33,7 @@ import ClassJoin from './pages/ClassJoin';
 import StudentLiveClass from './pages/StudentLiveClass';
 import StudentEnrollment from './pages/staff/StudentEnrollment';
 import Announcements from './pages/staff/Announcements';
-import StaffLiveClasses from './pages/staff/LiveClasses';
+
 
 export default function App() {
   return (
@@ -73,7 +73,6 @@ export default function App() {
                       <Route path="/class/create" element={<StaffCreateClass />} />
                       <Route path="/class/conduct/:classId" element={<StaffConductClass />} />
                       <Route path="/classes" element={<StaffMyClasses />} />
-                      <Route path="/live-now" element={<StaffLiveClasses />} />
                       <Route path="/reports" element={<StaffReports />} />
                       <Route path="/students" element={<StaffStudents />} />
                       <Route path="/enrollment" element={<StudentEnrollment />} />

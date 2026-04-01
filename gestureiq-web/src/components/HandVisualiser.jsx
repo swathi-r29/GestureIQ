@@ -120,7 +120,7 @@ function updateBone(bone, posA, posB) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────
-export default function HandVisualiser({ targetMudra = "", apiBase = "http://localhost:5001" }) {
+export default function HandVisualiser({ targetMudra = "", apiBase = import.meta.env.VITE_FLASK_URL || "" }) {
   const canvasRef   = useRef(null);
   const sceneRef    = useRef(null);
   const objectsRef  = useRef(null);

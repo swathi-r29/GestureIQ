@@ -16,13 +16,40 @@ const { generateClassReportPDF } = require('../utils/pdfGenerator');
 // @route   GET /api/staff/dashboard
 router.get('/dashboard', staffAuth, async (req, res) => {
     try {
-        const totalClasses = await LiveClass.countDocuments({ staffId: req.user.id });
+        const staff = await User.findById(req.user.id);
         
-        // Count unique students across all classes
+        // 1. Total Classes Conducted
+        const totalClassesConducted = await ClassSession.countDocuments({ staffId: req.user.id });
+        
+        // Total Scheduled/Active Classes (for other stats/links if needed)
+        const totalClasses = await LiveClass.countDocuments({ staffId: req.user.id });
+
+        // Calculate enrolled students
         const classes = await LiveClass.find({ staffId: req.user.id });
-        const studentIds = new Set();
-        classes.forEach(c => c.studentsEnrolled.forEach(id => studentIds.add(id.toString())));
-        const totalStudents = studentIds.size;
+        const enrolledStudentIds = [];
+        classes.forEach(c => {
+            if (c.studentsEnrolled) c.studentsEnrolled.forEach(id => enrolledStudentIds.push(id.toString()));
+        });
+
+        // 2. Total Students Registered (Institution + Enrolled)
+        const studentQuery = { role: 'student' };
+        if (staff.institution_name) {
+            studentQuery.$or = [
+                { institution_name: staff.institution_name },
+                { _id: { $in: enrolledStudentIds } }
+            ];
+        } else {
+            studentQuery._id = { $in: enrolledStudentIds };
+        }
+        const totalStudentsRegistered = await User.countDocuments(studentQuery);
+
+        // 3. Students Active Now
+        // Definition: enrolled students whose account status is 'active' or 'approved'
+        const studentsActiveNowQuery = { 
+            ...studentQuery, 
+            status: { $in: ['active', 'approved'] } 
+        };
+        const studentsActiveNow = await User.countDocuments(studentsActiveNowQuery);
 
         const nextClass = await LiveClass.findOne({
             staffId: req.user.id,
@@ -41,7 +68,9 @@ router.get('/dashboard', staffAuth, async (req, res) => {
 
         res.json({
             totalClasses,
-            totalStudents,
+            totalClassesConducted,
+            totalStudentsRegistered,
+            studentsActiveNow,
             nextClass,
             recentSessions,
             notifications: unreadNotifications
@@ -116,6 +145,25 @@ router.post('/class/create', staffAuth, async (req, res) => {
 router.get('/classes', staffAuth, async (req, res) => {
     try {
         const { status } = req.query;
+
+        // If asking for past/ended classes, we should look at ClassSession history
+        if (status === 'ended') {
+            const sessions = await ClassSession.find({ staffId: req.user.id }).sort({ conductedAt: -1 });
+            const historicalClasses = sessions.map(session => ({
+                _id: session._id,
+                classId: session.classId,
+                staffId: session.staffId,
+                title: session.title,
+                scheduledAt: session.conductedAt, // Map time to expected field
+                duration: session.duration,
+                mudrasList: session.mudrasCovered, // Map list to expected field
+                studentsEnrolled: session.studentReports.map(r => r.studentId),
+                status: 'ended'
+            }));
+            return res.json(historicalClasses);
+        }
+
+        // For scheduled or live classes, pull from LiveClass
         let query = { staffId: req.user.id };
         if (status && status !== 'all') {
             query.status = status;
@@ -124,6 +172,7 @@ router.get('/classes', staffAuth, async (req, res) => {
         const classes = await LiveClass.find(query).sort({ scheduledAt: -1 });
         res.json(classes);
     } catch (err) {
+        console.error("Classes Error:", err);
         res.status(500).send('Server Error');
     }
 });
@@ -132,8 +181,13 @@ router.get('/classes', staffAuth, async (req, res) => {
 router.get('/class/:classId', staffAuth, async (req, res) => {
     try {
         console.log(`[Route Debug] Fetching classId: ${req.params.classId} for staffId: ${req.user.id}`);
-        const liveClass = await LiveClass.findOne({ classId: req.params.classId, staffId: req.user.id })
-            .populate('studentsEnrolled', 'name email');
+        const isObjectId = mongoose.isValidObjectId(req.params.classId);
+        const liveClass = await LiveClass.findOne({
+            $or: [
+                { classId: req.params.classId, staffId: req.user.id },
+                ...(isObjectId ? [{ _id: req.params.classId, staffId: req.user.id }] : [])
+            ]
+        }).populate('studentsEnrolled', 'name email');
         
         if (!liveClass) {
             console.warn(`[Route Warn] Class ${req.params.classId} not found or not owned by staff ${req.user.id}`);
@@ -359,36 +413,63 @@ router.get('/report/:sessionId/pdf', staffAuth, async (req, res) => {
 // @route   GET /api/staff/students
 router.get('/students', staffAuth, async (req, res) => {
     try {
-        // Unique students across all sessions
-        const studentsData = await ClassSession.aggregate([
+        const staff = await User.findById(req.user.id);
+        
+        // Find all LiveClasses for this staff to get enrolled students
+        const staffClasses = await LiveClass.find({ staffId: req.user.id });
+        const enrolledStudentIds = [];
+        staffClasses.forEach(c => {
+            if (c.studentsEnrolled) {
+                c.studentsEnrolled.forEach(id => enrolledStudentIds.push(id.toString()));
+            }
+        });
+
+        // Find all students in the same institution OR enrolled in classes
+        const query = { role: 'student' };
+        
+        if (staff.institution_name) {
+            query.$or = [
+                { institution_name: staff.institution_name },
+                { _id: { $in: enrolledStudentIds } }
+            ];
+        } else {
+            query._id = { $in: enrolledStudentIds };
+        }
+
+        const institutionStudents = await User.find(query).select('_id name email createdAt');
+
+        // Get class session stats for these students under this staff
+        const sessionsData = await ClassSession.aggregate([
             { $match: { staffId: new mongoose.Types.ObjectId(req.user.id) } },
             { $unwind: "$studentReports" },
             { $group: {
                 _id: "$studentReports.studentId",
-                name: { $first: "$studentReports.studentName" },
                 classesAttended: { $sum: 1 },
                 avgOverallScore: { $avg: "$studentReports.overallScore" },
                 lastActive: { $max: "$conductedAt" }
-            }},
-            { $lookup: {
-                from: "users",
-                localField: "_id",
-                foreignField: "_id",
-                as: "userDetails"
-            }},
-            { $unwind: "$userDetails" },
-            { $project: {
-                studentId: "$_id",
-                name: 1,
-                email: "$userDetails.email",
-                classesAttended: 1,
-                avgOverallScore: 1,
-                lastActive: 1
             }}
         ]);
 
+        const sessionMap = {};
+        sessionsData.forEach(s => {
+            sessionMap[s._id.toString()] = s;
+        });
+
+        const studentsData = institutionStudents.map(student => {
+            const stats = sessionMap[student._id.toString()] || {};
+            return {
+                studentId: student._id,
+                name: student.name,
+                email: student.email,
+                classesAttended: stats.classesAttended || 0,
+                avgOverallScore: stats.avgOverallScore || 0,
+                lastActive: stats.lastActive || student.createdAt
+            };
+        });
+
         res.json(studentsData);
     } catch (err) {
+        console.error(err);
         res.status(500).send('Server Error');
     }
 });

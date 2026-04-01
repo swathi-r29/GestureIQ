@@ -112,27 +112,60 @@ io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
     socket.on('join_class_room', (data) => {
-        const classId = typeof data === 'string' ? data : data.classId;
-        const userName = data.name || 'Student';
-        const userId = data.userId || socket.id;
-        
+        const classId  = typeof data === 'string' ? data : data.classId;
+        const userName = typeof data === 'object' ? (data.name || 'Student') : 'Student';
+        const userId   = typeof data === 'object' ? (data.userId || socket.id) : socket.id;
+
+        // Prevent duplicate joins — leave old rooms first
+        const existing = socketRegistry.get(socket.id);
+        if (existing && existing.classId === classId) {
+            console.log(`User ${userId} already in room ${classId} — skipping duplicate join`);
+            return;
+        }
+
         socket.join(classId);
-        socketRegistry.set(socket.id, { classId, userId });
-        
+        socketRegistry.set(socket.id, { classId, userId, name: userName });
+
         console.log(`User ${userId} (${userName}) joined room ${classId}`);
-        socket.to(classId).emit('participant_joined', { 
-            id: socket.id, 
-            userId: userId, 
-            name: userName 
+
+        // Only emit participant_joined if this is a student (not teacher rejoining)
+        if (userId !== socket.id) {
+            socket.to(classId).emit('participant_joined', {
+                id:     socket.id,
+                userId: userId,
+                name:   userName
+            });
+        }
+    });
+
+    socket.on('student_join_class', (data) => {
+        const { classId, userId, name } = data;
+        socket.join(classId);
+        socketRegistry.set(socket.id, { classId, userId, name });
+        socket.to(classId).emit('participant_joined', {
+            id:     socket.id,
+            userId: userId,
+            name:   name || 'Student'
         });
+        console.log(`Student ${name} (${userId}) joined room ${classId}`);
+    });
+
+    socket.on('class_started', (classId) => {
+        socket.to(classId).emit('class_started');
+    });
+
+    socket.on('modules_changed', (data) => {
+        const { classId, modules } = data;
+        socket.to(classId).emit('modules_changed', { modules });
+    });
+
+    socket.on('staff_change_mudra', (data) => {
+        const { classId, newMudra } = data;
+        socket.to(classId).emit('mudra_changed', { mudra: newMudra });
     });
 
     socket.on('student_score_update', (data) => {
         io.to(data.classId).emit('score_update', data);
-    });
-
-    socket.on('staff_change_mudra', (data) => {
-        io.to(data.classId).emit('mudra_changed', data.newMudra);
     });
 
     socket.on('class_ended', (classId) => {
@@ -143,12 +176,12 @@ io.on('connection', (socket) => {
     socket.on('webrtc_offer', (data) => {
         if (data.to) {
             io.to(data.to).emit('teacher_broadcast_offer', {
-                from: socket.id,
+                from:  socket.id,
                 offer: data.offer
             });
         } else {
             socket.to(data.classId).emit('teacher_broadcast_offer', {
-                from: socket.id,
+                from:  socket.id,
                 offer: data.offer
             });
         }
@@ -156,21 +189,21 @@ io.on('connection', (socket) => {
 
     socket.on('webrtc_answer', (data) => {
         io.to(data.to).emit('webrtc_answer_response', {
-            from: socket.id,
+            from:   socket.id,
             answer: data.answer
         });
     });
 
     socket.on('webrtc_ice_candidate', (data) => {
         if (data.to) {
-            io.to(data.to).emit('ice_candidate_received', { 
-                from: socket.id,
-                candidate: data.candidate 
+            io.to(data.to).emit('ice_candidate_received', {
+                from:      socket.id,
+                candidate: data.candidate
             });
         } else {
-            socket.to(data.classId).emit('ice_candidate_received', { 
-                from: socket.id,
-                candidate: data.candidate 
+            socket.to(data.classId).emit('ice_candidate_received', {
+                from:      socket.id,
+                candidate: data.candidate
             });
         }
     });
@@ -179,13 +212,13 @@ io.on('connection', (socket) => {
         const registry = socketRegistry.get(socket.id);
         if (registry) {
             console.log(`User ${registry.userId} left room ${registry.classId}`);
-            socket.to(registry.classId).emit('participant_left', { 
-                id: socket.id, 
-                userId: registry.userId 
+            socket.to(registry.classId).emit('participant_left', {
+                id:     socket.id,
+                userId: registry.userId
             });
             socketRegistry.delete(socket.id);
         }
-        console.log('User disconnected');
+        console.log('User disconnected:', socket.id);
     });
 });
 

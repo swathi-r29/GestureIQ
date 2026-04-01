@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Users, 
-  Video, 
-  Bell, 
-  Calendar, 
-  ArrowRight, 
+import {
+  Users,
+  Video,
+  Bell,
+  Calendar,
+  ArrowRight,
   FileText,
   Clock
 } from 'lucide-react';
@@ -61,13 +61,13 @@ const StaffDashboard = () => {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { icon: Video, label: 'Total Classes', value: data?.totalClasses || 0, color: '#3B82F6' },
-          { icon: Users, label: 'Total Students', value: data?.totalStudents || 0, color: '#10B981' },
-          { icon: Clock, label: 'Upcoming Class', value: data?.nextClass ? '1' : '0', color: '#F59E0B' },
+          { icon: Users, label: 'Total Students Registered', value: data?.totalStudentsRegistered || 0, color: '#10B981' },
+          { icon: Video, label: 'Students Active Now', value: data?.studentsActiveNow || 0, color: '#3B82F6' },
+          { icon: Calendar, label: 'Total Classes Conducted', value: data?.totalClassesConducted || 0, color: '#F59E0B' },
           { icon: Bell, label: 'Alerts', value: data?.notifications || 0, color: '#EF4444' }
         ].map((stat, idx) => (
-          <div key={idx} className="p-6 rounded-2xl shadow-sm border transition-all hover:translate-y-[-4px]" 
-               style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div key={idx} className="p-6 rounded-2xl shadow-sm border transition-all hover:translate-y-[-4px]"
+            style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <div className="flex items-center space-x-4">
               <div className="p-3 rounded-xl" style={{ backgroundColor: `${stat.color}20` }}>
                 <stat.icon className="w-6 h-6" style={{ color: stat.color }} />
@@ -90,10 +90,10 @@ const StaffDashboard = () => {
               View All <ArrowRight className="w-4 h-4 ml-1" />
             </button>
           </div>
-          
+
           {data?.nextClass ? (
-            <div className="p-6 rounded-xl border border-dashed transition-hover hover:border-solid" 
-                 style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
+            <div className="p-6 rounded-xl border border-dashed transition-hover hover:border-solid"
+              style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
               <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--text)' }}>{data.nextClass.title}</h3>
               <div className="space-y-2 mb-6">
                 <p className="text-sm flex items-center" style={{ color: 'var(--text-muted)' }}>
@@ -106,7 +106,7 @@ const StaffDashboard = () => {
                   <Users className="w-4 h-4 mr-2" /> {data.nextClass.studentsEnrolled?.length || 0} Students Enrolled
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => navigate(`/staff/class/conduct/${data.nextClass.classId}`)}
                 className="w-full py-3 rounded-lg font-bold text-white transition-all hover:opacity-90"
                 style={{ backgroundColor: 'var(--accent)' }}
@@ -118,7 +118,7 @@ const StaffDashboard = () => {
             <div className="text-center py-12 opacity-50">
               <Calendar className="w-12 h-12 mx-auto mb-4" />
               <p>No classes scheduled today</p>
-              <button 
+              <button
                 onClick={() => navigate('/staff/class/create')}
                 className="mt-4 px-6 py-2 rounded-lg border text-sm font-bold"
                 style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
@@ -141,8 +141,8 @@ const StaffDashboard = () => {
           <div className="space-y-4">
             {data?.recentSessions?.length > 0 ? (
               data.recentSessions.map((session, idx) => (
-                <div key={idx} className="flex items-center justify-between p-4 rounded-xl transition-all hover:bg-black/5" 
-                     style={{ backgroundColor: 'var(--bg-card2)' }}>
+                <div key={idx} className="flex items-center justify-between p-4 rounded-xl transition-all hover:bg-black/5"
+                  style={{ backgroundColor: 'var(--bg-card2)' }}>
                   <div className="flex items-center space-x-4">
                     <div className="p-2 rounded-lg bg-purple-500/10">
                       <FileText className="w-5 h-5 text-purple-500" />
