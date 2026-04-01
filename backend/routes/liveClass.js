@@ -9,8 +9,8 @@ const adminAuth = require('../middleware/adminAuth');
 router.get('/all', adminAuth, async (req, res) => {
     try {
         const classes = await LiveClass.find()
-            .populate('hostId', 'name email institution_name')
-            .sort({ startTime: -1 });
+            .populate('staffId', 'name email institution_name')
+            .sort({ scheduledAt: -1 });
         res.json(classes);
     } catch (err) {
         res.status(500).send('Server Error');
@@ -21,8 +21,8 @@ router.get('/all', adminAuth, async (req, res) => {
 // @desc    Admin/Generic: Get currently active classes
 router.get('/active', auth, async (req, res) => {
     try {
-        const activeClasses = await LiveClass.find({ status: 'active' })
-            .populate('hostId', 'name institution_name');
+        const activeClasses = await LiveClass.find({ status: 'live' })
+            .populate('staffId', 'name institution_name');
         res.json(activeClasses);
     } catch (err) {
         res.status(500).send('Server Error');
@@ -35,10 +35,10 @@ router.get('/upcoming', auth, async (req, res) => {
     try {
         const upcoming = await LiveClass.find({
             status: 'scheduled',
-            startTime: { $gte: new Date() }
+            scheduledAt: { $gte: new Date() }
         })
-            .populate('hostId', 'name institution_name')
-            .sort({ startTime: 1 });
+            .populate('staffId', 'name institution_name')
+            .sort({ scheduledAt: 1 });
         res.json(upcoming);
     } catch (err) {
         res.status(500).send('Server Error');
@@ -50,8 +50,8 @@ router.get('/upcoming', auth, async (req, res) => {
 router.get('/my-hosting', auth, async (req, res) => {
     if (req.user.role !== 'staff') return res.status(403).json({ msg: 'Staff only' });
     try {
-        const myClasses = await LiveClass.find({ hostId: req.user.id })
-            .sort({ startTime: -1 });
+        const myClasses = await LiveClass.find({ staffId: req.user.id })
+            .sort({ scheduledAt: -1 });
         res.json(myClasses);
     } catch (err) {
         res.status(500).send('Server Error');
@@ -63,14 +63,14 @@ router.get('/my-hosting', auth, async (req, res) => {
 router.post('/create', auth, async (req, res) => {
     if (req.user.role !== 'staff') return res.status(403).json({ msg: 'Staff only' });
     try {
-        const { title, description, startTime, duration, meetingLink } = req.body;
+        const { title, description, scheduledAt, duration, joinLink } = req.body;
         const newClass = new LiveClass({
             title,
             description,
-            startTime,
+            scheduledAt,
             duration,
-            meetingLink,
-            hostId: req.user.id
+            joinLink,
+            staffId: req.user.id
         });
         await newClass.save();
         res.json(newClass);
@@ -92,7 +92,7 @@ router.post('/join/:id', auth, async (req, res) => {
             liveClass.attendees.push({ studentId: req.user.id });
             await liveClass.save();
         }
-        res.json({ meetingLink: liveClass.meetingLink });
+        res.json({ joinLink: liveClass.joinLink });
     } catch (err) {
         res.status(500).send('Join Failed');
     }
@@ -102,11 +102,11 @@ router.post('/join/:id', auth, async (req, res) => {
 // @desc    Staff: Start/End/Cancel class
 router.patch('/status/:id', auth, async (req, res) => {
     try {
-        const { status } = req.body; // active, completed, cancelled
+        const { status } = req.body; // scheduled, live, ended
         const liveClass = await LiveClass.findById(req.params.id);
 
         if (!liveClass) return res.status(404).json({ msg: 'Class not found' });
-        if (liveClass.hostId.toString() !== req.user.id && req.user.role !== 'admin') {
+        if (liveClass.staffId.toString() !== req.user.id && req.user.role !== 'admin') {
             return res.status(401).json({ msg: 'Unauthorized' });
         }
 
@@ -116,6 +116,28 @@ router.patch('/status/:id', auth, async (req, res) => {
     } catch (err) {
         res.status(500).send('Status Update Failed');
     }
+});
+
+// ── Active modules per class (in-memory) ─────────────────────────────────────
+// { classId: { mudra: true, face: false, pose: false } }
+const activeModules = {};
+
+// @route   GET api/live/modules/:classId
+// @desc    Get active modules for a class
+router.get('/modules/:classId', auth, async (req, res) => {
+    const modules = activeModules[req.params.classId] || {
+        mudra: true, face: false, pose: false
+    };
+    res.json(modules);
+});
+
+// @route   POST api/live/modules/:classId
+// @desc    Staff: Update active modules for a class
+router.post('/modules/:classId', auth, async (req, res) => {
+    if (req.user.role !== 'staff') return res.status(403).json({ msg: 'Staff only' });
+    const { mudra, face, pose } = req.body;
+    activeModules[req.params.classId] = { mudra, face, pose };
+    res.json(activeModules[req.params.classId]);
 });
 
 module.exports = router;

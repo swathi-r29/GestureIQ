@@ -1,7 +1,7 @@
 // src/pages/Detect.jsx
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE ROLE: STANDALONE FREE-PRACTICE DETECTOR
-// Updated: Velocity Hold Detection + 3D HandVisualiser + HoldDetectionRing
+// Updated: Natural voice + 6-language support + HoldDetectionRing + HandVisualiser
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef } from 'react';
@@ -9,40 +9,40 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
-import { useVoiceGuide } from '../hooks/useVoiceGuide';
+import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import HandVisualiser from '../components/HandVisualiser';
 import HoldDetectionRing from '../components/HoldDetectionRing';
 import { io } from 'socket.io-client';
 
 const MUDRAS = [
-    { folder: "pataka",       name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",             level: "Basic"        },
-    { folder: "tripataka",    name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                         level: "Basic"        },
-    { folder: "ardhapataka",  name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",              level: "Basic"        },
-    { folder: "kartarimukha", name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                  level: "Basic"        },
+    { folder: "pataka",       name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic"        },
+    { folder: "tripataka",    name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight and joined",             level: "Basic"        },
+    { folder: "ardhapataka",  name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",             level: "Basic"        },
+    { folder: "kartarimukha", name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                 level: "Basic"        },
     { folder: "mayura",       name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic"        },
-    { folder: "ardhachandra", name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                 level: "Basic"        },
-    { folder: "arala",        name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                 level: "Intermediate" },
-    { folder: "shukatunda",   name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",                level: "Intermediate" },
-    { folder: "mushti",       name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",            level: "Intermediate" },
-    { folder: "shikhara",     name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                           level: "Intermediate" },
-    { folder: "kapittha",     name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                     level: "Intermediate" },
-    { folder: "katakamukha",  name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                        level: "Intermediate" },
-    { folder: "suchi",        name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                         level: "Basic"        },
-    { folder: "chandrakala",  name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                       level: "Intermediate" },
-    { folder: "padmakosha",   name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                  level: "Intermediate" },
-    { folder: "sarpashira",   name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                  level: "Advanced"     },
-    { folder: "mrigashira",   name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",         level: "Advanced"     },
-    { folder: "simhamukha",   name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                       level: "Advanced"     },
-    { folder: "kangula",      name: "Kangula",      meaning: "Bell",                usage: "Bell fruit, fruit, drop of water",                 fingers: "Four fingers together, thumb bent across",                  level: "Advanced"     },
-    { folder: "alapadma",     name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                   level: "Advanced"     },
-    { folder: "chatura",      name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                   level: "Advanced"     },
-    { folder: "bhramara",     name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",        level: "Advanced"     },
-    { folder: "hamsasya",     name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                         level: "Advanced"     },
-    { folder: "hamsapaksha",  name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                     level: "Advanced"     },
-    { folder: "sandamsha",    name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                           level: "Advanced"     },
-    { folder: "mukula",       name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                          level: "Advanced"     },
-    { folder: "tamrachuda",   name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                  level: "Advanced"     },
-    { folder: "trishula",     name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",         level: "Advanced"     },
+    { folder: "ardhachandra", name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                level: "Basic"        },
+    { folder: "arala",        name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                level: "Intermediate" },
+    { folder: "shukatunda",   name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",               level: "Intermediate" },
+    { folder: "mushti",       name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",           level: "Intermediate" },
+    { folder: "shikhara",     name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                          level: "Intermediate" },
+    { folder: "kapittha",     name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                    level: "Intermediate" },
+    { folder: "katakamukha",  name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                       level: "Intermediate" },
+    { folder: "suchi",        name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                        level: "Basic"        },
+    { folder: "chandrakala",  name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                      level: "Intermediate" },
+    { folder: "padmakosha",   name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                 level: "Intermediate" },
+    { folder: "sarpashira",   name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                 level: "Advanced"     },
+    { folder: "mrigashira",   name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",        level: "Advanced"     },
+    { folder: "simhamukha",   name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                      level: "Advanced"     },
+    { folder: "kangula",      name: "Kangula",      meaning: "Bell",                usage: "Bell, fruit, small rounded objects",               fingers: "Ring and little finger bent inward, others straight",      level: "Advanced"     },
+    { folder: "alapadma",     name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                  level: "Advanced"     },
+    { folder: "chatura",      name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                  level: "Advanced"     },
+    { folder: "bhramara",     name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",       level: "Advanced"     },
+    { folder: "hamsasya",     name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                        level: "Advanced"     },
+    { folder: "hamsapaksha",  name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                    level: "Advanced"     },
+    { folder: "sandamsha",    name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                          level: "Advanced"     },
+    { folder: "mukula",       name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                         level: "Advanced"     },
+    { folder: "tamrachuda",   name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                 level: "Advanced"     },
+    { folder: "trishula",     name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",        level: "Advanced"     },
 ];
 
 const HOLD_DURATION_MS = 1500;
@@ -56,10 +56,7 @@ const LEVEL_COLORS = {
 let _socket = null;
 function getSocket() {
     if (!_socket) {
-        _socket = io('http://localhost:5000', {
-            transports: ['websocket'],
-            reconnectionAttempts: 5,
-        });
+        _socket = io(import.meta.env.VITE_BACKEND_URL, { transports: ['websocket'], reconnectionAttempts: 5 });
     }
     return _socket;
 }
@@ -67,29 +64,34 @@ function getSocket() {
 export default function Detect() {
     const { user }   = useAuth();
     const navigate   = useNavigate();
-    const { speak, stop, test, announce } = useVoiceGuide();
 
-    const [cameraOn,     setCameraOn]     = useState(false);
-    const [voiceEnabled, setVoiceEnabled] = useState(false);
-    const [detected,     setDetected]     = useState({});
-    const [progress,     setProgress]     = useState([]);
-    const [saved,        setSaved]        = useState(false);
-    const [visible,      setVisible]      = useState(false);
+    // ── Language + Voice ──────────────────────────────────────
+    const [lang, setLang] = useState('en');
+    const { speak, stop, test, unlock, announce } = useVoiceGuide({ language: lang });
+
+    // ── Core state ────────────────────────────────────────────
+    const [cameraOn,      setCameraOn]      = useState(false);
+    const [voiceEnabled,  setVoiceEnabled]  = useState(false);
+    const [detected,      setDetected]      = useState({});
+    const [progress,      setProgress]      = useState([]);
+    const [saved,         setSaved]         = useState(false);
+    const [visible,       setVisible]       = useState(false);
     const [selectedMudra, setSelectedMudra] = useState('');
-    const [holdState,    setHoldState]    = useState('idle');
-    const [holdProgress, setHoldProgress] = useState(0);
-    const [autoResult,   setAutoResult]   = useState(null);
-    const [show3D,       setShow3D]       = useState(true);
+    const [holdState,     setHoldState]     = useState('idle');
+    const [holdProgress,  setHoldProgress]  = useState(0);
+    const [autoResult,    setAutoResult]    = useState(null);
+    const [show3D,        setShow3D]        = useState(true);
 
-    const holdStartRef   = useRef(null);
-    const savedRef       = useRef(false);
-    const manualHoldPct  = useRef(0);
-    const videoRef       = useRef(null);
-    const canvasRef      = useRef(null);
-    const streamRef      = useRef(null);
-    const isDetectingRef = useRef(false);
+    const holdStartRef        = useRef(null);
+    const savedRef            = useRef(false);
+    const manualHoldPct       = useRef(0);
+    const videoRef            = useRef(null);
+    const canvasRef           = useRef(null);
+    const streamRef           = useRef(null);
+    const isDetectingRef      = useRef(false);
+    // Voice stability: only announce correction after seeing it 2x in a row
 
-    // ── Init ─────────────────────────────────────────────────
+    // ── Init ──────────────────────────────────────────────────
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
         setTimeout(() => setVisible(true), 100);
@@ -97,15 +99,21 @@ export default function Detect() {
         return () => stop();
     }, [user, navigate]);
 
-    // ── Socket: auto_evaluation from Flask hold detection ────
+    // ── Socket: auto_evaluation from Flask ────────────────────
     useEffect(() => {
         const socket = getSocket();
         const onAutoEval = (result) => {
             setAutoResult(result);
             setDetected(result);
             if (voiceEnabled) {
-                if (result.accuracy >= 75) speak(`Correct! ${result.name} — great form!`, { priority: true });
-                else if (result.corrections?.length > 0) announce.correction(result.corrections[0]);
+                if (result.accuracy >= 75) {
+                    announce.correct();
+                } else if (result.corrections?.length > 0) {
+                    const wrongMsg   = result.corrections.find(c => c.startsWith('Wrong mudra'));
+                    const fingerCorr = result.corrections.find(c => !c.startsWith('Wrong mudra'));
+                    if (wrongMsg) announce.correction(wrongMsg);
+                    else if (fingerCorr) announce.correction(fingerCorr);
+                }
             }
             if (result.detected && result.accuracy >= 75 && !savedRef.current) {
                 savedRef.current = true;
@@ -116,20 +124,20 @@ export default function Detect() {
         return () => socket.off('auto_evaluation', onAutoEval);
     }, [voiceEnabled]);
 
-    // ── Notify Flask when target mudra changes ───────────────
+    // ── Notify Flask when target changes ──────────────────────
     useEffect(() => {
         if (selectedMudra && cameraOn) getSocket().emit('set_free_practice_target', { target: selectedMudra });
         setAutoResult(null);
         savedRef.current = false;
     }, [selectedMudra, cameraOn]);
 
-    // ── Webcam start/stop ────────────────────────────────────
+    // ── Webcam ────────────────────────────────────────────────
     const startWebcam = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
             streamRef.current = stream;
             setCameraOn(true);
-            if (voiceEnabled) speak("Camera active. Show your hand mudra to begin recognition.", { priority: true });
+            if (voiceEnabled) announce.cameraActive();
         } catch {
             alert('Camera access denied. Please allow camera permission and use HTTPS.');
         }
@@ -158,7 +166,6 @@ export default function Detect() {
         return canvas.toDataURL('image/jpeg', 0.6);
     };
 
-    // Attach stream to video element
     useEffect(() => {
         if (cameraOn && streamRef.current && videoRef.current) {
             videoRef.current.srcObject = streamRef.current;
@@ -173,7 +180,7 @@ export default function Detect() {
         }
     }, [cameraOn]);
 
-    // ── Detection polling every 600ms ────────────────────────
+    // ── Detection polling 600ms ───────────────────────────────
     useEffect(() => {
         if (!cameraOn) return;
         const interval = setInterval(async () => {
@@ -190,13 +197,13 @@ export default function Detect() {
                 if (holdState !== 'evaluating') setDetected(data);
 
                 const accuracy    = data.accuracy    || 0;
+                const confidence  = data.confidence  || 0;
                 const corrections = data.corrections || [];
-                const isGood      = data.detected && data.confidence > 70 && accuracy >= 70 && (accuracy > 75 || corrections.length === 0);
+                // 70/70 Rule: Must have both high confidence and high accuracy
+                const isGood      = data.detected && confidence >= 70 && accuracy >= 70 && corrections.length === 0;
 
                 if (voiceEnabled && holdState === 'idle') {
-                    if (!data.detected) announce.noHand();
-                    else if (isGood) announce.hold();
-                    else if (corrections.length > 0 && accuracy < 70) announce.correction(corrections[0]);
+                    announce.fromResult(data);
                 }
 
                 if (isGood) {
@@ -221,7 +228,7 @@ export default function Detect() {
         return () => { clearInterval(interval); holdStartRef.current = null; };
     }, [cameraOn, voiceEnabled, selectedMudra, holdState]);
 
-    // ── Poll /mudra_data for Flask hold state ────────────────
+    // ── Poll /mudra_data for Flask hold state ─────────────────
     useEffect(() => {
         if (!cameraOn) return;
         const interval = setInterval(async () => {
@@ -236,28 +243,29 @@ export default function Detect() {
         return () => clearInterval(interval);
     }, [cameraOn, selectedMudra]);
 
-    // ── Progress helpers ─────────────────────────────────────
+    // ── Progress ──────────────────────────────────────────────
     const fetchProgress = async () => {
         try { const res = await axios.get('/api/user/progress'); setProgress(res.data.progress); } catch { }
     };
+
     const saveProgress = async (mudraName) => {
         setSaved(true);
         try {
             const res = await axios.post('/api/user/progress/update', { mudraName });
             setProgress(res.data);
-            if (voiceEnabled) speak(`${mudraName} mudra saved to your progress!`, { priority: true });
+            if (voiceEnabled) announce.saved(mudraName);
         } catch { }
         setTimeout(() => { setSaved(false); savedRef.current = false; }, 3000);
     };
 
-    // ── Derived display ──────────────────────────────────────
-    const displayData = (holdState === 'evaluating' && autoResult) ? autoResult : detected;
-    const mudraInfo   = MUDRAS.find(m => m.folder === displayData.name);
-    const confidence  = displayData.confidence || 0;
-    const accuracy    = displayData.accuracy   || 0;
-    const isDetected  = displayData.detected;
-    const corrections = displayData.corrections || [];
-    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith("Wrong mudra"));
+    // ── Derived display ───────────────────────────────────────
+    const displayData   = (holdState === 'evaluating' && autoResult) ? autoResult : detected;
+    const mudraInfo     = MUDRAS.find(m => m.folder === displayData.name);
+    const confidence    = displayData.confidence || 0;
+    const accuracy      = displayData.accuracy   || 0;
+    const isDetected    = displayData.detected;
+    const corrections   = displayData.corrections || [];
+    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith('Wrong mudra'));
 
     return (
         <div className={`max-w-6xl mx-auto px-6 py-10 transition-all duration-700 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
@@ -283,15 +291,17 @@ export default function Detect() {
                         {MUDRAS.map(m => <option key={m.folder} value={m.folder}>{m.name}</option>)}
                     </select>
                 </div>
+
                 <button onClick={() => setShow3D(v => !v)}
                     className="px-3 py-1.5 rounded border text-[9px] tracking-[3px] uppercase transition-all"
                     style={{
                         backgroundColor: show3D ? 'rgba(139,92,246,0.15)' : 'transparent',
-                        borderColor: show3D ? 'rgba(139,92,246,0.5)' : 'var(--border)',
-                        color: show3D ? '#a78bfa' : 'var(--text-muted)',
+                        borderColor:     show3D ? 'rgba(139,92,246,0.5)'  : 'var(--border)',
+                        color:           show3D ? '#a78bfa'               : 'var(--text-muted)',
                     }}>
                     {show3D ? '◈ 3D On' : '◈ 3D Off'}
                 </button>
+
                 {holdState !== 'idle' && (
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full border"
                         style={{
@@ -307,201 +317,255 @@ export default function Detect() {
                 )}
             </div>
 
-            <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
-                {/* Camera */}
-                {cameraOn ? (
-                    <div className="w-full rounded-lg overflow-hidden border relative"
-                        style={{ borderColor: 'var(--border)', height: '70vh', minHeight: '500px' }}>
-                        <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-2 px-4 py-2"
-                            style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                            <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-                            <span className="text-[9px] tracking-[4px] text-white/60 uppercase">Live Feed · MediaPipe Hands</span>
-                            {selectedMudra && (
-                                <span className="ml-auto text-[9px] tracking-[3px] uppercase text-yellow-400/80">
-                                    Target: {MUDRAS.find(m => m.folder === selectedMudra)?.name}
-                                </span>
-                            )}
-                        </div>
-                        {isDetected && (
-                            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 w-full max-w-[85%]">
-                                <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${corrections.length === 0 && accuracy > 75 ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
-                                    {corrections.length === 0 && accuracy > 75 ? '✓ Good Form' : '↻ Adjust Position'}
-                                </div>
-                                {wrongMudraMsg && (
-                                    <div className="px-4 py-2 mt-1 rounded-lg text-[10px] md:text-xs tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
-                                        ⚠️ {wrongMudraMsg}
-                                    </div>
+                {/* Left Column — Camera & 3D */}
+                <div className="lg:col-span-8 flex flex-col gap-8">
+                    {/* Camera */}
+                    {cameraOn ? (
+                        <div className="w-full rounded-lg overflow-hidden border relative"
+                            style={{ borderColor: 'var(--border)', height: '65vh', minHeight: '450px' }}>
+
+                            {/* Top bar */}
+                            <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-2 px-4 py-2"
+                                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                                <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+                                <span className="text-[9px] tracking-[4px] text-white/60 uppercase">Live Feed · MediaPipe Hands</span>
+                                {selectedMudra && (
+                                    <span className="ml-auto text-[9px] tracking-[3px] uppercase text-yellow-400/80">
+                                        Target: {MUDRAS.find(m => m.folder === selectedMudra)?.name}
+                                    </span>
                                 )}
                             </div>
-                        )}
-                        {holdState === 'idle' && holdProgress > 0 && (
-                            <div className="absolute top-12 left-4 z-10 bg-black/70 px-3 py-2 rounded-lg border border-green-500/30">
-                                <div className="text-[8px] tracking-[3px] uppercase text-green-400 mb-1">Saving…</div>
-                                <div className="w-24 h-1.5 bg-white/10 rounded-full">
-                                    <div className="h-full rounded-full bg-green-400 transition-all duration-200" style={{ width: `${holdProgress}%` }} />
+
+                            {/* Status + wrong mudra badge */}
+                            {isDetected && (
+                                <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 w-full max-w-[85%]">
+                                    <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${accuracy >= 70 && confidence >= 70 && corrections.length === 0 ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
+                                        {accuracy >= 70 && confidence >= 70 && corrections.length === 0 ? '✓ Good Form' : '↻ Adjust Position'}
+                                    </div>
+                                    {wrongMudraMsg && (
+                                        <div className="px-4 py-2 rounded-lg text-[10px] tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
+                                            ⚠️ {wrongMudraMsg}
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        )}
-                        <canvas ref={canvasRef} className="hidden" />
-                        <video ref={videoRef} autoPlay playsInline muted
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+                            )}
 
-                        {/* ── HOLD DETECTION RING ── */}
-                        <HoldDetectionRing
-                            holdProgress={holdProgress}
-                            holdState={holdState}
-                            mudraName={autoResult?.name || displayData.name || ''}
-                            accuracy={autoResult?.accuracy || accuracy}
-                        />
+                            {/* Manual hold bar */}
+                            {holdState === 'idle' && holdProgress > 0 && (
+                                <div className="absolute top-12 left-4 z-10 bg-black/70 px-3 py-2 rounded-lg border border-green-500/30">
+                                    <div className="text-[8px] tracking-[3px] uppercase text-green-400 mb-1">Saving…</div>
+                                    <div className="w-24 h-1.5 bg-white/10 rounded-full">
+                                        <div className="h-full rounded-full bg-green-400 transition-all duration-200" style={{ width: `${holdProgress}%` }} />
+                                    </div>
+                                </div>
+                            )}
 
-                        {saved && (
-                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 px-6 py-3 rounded-xl border bg-green-500/20 border-green-500/40 text-green-300 text-sm font-bold tracking-widest uppercase">
-                                ✓ Progress Saved!
-                            </div>
-                        )}
-                        <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <button onClick={test} className="px-3 py-1.5 rounded text-white text-[9px] tracking-widest uppercase border border-white/20 bg-white/5 hover:bg-white/10 transition-all">Test Voice</button>
-                                <button onClick={() => setVoiceEnabled(v => !v)}
-                                    className="px-4 py-2 rounded text-white text-[10px] tracking-widest uppercase flex items-center gap-2 border border-white/10 transition-all"
-                                    style={{ backgroundColor: voiceEnabled ? 'var(--copper)' : 'rgba(255,255,255,0.05)' }}>
-                                    {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
+                            <canvas ref={canvasRef} className="hidden" />
+                            <video ref={videoRef} autoPlay playsInline muted
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+
+                            {/* Hold Detection Ring */}
+                            <HoldDetectionRing
+                                holdProgress={holdProgress}
+                                holdState={holdState}
+                                mudraName={autoResult?.name || displayData.name || ''}
+                                accuracy={autoResult?.accuracy || accuracy}
+                            />
+
+                            {/* Saved overlay */}
+                            {saved && (
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 px-6 py-3 rounded-xl border bg-green-500/20 border-green-500/40 text-green-300 text-sm font-bold tracking-widest uppercase">
+                                    ✓ Progress Saved!
+                                </div>
+                            )}
+
+                            {/* Bottom controls */}
+                            <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <button onClick={test}
+                                        className="px-3 py-1.5 rounded text-white text-[9px] tracking-widest uppercase border border-white/20 bg-white/5 hover:bg-white/10 transition-all">
+                                        Test Voice
+                                    </button>
+                                    <LanguageSelector lang={lang} onChange={setLang} compact />
+                                    <button onClick={() => {
+                                            const next = !voiceEnabled;
+                                            setVoiceEnabled(next);
+                                            if (next) unlock();
+                                        }}
+                                        className="px-4 py-2 rounded text-white text-[10px] tracking-widest uppercase flex items-center gap-2 border border-white/10 transition-all"
+                                        style={{ backgroundColor: voiceEnabled ? 'var(--copper)' : 'rgba(255,255,255,0.05)' }}>
+                                        {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
+                                    </button>
+                                </div>
+                                <button onClick={stopWebcam}
+                                    className="px-6 py-2 rounded text-white text-xs tracking-widest uppercase border border-red-500/30 bg-red-500/20 hover:bg-red-500/30 transition-all">
+                                    ■ Stop Camera
                                 </button>
                             </div>
-                            <button onClick={stopWebcam} className="px-6 py-2 rounded text-white text-xs tracking-widest uppercase border border-red-500/30 bg-red-500/20 hover:bg-red-500/30 transition-all">
-                                ■ Stop Camera
+                        </div>
+                    ) : (
+                        <div className="w-full rounded-lg flex flex-col items-center justify-center gap-5 border"
+                            style={{ height: '65vh', minHeight: '450px', backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
+                            <div className="text-6xl" style={{ color: 'var(--text-muted)' }}>◎</div>
+                            <p className="text-xs tracking-[4px] uppercase" style={{ color: 'var(--text-muted)' }}>Camera ready to start</p>
+                            <button onClick={startWebcam}
+                                className="px-10 py-3 rounded text-white text-xs tracking-[4px] uppercase"
+                                style={{ backgroundColor: 'var(--accent)' }}>
+                                ▶ Start Camera
                             </button>
                         </div>
-                    </div>
-                ) : (
-                    <div className="w-full rounded-lg flex flex-col items-center justify-center gap-5 border"
-                        style={{ height: '70vh', minHeight: '500px', backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
-                        <div className="text-6xl" style={{ color: 'var(--text-muted)' }}>◎</div>
-                        <p className="text-xs tracking-[4px] uppercase" style={{ color: 'var(--text-muted)' }}>Camera ready to start</p>
-                        <button onClick={startWebcam} className="px-10 py-3 rounded text-white text-xs tracking-[4px] uppercase" style={{ backgroundColor: 'var(--accent)' }}>
-                            ▶ Start Camera
-                        </button>
-                    </div>
-                )}
+                    )}
 
-                {/* 3D Hand Visualiser */}
-                {show3D && (
-                    <div className="w-full rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="text-[9px] tracking-[5px] uppercase mb-4 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
-                            <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Angle Analysis
-                            {selectedMudra && (
-                                <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>
-                                    Gold = {MUDRAS.find(m => m.folder === selectedMudra)?.name} reference pose
-                                </span>
-                            )}
+                    {/* 3D Hand Visualiser */}
+                    {show3D && (
+                        <div className="w-full rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                            <div className="text-[9px] tracking-[5px] uppercase mb-4 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                                <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Angle Analysis
+                                {selectedMudra && (
+                                    <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>
+                                        Gold = {MUDRAS.find(m => m.folder === selectedMudra)?.name} reference pose
+                                    </span>
+                                )}
+                            </div>
+                            <HandVisualiser targetMudra={selectedMudra} apiBase={import.meta.env.VITE_FLASK_URL || ""} />
                         </div>
-                        <HandVisualiser targetMudra={selectedMudra} apiBase="http://localhost:5001" />
-                    </div>
-                )}
+                    )}
+                </div>
 
-                {/* Result Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Right Column — Information Panel */}
+                <div className="lg:col-span-4 flex flex-col gap-6">
+
                     {/* Card 1 — Name */}
-                    <div className="rounded-lg border p-6 transition-all duration-500"
+                    <div className="rounded-lg border p-6 transition-all duration-500 shadow-sm"
                         style={{ borderColor: isDetected ? 'var(--accent)' : 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="text-[9px] tracking-[5px] uppercase mb-3" style={{ color: 'var(--text-muted)' }}>✦ Detected Mudra</div>
-                        <div className="text-3xl font-bold mb-1" style={{ color: isDetected ? 'var(--accent)' : 'var(--border)' }}>
-                            {isDetected && mudraInfo ? mudraInfo.name : '—'}
+                        <div className="text-[9px] tracking-[5px] uppercase mb-4" style={{ color: 'var(--text-muted)' }}>✦ Detected Mudra</div>
+                        <div className="text-3xl font-bold mb-2 transition-colors duration-500" style={{ color: isDetected ? 'var(--accent)' : 'var(--border)' }}>
+                            {isDetected && mudraInfo ? mudraInfo.name : 'Waiting…'}
                         </div>
-                        {isDetected && mudraInfo && <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>{mudraInfo.meaning}</p>}
+                        {isDetected && mudraInfo && <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>{mudraInfo.meaning}</p>}
+                        
                         {holdState === 'evaluating' && autoResult && (
-                            <div className="mt-3 px-3 py-2 rounded border text-[9px] tracking-[3px] uppercase font-bold"
+                            <div className="mt-4 px-3 py-2 rounded border text-[9px] tracking-[3px] uppercase font-bold animate-pulse"
                                 style={{ backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)', color: '#10B981' }}>
                                 ⚡ Auto-detected on hold
                             </div>
                         )}
                         {saved && (
-                            <div className="mt-4 border rounded p-2 text-center"
-                                style={{ backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)', color: '#10B981' }}>
-                                <span className="text-[9px] tracking-[3px] uppercase">✓ Progress Saved</span>
+                            <div className="mt-4 border rounded p-3 text-center bg-green-500/10 border-green-500/20 text-green-400">
+                                <span className="text-[9px] tracking-[3px] uppercase font-bold">✓ Progress Saved</span>
                             </div>
                         )}
                     </div>
 
                     {/* Card 2 — Confidence + Accuracy */}
-                    <div className="rounded-lg border p-6" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="text-[9px] tracking-[5px] uppercase mb-3" style={{ color: 'var(--text-muted)' }}>Confidence</div>
-                        <div className="text-3xl font-bold mb-2" style={{ color: confidence >= 70 ? '#4ade80' : confidence >= 40 ? '#fbbf24' : 'var(--accent)' }}>
+                    <div className="rounded-lg border p-6 shadow-sm" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                        <div className="text-[9px] tracking-[5px] uppercase mb-4" style={{ color: 'var(--text-muted)' }}>Recognition Confidence</div>
+                        <div className="text-4xl font-bold mb-3" style={{ color: confidence >= 70 ? '#4ade80' : confidence >= 40 ? '#fbbf24' : 'var(--accent)' }}>
                             {confidence.toFixed(1)}%
                         </div>
-                        <div className="h-2 rounded overflow-hidden mb-4" style={{ backgroundColor: 'var(--bg-card2)' }}>
-                            <div className="h-full rounded transition-all duration-500"
+                        <div className="h-2.5 rounded-full overflow-hidden mb-6" style={{ backgroundColor: 'var(--bg-card2)' }}>
+                            <div className="h-full rounded-full transition-all duration-700 ease-out"
                                 style={{ width: `${confidence}%`, backgroundColor: confidence >= 70 ? '#4ade80' : confidence >= 40 ? '#fbbf24' : '#dc2626' }} />
                         </div>
+                        
                         {isDetected && (
-                            <>
-                                <div className="text-[9px] tracking-[3px] uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Accuracy</div>
-                                <div className="text-xl font-bold mb-1" style={{ color: accuracy > 75 ? '#4ade80' : '#fbbf24' }}>{accuracy.toFixed(0)}%</div>
-                                <div className="h-1.5 rounded overflow-hidden" style={{ backgroundColor: 'var(--bg-card2)' }}>
-                                    <div className="h-full rounded transition-all duration-500"
+                            <div className="pt-4 border-t border-white/5">
+                                <div className="flex justify-between items-end mb-2">
+                                    <div className="text-[9px] tracking-[3px] uppercase" style={{ color: 'var(--text-muted)' }}>Pose Accuracy</div>
+                                    <div className="text-lg font-bold" style={{ color: accuracy > 75 ? '#4ade80' : '#fbbf24' }}>{accuracy.toFixed(0)}%</div>
+                                </div>
+                                <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-card2)' }}>
+                                    <div className="h-full rounded-full transition-all duration-700 delay-100 ease-out"
                                         style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : '#fbbf24' }} />
                                 </div>
-                            </>
+                            </div>
                         )}
                     </div>
 
-                    {/* Card 3 — Corrections */}
-                    <div className="rounded-lg border p-6" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="flex justify-between items-center mb-3">
+                    {/* Card 3 — Corrections & Position */}
+                    <div className="rounded-lg border p-6 shadow-sm flex-grow" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                        <div className="flex justify-between items-center mb-5">
                             <div className="text-[9px] tracking-[5px] uppercase" style={{ color: 'var(--text-muted)' }}>Hand Position</div>
                             {isDetected && mudraInfo && (
-                                <span className="text-[9px] tracking-[3px] uppercase px-2 py-1 rounded border"
+                                <span className="text-[8px] tracking-[2px] uppercase px-2 py-1 rounded-sm border font-bold"
                                     style={{ backgroundColor: LEVEL_COLORS[mudraInfo.level].bg, borderColor: LEVEL_COLORS[mudraInfo.level].border, color: LEVEL_COLORS[mudraInfo.level].text }}>
                                     {mudraInfo.level}
                                 </span>
                             )}
                         </div>
+
                         {isDetected && mudraInfo ? (
-                            <div className="space-y-3">
-                                <p className="text-sm" style={{ color: 'var(--text)' }}>{mudraInfo.fingers}</p>
+                            <div className="space-y-5">
+                                <div className="p-3 rounded bg-white/5 border border-white/5">
+                                    <p className="text-xs leading-relaxed" style={{ color: 'var(--text)' }}>{mudraInfo.fingers}</p>
+                                </div>
+
                                 {corrections.length > 0 && (
-                                    <div className="p-3 rounded border bg-red-500/10 border-red-500/30">
-                                        <div className="text-[9px] tracking-[4px] uppercase text-red-500 mb-2 font-bold">Correction Needed</div>
-                                        <ul className="text-xs space-y-1 text-red-400">
-                                            {corrections.map((c, i) => <li key={i} className="flex items-center gap-2"><span className="w-1 h-1 rounded-full bg-red-500" />{c}</li>)}
+                                    <div className="p-4 rounded border bg-red-500/10 border-red-500/20">
+                                        <div className="text-[9px] tracking-[4px] uppercase text-red-500 mb-3 font-black">Correction Needed</div>
+                                        <ul className="text-xs space-y-2 text-red-400/90 font-medium">
+                                            {corrections.map((c, i) => (
+                                                <li key={i} className="flex items-start gap-2">
+                                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                                                    <span>{c}</span>
+                                                </li>
+                                            ))}
                                         </ul>
                                     </div>
                                 )}
-                                {accuracy >= 75 && corrections.length === 0 && (
-                                    <div className="p-3 rounded border bg-green-500/10 border-green-500/30">
-                                        <div className="text-[9px] tracking-[4px] uppercase text-green-500 font-bold">✓ Correct Pose</div>
+
+                                {accuracy >= 70 && confidence >= 70 && corrections.length === 0 && (
+                                    <div className="p-4 rounded border bg-green-500/10 border-green-500/20">
+                                        <div className="text-[9px] tracking-[4px] uppercase text-green-500 font-black flex items-center gap-2">
+                                            <span className="text-lg">✓</span> Correct Pose
+                                        </div>
                                     </div>
                                 )}
+
                                 <div>
-                                    <div className="text-[9px] tracking-[5px] uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Usage</div>
-                                    <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>{mudraInfo.usage}</p>
+                                    <div className="text-[9px] tracking-[5px] uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Common Usage</div>
+                                    <p className="text-xs italic leading-relaxed" style={{ color: 'var(--text-muted)' }}>{mudraInfo.usage}</p>
                                 </div>
                             </div>
                         ) : (
-                            <p className="text-xs" style={{ color: 'var(--border)' }}>Show a mudra to see details</p>
+                            <div className="h-full flex flex-col items-center justify-center py-10 opacity-40">
+                                <div className="text-4xl mb-4">✋</div>
+                                <p className="text-[10px] tracking-[3px] uppercase text-center">Position hand in camera to see details</p>
+                            </div>
                         )}
                     </div>
                 </div>
+            </div>
 
-                {/* Progress */}
-                {progress && (
-                    <div className="border rounded-lg p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
-                        <div className="flex justify-between items-center mb-3">
-                            <div className="text-[9px] tracking-[4px] uppercase" style={{ color: 'var(--text-muted)' }}>Your Progress</div>
-                            <span className="text-xs font-bold" style={{ color: 'var(--copper)' }}>{progress.detectedMudras?.length || 0} / 28 Mudras</span>
+            {/* Progress Bar (Full Width Below) */}
+            {progress && (
+                <div className="mt-8 border rounded-lg p-6 shadow-sm" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
+                    <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="text-[9px] tracking-[4px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Learning Journey</div>
+                            <div className="h-px w-12 bg-white/10"></div>
+                            <span className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--copper)' }}>
+                                {progress.detectedMudras?.length || 0} of 28 Mastered
+                            </span>
                         </div>
-                        <div className="h-1.5 rounded overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
-                            <div className="h-full rounded transition-all duration-700"
-                                style={{ width: `${((progress.detectedMudras?.length || 0) / 28) * 100}%`, backgroundColor: 'var(--copper)' }} />
-                        </div>
-                        <div className="flex justify-between mt-2">
-                            <span className="text-[9px] tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Sessions: {progress.practiceCount || 0}</span>
-                            <span className="text-[9px] tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>{Math.round(((progress.detectedMudras?.length || 0) / 28) * 100)}% Complete</span>
+                        <span className="text-[10px] tracking-widest uppercase font-bold text-white/40">
+                            {Math.round(((progress.detectedMudras?.length || 0) / 28) * 100)}% Complete
+                        </span>
+                    </div>
+                    <div className="h-2 rounded-full overflow-hidden bg-black/20" style={{ border: '1px solid var(--border)' }}>
+                        <div className="h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(184,115,51,0.3)]"
+                            style={{ width: `${((progress.detectedMudras?.length || 0) / 28) * 100}%`, backgroundColor: 'var(--copper)' }} />
+                    </div>
+                    <div className="flex justify-between mt-3">
+                        <span className="text-[9px] tracking-[3px] uppercase text-white/30 font-medium">Session Count: {progress.practiceCount || 0}</span>
+                        <div className="flex gap-4">
+                            <span className="text-[9px] tracking-[3px] uppercase text-white/30 font-medium italic">GestureIQ Bharatnatyam Guide</span>
                         </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
         </div>
     );
 }

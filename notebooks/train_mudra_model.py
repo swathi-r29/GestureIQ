@@ -4,68 +4,57 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 import pickle
+import sys
 import os
 
-df = pd.read_csv("D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv")
+# Add root directory to path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.feature_engineering import extract_features
 
-# Normalize landmarks relative to wrist
-def normalize(row):
+# Paths
+csv_path = "e:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+model_path = "e:/GestureIQ/models/mudra_model.pkl"
+
+if not os.path.exists(csv_path):
+    print(f"ERROR: Dataset not found at {csv_path}")
+    sys.exit(1)
+
+print(f"Loading dataset from {csv_path}...")
+df = pd.read_csv(csv_path)
+
+def process_row(row):
+    # Extract x, y, z triplets
     vals = row.values
-    wrist_x, wrist_y, wrist_z = vals[0], vals[1], vals[2]
-    normalized = []
+    pts = []
     for i in range(0, len(vals), 3):
-        normalized += [vals[i]-wrist_x, vals[i+1]-wrist_y, vals[i+2]-wrist_z]
-    
-    # Scale normalization
-    max_val = max(abs(v) for v in normalized)
-    if max_val > 0:
-        normalized = [v / max_val for v in normalized]
-        
-    # Feature Engineering: Distance from Thumb tip (point 4) to other tips (8, 12, 16, 20)
-    # Point N starts at index N*3: 4->12, 8->24, 12->36, 16->48, 20->60
-    import math
-    def get_dist(p1_idx, p2_idx):
-        return math.sqrt(
-            (normalized[p1_idx] - normalized[p2_idx])**2 +
-            (normalized[p1_idx+1] - normalized[p2_idx+1])**2 +
-            (normalized[p1_idx+2] - normalized[p2_idx+2])**2
-        )
-    
-    distances = [
-        get_dist(12, 24), # Thumb to Index
-        get_dist(12, 36), # Thumb to Middle
-        get_dist(12, 48), # Thumb to Ring
-        get_dist(12, 60)  # Thumb to Pinky
-    ]
-    
-    # Feature 2: Finger Straightness (Distance from Tip to PIP Joint)
-    # Index: Tip (8)->24, PIP (6)->18
-    # Middle: Tip (12)->36, PIP (10)->30
-    # Ring: Tip (16)->48, PIP (14)->42
-    # Pinky: Tip (20)->60, PIP (18)->54
-    straightness = [
-        get_dist(24, 15), # Index curl (using MCP joint 5->15 for better arc measurement)
-        get_dist(36, 27), # Middle curl
-        get_dist(48, 39), # Ring curl
-        get_dist(60, 51)  # Pinky curl
-    ]
-    
-    return normalized + distances + straightness
+        pts.append([vals[i], vals[i+1], vals[i+2]])
+    return extract_features(pts)
 
 X_raw = df.drop('mudra_name', axis=1)
-X = np.array([normalize(row) for _, row in X_raw.iterrows()])
 y = df['mudra_name'].values
+
+print("Extracting features (Normalization, Angles, Distances)...")
+X = np.array([process_row(row) for _, row in X_raw.iterrows()])
+
+print(f"Feature vector size: {X.shape[1]}")
+if X.shape[1] != 72:
+    print(f"WARNING: Expected 72 features, got {X.shape[1]}")
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-print("Training...")
-model = RandomForestClassifier(n_estimators=200, random_state=42)
+print(f"Training RandomForestClassifier on {len(X_train)} samples...")
+model = RandomForestClassifier(n_estimators=200, max_depth=20, random_state=42)
 model.fit(X_train, y_train)
 
-accuracy = accuracy_score(y_test, model.predict(X_test))
-print(f"Accuracy: {accuracy * 100:.2f}%")
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"\nAccuracy: {accuracy * 100:.2f}%")
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
 
-with open("D:/GestureIQ/models/mudra_model.pkl", "wb") as f:
+# Save model
+os.makedirs(os.path.dirname(model_path), exist_ok=True)
+with open(model_path, "wb") as f:
     pickle.dump(model, f)
 
-print("✅ Model saved!")
+print(f"\n✅ Model saved to {model_path}!")
