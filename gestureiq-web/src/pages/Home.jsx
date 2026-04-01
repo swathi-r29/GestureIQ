@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useEffect, useState } from 'react';
 
-const Mudra = ["patak"]
+
 const MUDRA_NAMES = [
     "Pataka", "Tripataka", "Ardhapataka", "Kartarimukha", "Mayura",
     "Ardhachandra", "Arala", "Shukatunda", "Mushti", "Shikhara",
