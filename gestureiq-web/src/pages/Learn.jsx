@@ -14,6 +14,9 @@ import HandVisualiser from '../components/HandVisualiser';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
+const { Hands, HAND_CONNECTIONS } = window;
+const { drawConnectors, drawLandmarks } = window;
+
 const MUDRAS = [
     { name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic",        folder: "pataka"       },
     { name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                        level: "Basic",        folder: "tripataka"    },
@@ -172,6 +175,7 @@ export default function Learn() {
     const [progress,        setProgress]        = useState([]);
     const [bestScores,      setBestScores]      = useState({});
     const [cameraOn,        setCameraOn]        = useState(false);
+    const [landmarks,       setLandmarks]       = useState(null);
     const [detected,        setDetected]        = useState({ name: '', confidence: 0, detected: false });
     const [loading,         setLoading]         = useState(true);
     const [mudraContent,    setMudraContent]    = useState(null);
@@ -188,7 +192,12 @@ export default function Learn() {
     const videoRef            = useRef(null);
     const canvasRef           = useRef(null);
     const streamRef           = useRef(null);
+    const handsRef            = useRef(null);
+    const landmarksRef        = useRef(null);
+    const lastResultTimeRef   = useRef(Date.now());
     const isDetectingRef      = useRef(false);
+    const recoveryIntervalRef = useRef(null);
+    const requestRef          = useRef(null);
 
     const PRACTICE_STEPS = [
         { title: 'Study the Position',  desc: 'Look at the reference image carefully. Read the finger instructions below.' },
@@ -212,13 +221,121 @@ export default function Learn() {
     useEffect(() => {
         if (stage === STAGES.PRACTICE && selectedMudra && voiceEnabled) {
             setTimeout(() => {
-                // announce.start() uses getInstruction() internally — handles
-                // all 6 languages with native-script mudra names automatically.
-                // No direct window.speechSynthesis needed.
                 announce.start(selectedMudra.folder);
             }, 500);
         }
     }, [stage, selectedMudra]);
+
+    // ── MediaPipe: Hands Setup ──────────────────────────────
+    useEffect(() => {
+        if (cameraOn && !handsRef.current) {
+            handsRef.current = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+            handsRef.current.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+                handsRef.current.onResults((results) => {
+                    lastResultTimeRef.current = Date.now();
+                    const canvas = canvasRef.current;
+                    const video  = videoRef.current;
+                    if (!canvas || !video) return;
+                    
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Sync canvas size to visible video size for perfect alignment
+                    canvas.width  = video.clientWidth;
+                    canvas.height = video.clientHeight;
+                    
+                    ctx.save();
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Handle Mirroring for 2D UI matching (CSS scaleX(-1))
+                    // Since the video is mirrored via CSS, we mirror the drawing context
+                    ctx.scale(-1, 1);
+                    ctx.translate(-canvas.width, 0);
+                    
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        let landmarks = results.multiHandLandmarks[0];
+                        let handedness = results.multiHandedness[0]?.label || 'Right';
+                        const score = results.multiHandedness[0]?.score || 0;
+                        
+                        // ── Frontend Mirroring (Trick Backend) ──
+                        // If it's a left hand, we mirror it horizontally to treat it as a right hand.
+                        if (handedness === 'Left') {
+                            landmarks = landmarks.map(lm => ({
+                                ...lm,
+                                x: 1 - lm.x
+                            }));
+                            handedness = 'Right'; // Now seen as Right by everything downstream
+                        }
+                        
+                        landmarksRef.current = { landmarks, handedness, score };
+                        
+                        // SYNC: Update the landmarks state for the 3D visualizer 
+                        // We do this every frame for smoothness in the 3D view
+                        setLandmarks(landmarks);
+                        
+                        // Draw skeleton (Now perfectly aligned with mirrored video)
+                        // drawConnectors/drawLandmarks uses normalized [0,1] coordinates
+                        const drawOpts = {
+                            width:  canvas.width,
+                            height: canvas.height
+                        };
+                        
+                        // Scale landmarks to pixel space for drawConnectors
+                        const pixelLm = landmarks.map(lm => ({
+                            x: lm.x * canvas.width,
+                            y: lm.y * canvas.height
+                        }));
+
+                        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
+                        drawLandmarks(ctx, landmarks, { color: '#ffffff', lineWidth: 1, radius: 2 });
+                    } else {
+                        landmarksRef.current = null;
+                    }
+                    ctx.restore();
+                });
+
+            // ── Auto-Recovery Monitor ──
+            recoveryIntervalRef.current = setInterval(() => {
+                if (cameraOn && (Date.now() - lastResultTimeRef.current > 3000)) {
+                    console.warn("[MediaPipe] Stale results in Learn.jsx. Re-initializing...");
+                    lastResultTimeRef.current = Date.now();
+                    if (handsRef.current) handsRef.current.dispatchEvent({type: 'error', message: 'recovery'});
+                }
+            }, 1000);
+        }
+
+        return () => {
+            if (recoveryIntervalRef.current) clearInterval(recoveryIntervalRef.current);
+            if (handsRef.current) {
+                handsRef.current.close();
+                handsRef.current = null;
+            }
+        };
+    }, [cameraOn]);
+
+    // ── MediaPipe: Frame Loop ────────────────────────────────
+    useEffect(() => {
+        let active = true;
+        const processFrame = async () => {
+            if (cameraOn && videoRef.current && handsRef.current && active) {
+                if (videoRef.current.readyState >= 2) {
+                    await handsRef.current.send({ image: videoRef.current });
+                }
+                requestRef.current = requestAnimationFrame(processFrame);
+            }
+        };
+        if (cameraOn) requestRef.current = requestAnimationFrame(processFrame);
+        return () => {
+            active = false;
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
+    }, [cameraOn]);
 
     // ── Webcam ────────────────────────────────────────────────
     const startWebcam = useCallback(async () => {
@@ -248,11 +365,12 @@ export default function Learn() {
         // The video displays with scaleX(-1) so the student sees a mirrored view.
         // We must send a mirrored frame to Flask so MediaPipe sees the same
         // hand orientation as the training data (front-camera = mirrored).
+        // MIRROR FIX: Ensure the frame is mirrored for consistent coordinate extraction on the backend
         ctx.save();
         ctx.scale(-1, 1);
         ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
         ctx.restore();
-        return canvas.toDataURL('image/jpeg', 0.6);
+        return canvas.toDataURL('image/jpeg', 0.8);
     }, []);
 
     useEffect(() => {
@@ -274,11 +392,24 @@ export default function Learn() {
             if (isDetectingRef.current) return;
             isDetectingRef.current = true;
             try {
-                const frame = captureFrame();
-                if (!frame) return;
-                const res  = await fetch('/api/detect_frame', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ frame, targetMudra: selectedMudra.folder })
+                const dataObj = landmarksRef.current;
+                if (!dataObj) {
+                    setDetected({ name: 'No Hand', confidence: 0, detected: false });
+                    setHoldProgress(0);
+                    holdStartRef.current = null;
+                    isDetectingRef.current = false;
+                    return;
+                }
+
+                const res  = await fetch(`${import.meta.env.VITE_FLASK_URL || ''}/api/detect_landmarks`, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        landmarks: dataObj.landmarks,
+                        handedness: dataObj.handedness,
+                        presenceScore: dataObj.score,
+                        targetMudra: selectedMudra.folder 
+                    })
                 });
                 const data = await res.json();
                 setDetected(data);
@@ -331,6 +462,10 @@ export default function Learn() {
     };
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
+        if (!folder || folder === 'undefined') {
+            console.error('Mudra folder is undefined. Cannot save progress.');
+            return;
+        }
         try {
             const token = localStorage.getItem('token');
             const score = Math.round(currentAccuracy);
@@ -567,7 +702,13 @@ export default function Learn() {
                                         <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Angle Analysis
                                         <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>Gold = {selectedMudra.name} reference</span>
                                     </div>
-                                    <HandVisualiser targetMudra={selectedMudra.folder} apiBase={import.meta.env.VITE_FLASK_URL || ""} />
+                                    <HandVisualiser 
+                                        targetMudra={selectedMudra.folder} 
+                                        landmarks={landmarksRef.current?.landmarks || []}
+                                        deviations={detected?.deviations || {}}
+                                        infoOverride={detected}
+                                        apiBase={import.meta.env.VITE_FLASK_URL || ""} 
+                                    />
                                 </div>
                             )}
 

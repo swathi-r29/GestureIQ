@@ -121,16 +121,39 @@ function updateBone(bone, posA, posB) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────
-export default function HandVisualiser({ targetMudra = "", apiBase = import.meta.env.VITE_FLASK_URL || "" }) {
+export default function HandVisualiser({ 
+  landmarks = [], 
+  deviations = {}, 
+  targetMudra = "",
+  infoOverride = null,
+  loading = false,
+}) {
   const canvasRef   = useRef(null);
   const sceneRef    = useRef(null);
   const objectsRef  = useRef(null);
   const animRef     = useRef(null);
   const dataRef     = useRef({ landmarks: [], refLandmarks: [], deviations: {} });
 
-  const [info, setInfo]       = useState({ mudra: "", accuracy: 0, detected: false, angles: {}, refAngles: {} });
   const [showRef, setShowRef] = useState(true);
-  const [loading, setLoading] = useState(true);
+
+  // Sync props to dataRef for the animation loop
+  useEffect(() => {
+    dataRef.current = {
+      landmarks: landmarks || [],
+      refLandmarks: [], 
+      deviations: deviations || {}
+    };
+  }, [landmarks, deviations]);
+
+  // Use override info or fallback, ensuring nested structures exist
+  const info = {
+    mudra:     infoOverride?.name || targetMudra,
+    detected:  infoOverride?.detected || (deviations && Object.keys(deviations).length > 0),
+    landmarks: infoOverride?.landmarks || landmarks,
+    angles:    infoOverride?.angles || {},
+    refAngles: infoOverride?.refAngles || {},
+    ...infoOverride
+  };
 
   // ── Build Three.js scene once ──────────────────────────────
   useEffect(() => {
@@ -149,13 +172,19 @@ export default function HandVisualiser({ targetMudra = "", apiBase = import.meta
       frameId = requestAnimationFrame(animate);
       angle  += 0.004;
 
-      const { landmarks, refLandmarks, deviations } = dataRef.current;
+      if (!dataRef.current || !objectsRef.current || !sceneRef.current) return;
+
+      const { landmarks, deviations } = dataRef.current;
       const { spheres, bones, refSpheres, refBones } = objectsRef.current;
+      const { camera, renderer, scene } = sceneRef.current;
 
       // Auto-rotate when no hand detected
       if (landmarks.length === 0) {
         camera.position.x = Math.sin(angle) * 1.8;
         camera.position.z = Math.cos(angle) * 1.8;
+        camera.lookAt(0, 0, 0);
+      } else {
+        camera.position.set(0, 0, 1.8);
         camera.lookAt(0, 0, 0);
       }
 
@@ -177,22 +206,6 @@ export default function HandVisualiser({ targetMudra = "", apiBase = import.meta
         bones.forEach(b => b.mesh.visible = false);
       }
 
-      // Update reference ghost hand
-      if (showRef && refLandmarks.length === 21) {
-        const vecs = refLandmarks.map(landmarksToVec3);
-        vecs.forEach((v, i) => {
-          refSpheres[i].position.copy(v);
-          refSpheres[i].visible = true;
-        });
-        refBones.forEach(b => {
-          updateBone(b, vecs[b.a], vecs[b.b]);
-          b.mesh.visible = true;
-        });
-      } else {
-        refSpheres.forEach(s => s.visible = false);
-        refBones.forEach(b => b.mesh.visible = false);
-      }
-
       renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
       camera.aspect = canvas.clientWidth / canvas.clientHeight;
       camera.updateProjectionMatrix();
@@ -208,53 +221,7 @@ export default function HandVisualiser({ targetMudra = "", apiBase = import.meta
     };
   }, [showRef]);
 
-  // ── Poll /api/landmarks at 10fps ───────────────────────────
-  useEffect(() => {
-    let running = true;
-
-    const poll = async () => {
-      while (running) {
-        try {
-          const res  = await fetch(`${apiBase}/api/landmarks?target=${targetMudra}`);
-          const data = await res.json();
-
-          // Compute per-finger deviation
-          const deviations = {};
-          if (data.current_angles && data.ref_angles) {
-            for (const finger of ["thumb","index","middle","ring","pinky"]) {
-              const cur = data.current_angles[finger];
-              const ref = data.ref_angles[finger];
-              if (cur !== undefined && ref !== undefined) {
-                deviations[finger] = Math.abs(cur - ref);
-              }
-            }
-          }
-
-          dataRef.current = {
-            landmarks:    data.landmarks || [],
-            refLandmarks: [],           // populated below if available
-            deviations,
-          };
-
-          setInfo({
-            mudra:     data.mudra_name || "",
-            detected:  data.detected   || false,
-            angles:    data.current_angles || {},
-            refAngles: data.ref_angles     || {},
-          });
-          setLoading(false);
-        } catch (e) {
-          setLoading(false);
-        }
-        await new Promise(r => setTimeout(r, 100)); // 10fps
-      }
-    };
-
-    poll();
-    return () => { running = false; };
-  }, [targetMudra, apiBase]);
-
-  const fingerEntries = ["thumb","index","middle","ring","pinky"];
+  const fingerEntries = ["thumb", "index", "middle", "ring", "pinky"];
 
   return (
     <div style={{
@@ -332,8 +299,8 @@ export default function HandVisualiser({ targetMudra = "", apiBase = import.meta
         </div>
 
         {fingerEntries.map(finger => {
-          const cur = info.angles[finger];
-          const ref = info.refAngles[finger];
+          const cur = info.angles?.[finger];
+          const ref = info.refAngles?.[finger];
           const dev = (cur !== undefined && ref !== undefined) ? Math.abs(cur - ref) : null;
           const pct = dev !== null ? Math.min(dev / 90, 1) : 0;
           const color = dev === null ? "#475569"

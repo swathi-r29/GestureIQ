@@ -66,7 +66,9 @@ const StudentLiveClass = () => {
     // MediaPipe Refs
     const handsRef = useRef(null);
     const landmarksRef = useRef(null);
+    const lastResultTimeRef = useRef(Date.now());
     const requestRef = useRef(null);
+    const recoveryIntervalRef = useRef(null);
 
     // Keep classDataRef in sync
     useEffect(() => {
@@ -146,6 +148,7 @@ const StudentLiveClass = () => {
         });
 
         handsRef.current.onResults((results) => {
+            lastResultTimeRef.current = Date.now();
             const canvas = canvasRef.current;
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
@@ -156,7 +159,10 @@ const StudentLiveClass = () => {
             
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const landmarks = results.multiHandLandmarks[0];
-                landmarksRef.current = landmarks;
+                const handedness = results.multiHandedness[0]?.label || 'Right';
+                const score = results.multiHandedness[0]?.score || 0;
+                
+                landmarksRef.current = { landmarks, handedness, score };
                 
                 // Draw skeleton
                 drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
@@ -167,7 +173,18 @@ const StudentLiveClass = () => {
             ctx.restore();
         });
 
+        // ── Auto-Recovery Monitor ──
+        recoveryIntervalRef.current = setInterval(() => {
+            if (webcamActive && (Date.now() - lastResultTimeRef.current > 3000)) {
+                console.warn("[MediaPipe] Stale results detected. Re-initializing...");
+                lastResultTimeRef.current = Date.now();
+                // Attempt soft reset
+                if (handsRef.current) handsRef.current.dispatchEvent({type: 'error', message: 'recovery'});
+            }
+        }, 1000);
+
         return () => {
+            if (recoveryIntervalRef.current) clearInterval(recoveryIntervalRef.current);
             if (handsRef.current) handsRef.current.close();
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
@@ -247,7 +264,9 @@ const StudentLiveClass = () => {
                 body:    JSON.stringify({
                     classId,
                     studentId:   user?.id || user?._id || 'unknown',
-                    landmarks:   landmarks,
+                    landmarks:   dataObj.landmarks,
+                    handedness:  dataObj.handedness,
+                    presenceScore: dataObj.score,
                     targetMudra: currentClassData?.targetMudra || ''
                 })
             });
@@ -268,13 +287,24 @@ const StudentLiveClass = () => {
                 });
             }
 
-            if ((data.accuracy || 0) > bestScoreRef.current) {
-                bestScoreRef.current = data.accuracy;
-                bestMudraRef.current = data.name;
-                setBestScore(data.accuracy);
-            }
-
+        // ── 5b. Throttled Socket Update ──
+        if (socketRef.current && dataObj.landmarks) {
             const now = Date.now();
+            const lastEmit = socketRef.current._lastLiveEmit || 0;
+            if (now - lastEmit > 100) {
+                socketRef.current._lastLiveEmit = now;
+                socketRef.current.emit('student_score_update', {
+                    classId,
+                    studentId:   user?.id || user?._id || 'unknown',
+                    studentName: user?.name || 'Student',
+                    mudra:       data.name || 'None',
+                    score:       data.accuracy || 0,
+                    landmarks:   dataObj.landmarks // Throttled real-time skeleton
+                });
+            }
+        }
+
+        const now = Date.now();
             if (now - lastVoiceRef.current > 5000) {
                 lastVoiceRef.current = now;
                 announce.fromResult(data);

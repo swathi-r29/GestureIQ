@@ -12,9 +12,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
 # Paths
-csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
-#model_path = "e:/GestureIQ/models/mudra_model.pkl"
-model_path = "D:/GestureIQ/models/mudra_model.pkl"
+#csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+#model_path = "D:/GestureIQ/models/mudra_model.pkl"
+
+csv_path = "E:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+model_path = "E:/GestureIQ/models/mudra_model.pkl"
 
 if not os.path.exists(csv_path):
     print(f"ERROR: Dataset not found at {csv_path}")
@@ -38,8 +40,8 @@ print("Extracting features (Normalization, Angles, Distances)...")
 X = np.array([process_row(row) for _, row in X_raw.iterrows()])
 
 print(f"Feature vector size: {X.shape[1]}")
-if X.shape[1] != 72:
-    print(f"WARNING: Expected 72 features, got {X.shape[1]}")
+if X.shape[1] != 82:
+    print(f"WARNING: Expected 82 features, got {X.shape[1]}")
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 

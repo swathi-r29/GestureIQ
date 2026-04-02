@@ -74,7 +74,7 @@ cap = cv2.VideoCapture(0)
 # =============================================================================
 EMA_ALPHA          = 0.55
 LANDMARK_EMA_ALPHA = 0.60
-MIN_STABLE_FRAMES  = 5
+MIN_STABLE_FRAMES  = 4
 STABLE_THRESHOLD   = 0.52
 FAST_BREAK_FRAMES  = 4
 
@@ -291,11 +291,11 @@ MUDRA_REFERENCE_ANGLES = {
 # CORRECTION THRESHOLDS
 # =============================================================================
 CORRECTION_THRESHOLDS = {
-    "thumb": 40,
-    "index": 35,
-    "middle": 35,
-    "ring": 35,
-    "pinky": 35,
+    "thumb": 45,
+    "index": 42,
+    "middle": 42,
+    "ring": 42,
+    "pinky": 42,
 }
 
 # Mudras where non-thumb fingers must be fully straight
@@ -333,11 +333,11 @@ SKIP_CORRECTION_FINGERS = {
 }
 
 # Shared geometry helpers are imported from utils.feature_engineering
-def dist_lm(lm, i, j):
-    """Proxy for shared get_distance using MediaPipe landmark objects."""
+def dist_lm(lm, i, j, palm_size=1.0):
+    """Proxy for shared get_distance using MediaPipe landmark objects, normalized by palm size."""
     p1 = [lm[i].x, lm[i].y, lm[i].z]
     p2 = [lm[j].x, lm[j].y, lm[j].z]
-    return get_distance(p1, p2)
+    return get_distance(p1, p2) / palm_size
 
 def get_finger_angles_dict(landmarks):
     """
@@ -508,13 +508,19 @@ def update_stability(current_name, ema_prob_vector):
 def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
     mudra_key = str(detected_mudra).lower().strip()
     reference = MUDRA_REFERENCE_ANGLES.get(mudra_key)
-    if not reference:
-        return [], 100
-
     lm           = landmarks_ref
     skip_fingers = SKIP_CORRECTION_FINGERS.get(mudra_key, set())
     deviations   = []
     total_error  = 0
+
+    # 0. Scale Invariance Check (Palm Normalization)
+    # Palm size: distance from wrist(0) to middle MCP(9)
+    palm_size = 1.0
+    if lm is not None:
+        p_w = [lm[0].x, lm[0].y, lm[0].z]
+        p_m = [lm[9].x, lm[9].y, lm[9].z]
+        palm_size = get_distance(p_w, p_m)
+        if palm_size < 1e-6: palm_size = 1.0
 
     # ── Base angle deviation loop ─────────────────────────────────────────────
     for finger, ref_angle in reference.items():
@@ -578,7 +584,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             if current_angles.get("thumb", 70) > 120:
                 total_error += 60
                 deviations.append((60, "Bend your thumb inward toward your palm"))
-            if dist_lm(lm, 4, 5) > 0.16:
+            if dist_lm(lm, 4, 5, palm_size) > 0.45:
                 total_error += 40
                 deviations.append((40, "Tuck your thumb closer to your index finger base"))
 
@@ -595,7 +601,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             elif ring_a > 60:
                 total_error += 35
                 deviations.append((35, "Curl your ring finger down a little more"))
-            if dist_lm(lm, 16, 0) > 0.22:
+            if dist_lm(lm, 16, 0, palm_size) > 0.55:
                 total_error += 55
                 deviations.append((55, "Bend your ring finger all the way to your palm"))
             for f in ["index", "middle", "pinky"]:
@@ -605,7 +611,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             if current_angles.get("thumb", 70) > 120:
                 total_error += 55
                 deviations.append((55, "Bend your thumb inward toward your palm"))
-            if dist_lm(lm, 4, 5) > 0.15:
+            if dist_lm(lm, 4, 5, palm_size) > 0.42:
                 total_error += 35
                 deviations.append((35, "Keep your thumb tucked inward"))
 
@@ -629,15 +635,11 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                 deviations.append((50, "Bend your thumb inward toward your palm"))
 
         # ── KANGULA ───────────────────────────────────────────────────────────
-        # Ring FULLY bent (~45°). Index+middle+pinky extended (~165°).
+        # Thumb tip to Ring tip contact. Other fingers extended.
         elif mudra_key == "kangula":
-            ring_a = current_angles.get("ring", 45)
-            if ring_a > 85:
+            if dist_lm(lm, 4, 16, palm_size) > 0.05:
                 total_error += 85
-                deviations.append((85, "Bend your ring finger fully inward toward your palm"))
-            if dist_lm(lm, 16, 0) > 0.22:
-                total_error += 45
-                deviations.append((45, "Curl your ring finger all the way to your palm for Kangula"))
+                deviations.append((85, "Touch your thumb to your ring fingertip for Kangula"))
             for f in ["index", "middle", "pinky"]:
                 a = current_angles.get(f, 165)
                 if a < 110:
@@ -664,7 +666,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                 total_error += 50
                 deviations.append((50, "Keep all fingers evenly curved — no one finger out of line"))
 
-            if dist_lm(lm, 8, 12) > 0.035 or dist_lm(lm, 12, 16) > 0.035:
+            if dist_lm(lm, 8, 12, palm_size) > 0.12 or dist_lm(lm, 12, 16, palm_size) > 0.12:
                 total_error += 60
                 deviations.append((60, "Press all fingers tightly together — no gaps for Sarpashira"))
 
@@ -686,7 +688,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             if current_angles.get("thumb", 160) < 120:
                 total_error += 55
                 deviations.append((55, "Extend your thumb outward for Chandrakala"))
-            if dist_lm(lm, 4, 8) < 0.14:
+            if dist_lm(lm, 4, 8, palm_size) < 0.35:
                 total_error += 45
                 deviations.append((45, "Spread thumb and index apart — make a C / crescent shape"))
 
@@ -704,11 +706,11 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             elif avg_f < 75:
                 total_error += 60
                 deviations.append((60, "Open your fingers more — not a fist, a gentle cup"))
-            ip_d = dist_lm(lm, 8, 20)
-            if ip_d > 0.22:
+            ip_d = dist_lm(lm, 8, 20, palm_size)
+            if ip_d > 0.65:
                 total_error += 35
                 deviations.append((35, "Bring your fingertips slightly closer together"))
-            elif ip_d < 0.05:
+            elif ip_d < 0.22:
                 total_error += 30
                 deviations.append((30, "Spread your fingers slightly apart — not too tight"))
 
@@ -720,7 +722,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
             if avg_sp < 0.08:
                 total_error += 50
                 deviations.append((50, "Spread all five fingers wide apart"))
-            if dist_lm(lm, 8, 20) < 0.18:
+            if dist_lm(lm, 8, 20, palm_size) < 0.55:
                 total_error += 55
                 deviations.append((55, "Spread all five fingers wide apart like a blooming lotus"))
             avg_f = sum(current_angles.get(f, 120) for f in
@@ -737,8 +739,8 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         elif mudra_key == "mushti":
             fist_count = 0
             for t in [8, 12, 16, 20]:
-                d = dist_lm(lm, t, 0)
-                if d > 0.24:
+                d = dist_lm(lm, t, 0, palm_size)
+                if d > 0.65:
                     total_error += 50
                     deviations.append((50, f"Curl your {['index','middle','ring','little'][[8,12,16,20].index(t)]} finger tightly into the fist"))
                 else:
@@ -747,7 +749,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                 total_error = total_error * 0.15  # strong reward for full fist
             elif fist_count <= 2:
                 total_error += 200
-            if dist_lm(lm, 4, 11) > 0.18:
+            if dist_lm(lm, 4, 11, palm_size) > 0.52:
                 total_error += 30
                 deviations.append((30, "Tuck your thumb over your curled fingers"))
 
@@ -756,7 +758,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         elif mudra_key == "shikhara":
             fist_count = 0
             for t in [8, 12, 16, 20]:
-                if dist_lm(lm, t, 0) > 0.24:
+                if dist_lm(lm, t, 0, palm_size) > 0.62:
                     total_error += 45
                     deviations.append((45, f"Curl your {['index','middle','ring','little'][[8,12,16,20].index(t)]} finger into fist"))
                 else:
@@ -768,36 +770,38 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
                 deviations.append((65, "Raise your thumb straight up for Shikhara"))
 
         # ── HAMSASYA ──────────────────────────────────────────────────────────
-        # All 5 tips meet at one point (all-finger pinch)
+        # Thumb tip to Index tip contact. (Swan Beak)
         elif mudra_key == "hamsasya":
-            max_dist = max(dist_lm(lm, 4, t) for t in [8, 12, 16, 20])
-            if max_dist > 0.10:
-                total_error += 80
-                deviations.append((80, "Bring ALL five fingertips together to one point for Hamsasya"))
-            elif max_dist > 0.06:
-                total_error += 40
-                deviations.append((40, "Tighten the pinch — all tips closer together"))
+            # Hamsasya contact check (Thumb-Index)
+            if dist_lm(lm, 4, 8, palm_size) > 0.05:
+                total_error += 85
+                deviations.append((85, "Touch your thumb to your index tip for Hamsasya"))
+            
+            # ALLOW middle/ring/pinky to be straight (Legacy hamsasya) or bent (Model hamsasya)
+            # Traditionally they are spread and straight. The model trained them as bent.
+            # We skip the base angle errors for these fingers to allow both styles.
+            pass
 
         # ── MUKULA ────────────────────────────────────────────────────────────
         # All 5 tips meet (bud shape) — similar to hamsasya but slightly more open
         elif mudra_key == "mukula":
-            max_dist = max(dist_lm(lm, 4, t) for t in [8, 12, 16, 20])
-            if max_dist > 0.12:
+            max_dist = max(dist_lm(lm, 4, t, palm_size) for t in [8, 12, 16, 20])
+            if max_dist > 0.38:
                 total_error += 75
                 deviations.append((75, "Touch all five fingertips together (flower bud shape)"))
-            elif max_dist > 0.08:
+            elif max_dist > 0.22:
                 total_error += 35
                 deviations.append((35, "Bring your fingertips a little closer together"))
 
         # ── BHRAMARA ──────────────────────────────────────────────────────────
-        # Index+thumb tips touch (loop). Middle bent. Ring+pinky open.
+        # Thumb tip to Middle tip contact (Loop). Index bent.
         elif mudra_key == "bhramara":
-            if dist_lm(lm, 4, 8) > 0.05:
+            if dist_lm(lm, 4, 12, palm_size) > 0.05:
+                total_error += 85
+                deviations.append((85, "Touch your thumb to your middle tip for Bhramara"))
+            if current_angles.get("index", 70) > 110:
                 total_error += 65
-                deviations.append((65, "Touch your thumb tip and index fingertip together to form a loop"))
-            if current_angles.get("middle", 70) > 110:
-                total_error += 45
-                deviations.append((45, "Bend your middle finger inward for Bhramara"))
+                deviations.append((65, "Bend your index finger inward for Bhramara"))
             for f in ["ring", "pinky"]:
                 if current_angles.get(f, 175) < 130:
                     total_error += 30
@@ -806,9 +810,9 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         # ── KATAKAMUKHA ───────────────────────────────────────────────────────
         # Thumb+index+middle form 3-finger pinch. Ring+pinky open.
         elif mudra_key == "katakamukha":
-            d_ti = dist_lm(lm, 4, 8)
-            d_tm = dist_lm(lm, 4, 12)
-            if d_ti > 0.09 or d_tm > 0.09:
+            d_ti = dist_lm(lm, 4, 8, palm_size)
+            d_tm = dist_lm(lm, 4, 12, palm_size)
+            if d_ti > 0.25 or d_tm > 0.25:
                 total_error += 55
                 deviations.append((55, "Bring thumb, index, and middle fingertips together"))
             for f in ["ring", "pinky"]:
@@ -830,7 +834,7 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         # ── MAYURA ────────────────────────────────────────────────────────────
         # All open. Thumb bends to touch ring fingertip.
         elif mudra_key == "mayura":
-            if dist_lm(lm, 4, 16) > 0.13:
+            if dist_lm(lm, 4, 16, palm_size) > 0.38:
                 total_error += 55
                 deviations.append((55, "Bring your thumb tip to touch your ring fingertip"))
             for f in ["index", "middle", "pinky"]:
@@ -1048,17 +1052,17 @@ def is_hand_held(landmarks):
 # =============================================================================
 # CORE MADM PIPELINE
 # =============================================================================
-def run_madm(mp_landmarks, target_mudra=""):
+def run_madm(landmarks, target_mudra='', label="Right"):
     global last_landmarks, last_stable_name
 
     try:
         # 1. Adapt input (MediaPipe object OR JSON list)
-        if hasattr(mp_landmarks, 'landmark'):
-            lm_list = mp_landmarks.landmark
-            last_landmarks = mp_landmarks
+        if hasattr(landmarks, 'landmark'):
+            lm_list = landmarks.landmark
+            last_landmarks = landmarks
         else:
-            # mp_landmarks is the JSON list from frontend
-            lm_list = [LM(p['x'], p['y'], p['z']) for p in mp_landmarks]
+            # landmarks is the JSON list from frontend
+            lm_list = [LM(p['x'], p['y'], p['z']) for p in landmarks]
             # Mock a MediaPipe-like container for internal tracking if needed
             last_landmarks = type('obj', (object,), {'landmark': lm_list})
 
@@ -1072,13 +1076,25 @@ def run_madm(mp_landmarks, target_mudra=""):
         smooth_lm    = [LM(smoothed_arr[i, 0], smoothed_arr[i, 1], smoothed_arr[i, 2])
                         for i in range(21)]
 
-        features = extract_features(smooth_lm)
-        if len(features) != 72:
-            print(f"[ERROR] Feature size mismatch: Expected 72, got {len(features)}")
+        features = extract_features(smooth_lm, label=label)
+        if len(features) != 82:
+            print(f"[ERROR] Feature size mismatch: Expected 82, got {len(features)}")
             return {"detected": False, "feedback": "Feature error"}
 
         raw_probs   = model.predict_proba([features])[0]
         raw_conf    = float(max(raw_probs)) * 100
+        
+        # ── Confidence Gating (0.65 Floor for Modern 3D Pipeline) ─────────────
+        if raw_conf < 65:
+            return {
+                "detected": False, 
+                "name": "", 
+                "confidence": round(raw_conf, 1),
+                "status": "Refining Pose",
+                "accuracy": 0,
+                "corrections": ["Hold your hand steady", "Check your finger positions"]
+            }
+
         ema_p       = update_ema_probs(raw_probs)
         top_idx     = int(np.argmax(ema_p))
         top_name    = str(model.classes_[top_idx])
@@ -1099,6 +1115,14 @@ def run_madm(mp_landmarks, target_mudra=""):
             target_key = target_mudra.lower().strip()
             if target_key in MUDRA_REFERENCE_ANGLES:
                 _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper)
+                
+                # ── Hamsasya Over-Override ──
+                # If target is hamsasya and we have contact + index bent, it's hamsasya 
+                # even if ML says Arala.
+                if target_key == "hamsasya":
+                    if dist_lm(lm_wrapper, 4, 8, palm_size) < 0.12 and finger_angles.get("index", 180) < 110:
+                        geom_acc = 95.0
+                
                 if geom_acc > 70:
                     if stable_name != target_key:
                         print(f"[HYBRID] Force Matching Target: ML={stable_name}({smooth_conf:.1f}%) -> Target={target_key}({geom_acc:.1f}%)")
@@ -1126,7 +1150,8 @@ def run_madm(mp_landmarks, target_mudra=""):
                 ring_angle = finger_angles.get("ring", 175)
 
                 # ── PATAKA ↔ TRIPATAKA ring-finger override ───────────────────────
-                if stable_name == "pataka" and ring_angle < 100:
+                # Pataka: Ring should be > 150. Tripataka: Ring should be < 110.
+                if stable_name == "pataka" and ring_angle < 110:
                     tri_score = geom_scores.get("tripataka",   0)
                     ard_score = geom_scores.get("ardhapataka", 0)
                     kng_score = geom_scores.get("kangula",     0)
@@ -1135,15 +1160,15 @@ def run_madm(mp_landmarks, target_mudra=""):
                         key=lambda x: x[1]
                     )
                     if best_alt > 45:
-                        print(f"      ---> RING BENT OVERRIDE: pataka → {best_alt_name} (ring={ring_angle:.0f}°)")
+                        print(f"      ---> RING BENT (40° diff): pataka → {best_alt_name} (ring={ring_angle:.0f}°)")
                         stable_name = best_alt_name
                         smooth_conf = max(smooth_conf, best_alt * 0.85)
                         is_stable   = True
 
-                elif stable_name == "tripataka" and ring_angle > 145:
+                elif stable_name == "tripataka" and ring_angle > 150:
                     pat_score = geom_scores.get("pataka", 0)
                     if pat_score > 45:
-                        print(f"      ---> RING STRAIGHT OVERRIDE: tripataka → pataka (ring={ring_angle:.0f}°)")
+                        print(f"      ---> RING STRAIGHT (40° diff): tripataka → pataka (ring={ring_angle:.0f}°)")
                         stable_name = "pataka"
                         smooth_conf = max(smooth_conf, pat_score * 0.85)
                         is_stable   = True
@@ -1219,7 +1244,7 @@ def run_madm(mp_landmarks, target_mudra=""):
 
         total_accuracy = min(100.0, round(total_accuracy, 1))
 
-        is_good_frame = (smooth_conf >= 70 and total_accuracy >= 70)
+        is_good_frame = (smooth_conf >= 60 and total_accuracy >= 65)
         if is_good_frame:
             held, hold_progress = is_hand_held(lm_list)
         else:
@@ -1435,8 +1460,20 @@ def detect_landmarks():
         if len(landmarks) != 21:
              return jsonify({"error": "Invalid landmark count"}), 400
 
-        # Run MADM pipeline
-        mudra_result = run_madm(landmarks, target)
+        # 1. Hand Presence Filter (MediaPipe Tracker Confidence)
+        presence_score = body.get('presenceScore', 1.0) 
+        handedness     = body.get('handedness', 'Right') # "Left" or "Right"
+        
+        if presence_score < 0.7:
+             return jsonify({
+                 "detected": False, 
+                 "status": "No Hand Detected", 
+                 "confidence": 0,
+                 "feedback": "Hand presence too low"
+             })
+
+        # 2. Run MADM pipeline
+        mudra_result = run_madm(landmarks, target, label=handedness)
         
         # Merge with Navarasa state (Navarasa is still camera-feed dependent or can be disabled for this route)
         mudra_result.update(current_navarasa)

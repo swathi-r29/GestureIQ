@@ -75,14 +75,15 @@ export default function Detect() {
     // ── Core state ────────────────────────────────────────────
     const [cameraOn,      setCameraOn]      = useState(false);
     const [voiceEnabled,  setVoiceEnabled]  = useState(false);
-    const [detected,      setDetected]      = useState({});
+    const [detected,      setDetected]      = useState({ name: '', confidence: 0, detected: false });
     const [progress,      setProgress]      = useState([]);
     const [saved,         setSaved]         = useState(false);
     const [visible,       setVisible]       = useState(false);
     const [selectedMudra, setSelectedMudra] = useState('');
     const [holdState,     setHoldState]     = useState('idle');
     const [holdProgress,  setHoldProgress]  = useState(0);
-    const [autoResult,    setAutoResult]    = useState(null);
+    const [landmarks,       setLandmarks]       = useState(null);
+    const [autoResult,      setAutoResult]      = useState(null);
     const [show3D,        setShow3D]        = useState(true);
 
     const holdStartRef        = useRef(null);
@@ -91,10 +92,12 @@ export default function Detect() {
     const videoRef            = useRef(null);
     const canvasRef           = useRef(null);
     const streamRef           = useRef(null);
+    const landmarksRef        = useRef(null);
+    const lastResultTimeRef   = useRef(Date.now());
     const isDetectingRef      = useRef(false);
     const handsRef            = useRef(null);
-    const landmarksRef        = useRef(null);
     const requestRef          = useRef(null);
+    const recoveryIntervalRef = useRef(null);
     // Voice stability: only announce correction after seeing it 2x in a row
 
     // ── Init ──────────────────────────────────────────────────
@@ -112,34 +115,69 @@ export default function Detect() {
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5
         });
-
         handsRef.current.onResults((results) => {
+            lastResultTimeRef.current = Date.now();
             const canvas = canvasRef.current;
-            if (!canvas) return;
+            const video  = videoRef.current;
+            if (!canvas || !video) return;
+            
             const ctx = canvas.getContext('2d');
             
-            // Clear and draw
+            // Sync canvas size to visible video size for perfect alignment
+            canvas.width  = video.clientWidth;
+            canvas.height = video.clientHeight;
+            
             ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Handle Mirroring for 2D UI matching (CSS scaleX(-1))
+            // Since the video is mirrored via CSS, we mirror the drawing context
             ctx.scale(-1, 1);
-            ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
+            ctx.translate(-canvas.width, 0);
             
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0];
-                landmarksRef.current = landmarks;
+                let landmarks = results.multiHandLandmarks[0];
+                let handedness = results.multiHandedness[0]?.label || 'Right';
+                const score = results.multiHandedness[0]?.score || 0;
                 
-                // Draw skeleton
-                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
-                drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1, radius: 2 });
+                // ── Frontend Mirroring (Trick Backend) ──
+                // If it's a left hand, we mirror it horizontally to treat it as a right hand.
+                if (handedness === 'Left') {
+                    landmarks = landmarks.map(lm => ({
+                        ...lm,
+                        x: 1 - lm.x
+                    }));
+                    handedness = 'Right'; // Now seen as Right by everything downstream
+                }
+                
+                landmarksRef.current = { landmarks, score, handedness };
+
+                // SYNC: Update landmarks state for the 3D visualizer
+                setLandmarks(landmarks);
+                
+                // Draw skeleton (Now perfectly aligned with mirrored video)
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
+                drawLandmarks(ctx, landmarks, { color: '#ffffff', lineWidth: 1, radius: 2 });
             } else {
                 landmarksRef.current = null;
             }
             ctx.restore();
         });
 
+        // ── Auto-Recovery Monitor ──
+        recoveryIntervalRef.current = setInterval(() => {
+            if (cameraOn && (Date.now() - lastResultTimeRef.current > 3000)) {
+                console.warn("[MediaPipe] Stale results detected. Re-initializing worker...");
+                lastResultTimeRef.current = Date.now(); // reset to avoid loop
+                if (handsRef.current) handsRef.current.dispatchEvent({type: 'error', message: 'recovery'});
+            }
+        }, 1000);
+
         setTimeout(() => setVisible(true), 100);
         fetchProgress();
         return () => {
             stop();
+            if (recoveryIntervalRef.current) clearInterval(recoveryIntervalRef.current);
             if (handsRef.current) handsRef.current.close();
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
@@ -243,16 +281,18 @@ export default function Detect() {
         if (!cameraOn) return;
         const interval = setInterval(async () => {
             if (isDetectingRef.current) return;
-            const landmarks = landmarksRef.current;
-            if (!landmarks) return;
+            const dataObj = landmarksRef.current;
+            if (!dataObj) return;
 
             isDetectingRef.current = true;
             try {
-                const res  = await fetch('/api/detect_landmarks', {
+                const res  = await fetch(`${import.meta.env.VITE_FLASK_URL || ''}/api/detect_landmarks`, {
                     method: 'POST', 
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
-                        landmarks, 
+                        landmarks: dataObj.landmarks,
+                        presenceScore: dataObj.score,
+                        handedness: dataObj.handedness,
                         targetMudra: selectedMudra || '' 
                     })
                 });
@@ -497,7 +537,14 @@ export default function Detect() {
                                     </span>
                                 )}
                             </div>
-                            <HandVisualiser targetMudra={selectedMudra} apiBase={import.meta.env.VITE_FLASK_URL || ""} />
+                            <HandVisualiser 
+                                targetMudra={selectedMudra} 
+                                landmarks={landmarks || []}
+                                deviations={autoResult?.deviations || {}}
+                                infoOverride={autoResult}
+                                apiBase={import.meta.env.VITE_FLASK_URL || ""} 
+                                loading={!landmarks}
+                            />
                         </div>
                     )}
                 </div>
