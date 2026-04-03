@@ -1,3 +1,5 @@
+# utils/feature_engineering.py
+
 import math
 import numpy as np
 
@@ -18,17 +20,18 @@ def extract_features(landmarks, label="Right"):
     Extract 82 features from 21 MediaPipe hand landmarks.
     label: "Left" or "Right" — Left hand X coords are mirrored so model always sees Right.
     """
-    # Convert to list of [x, y, z]
+    # 1. Extract raw points first (0.0 - 1.0 range)
     if hasattr(landmarks[0], 'x'):
         pts = [[lm.x, lm.y, lm.z] for lm in landmarks]
     else:
         pts = [[lm[0], lm[1], lm[2]] for lm in landmarks]
 
-    # Mirror left hand so model always sees right-hand geometry
+    # 2. Mirror if Left (Ensures model sees a Right-hand coordinate set)
     if label == "Left":
-        pts = [[1.0 - p[0], p[1], p[2]] for p in pts]
+        for p in pts:
+            p[0] = 1.0 - p[0]
 
-    # Normalize relative to wrist (landmark 0)
+    # 3. Wrist Center Normalization
     wrist = pts[0]
     pts = [[p[0] - wrist[0], p[1] - wrist[1], p[2] - wrist[2]] for p in pts]
 
