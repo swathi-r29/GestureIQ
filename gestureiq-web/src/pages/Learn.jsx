@@ -167,7 +167,7 @@ export default function Learn() {
 
     // ── Language + Voice ──────────────────────────────────────
     const [lang, setLang] = useState('en');
-    const { speak, stop, test, unlock, announce } = useVoiceGuide({ language: lang });
+    const { stop, test, unlock, announce } = useVoiceGuide({ language: lang });
 
     const [stage,           setStage]           = useState(STAGES.SELECT_LEVEL);
     const [selectedLevel,   setSelectedLevel]   = useState(null);
@@ -175,7 +175,7 @@ export default function Learn() {
     const [progress,        setProgress]        = useState([]);
     const [bestScores,      setBestScores]      = useState({});
     const [cameraOn,        setCameraOn]        = useState(false);
-    const [landmarks,       setLandmarks]       = useState(null);
+    // const [landmarks,       setLandmarks]       = useState(null); // unused, safe removal
     const [detected,        setDetected]        = useState({ name: '', confidence: 0, detected: false });
     const [loading,         setLoading]         = useState(true);
     const [mudraContent,    setMudraContent]    = useState(null);
@@ -186,7 +186,10 @@ export default function Learn() {
     const [holdProgress,    setHoldProgress]    = useState(0);
     const [practiceStep,    setPracticeStep]    = useState(0);
     const [show3D,          setShow3D]          = useState(true);
+    const [frozenFrame,     setFrozenFrame]     = useState(null);
+    const [isFrozen,        setIsFrozen]        = useState(false);
 
+    const attemptsRef         = useRef(0);
     const holdStartRef        = useRef(null);
     const masteredRef         = useRef(false);
     const videoRef            = useRef(null);
@@ -198,6 +201,7 @@ export default function Learn() {
     const isDetectingRef      = useRef(false);
     const recoveryIntervalRef = useRef(null);
     const requestRef          = useRef(null);
+    const voiceTimerRef       = useRef(0); // last time voice fired (5s cooldown)
 
     const PRACTICE_STEPS = [
         { title: 'Study the Position',  desc: 'Look at the reference image carefully. Read the finger instructions below.' },
@@ -263,35 +267,13 @@ export default function Learn() {
                         let handedness = results.multiHandedness[0]?.label || 'Right';
                         const score = results.multiHandedness[0]?.score || 0;
                         
-                        // ── Frontend Mirroring (Trick Backend) ──
-                        // If it's a left hand, we mirror it horizontally to treat it as a right hand.
-                        if (handedness === 'Left') {
-                            landmarks = landmarks.map(lm => ({
-                                ...lm,
-                                x: 1 - lm.x
-                            }));
-                            handedness = 'Right'; // Now seen as Right by everything downstream
-                        }
-                        
+                        // Store raw landmarks — Flask handles mirroring via handedness label
                         landmarksRef.current = { landmarks, handedness, score };
                         
-                        // SYNC: Update the landmarks state for the 3D visualizer 
-                        // We do this every frame for smoothness in the 3D view
-                        setLandmarks(landmarks);
+                        // 3D visualizer uses landmarksRef.current directly
                         
                         // Draw skeleton (Now perfectly aligned with mirrored video)
                         // drawConnectors/drawLandmarks uses normalized [0,1] coordinates
-                        const drawOpts = {
-                            width:  canvas.width,
-                            height: canvas.height
-                        };
-                        
-                        // Scale landmarks to pixel space for drawConnectors
-                        const pixelLm = landmarks.map(lm => ({
-                            x: lm.x * canvas.width,
-                            y: lm.y * canvas.height
-                        }));
-
                         drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
                         drawLandmarks(ctx, landmarks, { color: '#ffffff', lineWidth: 1, radius: 2 });
                     } else {
@@ -401,6 +383,9 @@ export default function Learn() {
                     return;
                 }
 
+                // Increment attempts when hand is present
+                attemptsRef.current += 1;
+
                 const res  = await fetch(`${import.meta.env.VITE_FLASK_URL || ''}/api/detect_landmarks`, {
                     method: 'POST', 
                     headers: { 'Content-Type': 'application/json' },
@@ -414,6 +399,15 @@ export default function Learn() {
                 const data = await res.json();
                 setDetected(data);
 
+                // ── Voice — only fire when stable + 5s cooldown (matches Detect.jsx) ──
+                if (voiceEnabled && data.is_stable) {
+                    const now = Date.now();
+                    if (now - voiceTimerRef.current > 5000) {
+                        voiceTimerRef.current = now;
+                        announce.fromResult(data);
+                    }
+                }
+
                 const accuracy    = data.accuracy    || 0;
                 const corrections = data.corrections || [];
                 const isCorrect   = data.detected && accuracy >= 65 && (accuracy > 70 || corrections.length === 0);
@@ -421,7 +415,6 @@ export default function Learn() {
                 if (isCorrect) {
                     if (!holdStartRef.current) {
                         holdStartRef.current = Date.now();
-                        // voice handled by announce.fromResult(data) below
                     }
                     const elapsed = Date.now() - holdStartRef.current;
                     setHoldProgress(Math.min(100, (elapsed / HOLD_DURATION_MS) * 100));
@@ -431,13 +424,10 @@ export default function Learn() {
                     }
                 } else {
                     if (holdStartRef.current) { holdStartRef.current = null; setHoldProgress(0); }
-                    if (voiceEnabled) {
-                        announce.fromResult(data);
-                    }
                 }
             } catch { }
             finally { isDetectingRef.current = false; }
-        }, 600);
+        }, 180); // Faster 180ms loop like Detect.jsx for smoother feedback
 
         return () => { clearInterval(interval); holdStartRef.current = null; setHoldProgress(0); };
     }, [stage, cameraOn, selectedMudra, voiceEnabled, captureFrame]);
@@ -469,6 +459,12 @@ export default function Learn() {
         try {
             const token = localStorage.getItem('token');
             const score = Math.round(currentAccuracy);
+            
+            // ── MASTERY MOMENT: Capture Snapshot & Statistics ──
+            const snapshot = captureFrame();
+            setFrozenFrame(snapshot);
+            setIsFrozen(true);
+            
             setSessionScore(score);
             const res = await axios.post('/api/user/progress/update', { mudraName: folder, score }, { headers: { 'x-auth-token': token } });
             setProgress(res.data.detectedMudras || []);
@@ -476,7 +472,16 @@ export default function Learn() {
             setSessionComplete(true);
             stopWebcam();
             setHoldProgress(0);
-            if (voiceEnabled) announce.mastered(selectedMudra.name);
+            
+            if (voiceEnabled) {
+                announce.mastered({ 
+                    mudra: selectedMudra.name, 
+                    score: score, 
+                    attempts: attemptsRef.current 
+                });
+            }
+            // Reset attempts for next mudra
+            attemptsRef.current = 0;
         } catch { console.error('Failed to update progress'); }
     };
 
@@ -494,6 +499,12 @@ export default function Learn() {
     const nextMudra = () => {
         const levelMudras  = getLevelMudras(selectedLevel);
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
+        
+        // Reset Mastery Moment state
+        setIsFrozen(false);
+        setFrozenFrame(null);
+        attemptsRef.current = 0;
+
         if (currentIndex < levelMudras.length - 1) enterPractice(levelMudras[currentIndex + 1]);
         else setStage(STAGES.MUDRA_LIST);
     };
@@ -733,7 +744,7 @@ export default function Learn() {
                                         <BookOpen size={11} /> Step-by-step Finger Guide
                                     </div>
                                     <p className="text-sm leading-relaxed font-medium" style={{ color: 'var(--text)' }}>
-                                        {VOICE_INSTRUCTIONS[selectedMudra.folder] || selectedMudra.fingers}
+                                        {getVoiceInstruction(selectedMudra.folder, lang) || selectedMudra.fingers}
                                     </p>
                                     {voiceEnabled && (
                                         <button onClick={() => {
@@ -810,6 +821,52 @@ export default function Learn() {
                                                 <span className="text-[9px] text-green-300 font-bold">
                                                     {Math.ceil((1 - holdProgress / 100) * (HOLD_DURATION_MS / 1000))}s
                                                 </span>
+                                            </div>
+                                        )}
+
+                                        {/* Frozen Snapshot Overlay */}
+                                        {isFrozen && frozenFrame && (
+                                            <div className="absolute inset-0 z-50 animate-fade-in">
+                                                <img src={frozenFrame} className="w-full h-full object-cover grayscale-[0.3] brightness-75 transition-all duration-1000" alt="Mastery Moment" />
+                                                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+                                                
+                                                {/* Success Content */}
+                                                <div className="absolute inset-x-0 bottom-0 p-10 flex flex-col items-center text-center">
+                                                    <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(34,197,94,0.5)] animate-bounce-subtle">
+                                                        <CheckCircle2 size={40} className="text-white" />
+                                                    </div>
+                                                    
+                                                    <div className="text-[10px] tracking-[8px] uppercase text-green-400 mb-2 font-black">Mudra Mastered</div>
+                                                    <h2 className="text-5xl font-black text-white mb-2 uppercase tracking-tighter">{selectedMudra.name}</h2>
+                                                    
+                                                    <div className="flex gap-8 mb-8 mt-4">
+                                                        <div className="text-center">
+                                                            <div className="text-[8px] tracking-[3px] uppercase text-white/50 mb-1">Score</div>
+                                                            <div className="text-3xl font-bold" style={{ color: 'var(--copper)' }}>{sessionScore}%</div>
+                                                            <div className={`text-[10px] font-bold uppercase ${sessionScore > 85 ? 'text-green-400' : sessionScore > 70 ? 'text-amber-400' : 'text-orange-400'}`}>
+                                                                {sessionScore > 85 ? 'Excellent' : sessionScore > 70 ? 'Good Form' : 'Improved'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="w-px h-10 bg-white/20 mt-4" />
+                                                        <div className="text-center">
+                                                            <div className="text-[8px] tracking-[3px] uppercase text-white/50 mb-1">Effort</div>
+                                                            <div className="text-3xl font-bold text-white">{attemptsRef.current}</div>
+                                                            <div className="text-[10px] font-bold uppercase text-white/50">Attempts</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex gap-4 w-full max-w-sm">
+                                                        <button onClick={() => { setIsFrozen(false); setFrozenFrame(null); startWebcam(); }}
+                                                            className="flex-1 py-4 rounded-xl border border-white/20 text-white font-bold uppercase tracking-widest text-[10px] hover:bg-white/10 transition-all">
+                                                            Try Again
+                                                        </button>
+                                                        <button onClick={nextMudra}
+                                                            className="flex-1 py-4 rounded-xl font-bold uppercase tracking-widest text-[10px] shadow-lg shadow-green-500/20 hover:scale-105 transition-all"
+                                                            style={{ backgroundColor: 'var(--accent)', color: 'white' }}>
+                                                            Next Mudra →
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
 

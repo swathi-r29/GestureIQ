@@ -1,687 +1,658 @@
-
-// src/pages/Detect.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// MODULE ROLE: STANDALONE FREE-PRACTICE DETECTOR
-// Updated: Natural voice + 6-language support + HoldDetectionRing + HandVisualiser
-// ─────────────────────────────────────────────────────────────────────────────
-
-import { useState, useEffect, useRef } from 'react';
+// src/pages/Detect.jsx — Complete Professional Rewrite
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import HandVisualiser from '../components/HandVisualiser';
-import HoldDetectionRing from '../components/HoldDetectionRing';
-import { io } from 'socket.io-client';
+
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
 
 const MUDRAS = [
-    { folder: "pataka",       name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic"        },
-    { folder: "tripataka",    name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight and joined",             level: "Basic"        },
-    { folder: "ardhapataka",  name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",             level: "Basic"        },
-    { folder: "kartarimukha", name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                 level: "Basic"        },
-    { folder: "mayura",       name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic"        },
-    { folder: "ardhachandra", name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                level: "Basic"        },
-    { folder: "arala",        name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                level: "Intermediate" },
-    { folder: "shukatunda",   name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",               level: "Intermediate" },
-    { folder: "mushti",       name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",           level: "Intermediate" },
-    { folder: "shikhara",     name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                          level: "Intermediate" },
-    { folder: "kapittha",     name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                    level: "Intermediate" },
-    { folder: "katakamukha",  name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                       level: "Intermediate" },
-    { folder: "suchi",        name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                        level: "Basic"        },
-    { folder: "chandrakala",  name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                      level: "Intermediate" },
-    { folder: "padmakosha",   name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                 level: "Intermediate" },
-    { folder: "sarpashira",   name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                 level: "Advanced"     },
-    { folder: "mrigashira",   name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",        level: "Advanced"     },
-    { folder: "simhamukha",   name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                      level: "Advanced"     },
-    { folder: "kangula",      name: "Kangula",      meaning: "Bell",                usage: "Bell, fruit, small rounded objects",               fingers: "Ring and little finger bent inward, others straight",      level: "Advanced"     },
-    { folder: "alapadma",     name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                  level: "Advanced"     },
-    { folder: "chatura",      name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                  level: "Advanced"     },
-    { folder: "bhramara",     name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",       level: "Advanced"     },
-    { folder: "hamsasya",     name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                        level: "Advanced"     },
-    { folder: "hamsapaksha",  name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                    level: "Advanced"     },
-    { folder: "sandamsha",    name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                          level: "Advanced"     },
-    { folder: "mukula",       name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                         level: "Advanced"     },
-    { folder: "tamrachuda",   name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                 level: "Advanced"     },
-    { folder: "trishula",     name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",        level: "Advanced"     },
+    { folder: "pataka",       name: "Pataka",       meaning: "Flag",                level: "Basic"        },
+    { folder: "tripataka",    name: "Tripataka",    meaning: "Three parts of flag", level: "Basic"        },
+    { folder: "ardhapataka",  name: "Ardhapataka",  meaning: "Half flag",           level: "Basic"        },
+    { folder: "kartarimukha", name: "Kartarimukha", meaning: "Scissors face",       level: "Basic"        },
+    { folder: "mayura",       name: "Mayura",       meaning: "Peacock",             level: "Basic"        },
+    { folder: "ardhachandra", name: "Ardhachandra", meaning: "Half moon",           level: "Basic"        },
+    { folder: "arala",        name: "Arala",        meaning: "Bent",                level: "Intermediate" },
+    { folder: "shukatunda",   name: "Shukatunda",   meaning: "Parrot beak",         level: "Intermediate" },
+    { folder: "mushti",       name: "Mushti",       meaning: "Fist",                level: "Intermediate" },
+    { folder: "shikhara",     name: "Shikhara",     meaning: "Spire",               level: "Intermediate" },
+    { folder: "kapittha",     name: "Kapittha",     meaning: "Wood apple",          level: "Intermediate" },
+    { folder: "katakamukha",  name: "Katakamukha",  meaning: "Opening in bracelet", level: "Intermediate" },
+    { folder: "suchi",        name: "Suchi",        meaning: "Needle",              level: "Basic"        },
+    { folder: "chandrakala",  name: "Chandrakala",  meaning: "Digit of moon",       level: "Intermediate" },
+    { folder: "padmakosha",   name: "Padmakosha",   meaning: "Lotus bud",           level: "Intermediate" },
+    { folder: "sarpashira",   name: "Sarpashira",   meaning: "Snake head",          level: "Advanced"     },
+    { folder: "mrigashira",   name: "Mrigashira",   meaning: "Deer head",           level: "Advanced"     },
+    { folder: "simhamukha",   name: "Simhamukha",   meaning: "Lion face",           level: "Advanced"     },
+    { folder: "kangula",      name: "Kangula",      meaning: "Bell",                level: "Advanced"     },
+    { folder: "alapadma",     name: "Alapadma",     meaning: "Full bloomed lotus",  level: "Advanced"     },
+    { folder: "chatura",      name: "Chatura",      meaning: "Clever",              level: "Advanced"     },
+    { folder: "bhramara",     name: "Bhramara",     meaning: "Bee",                 level: "Advanced"     },
+    { folder: "hamsasya",     name: "Hamsasya",     meaning: "Swan beak",           level: "Advanced"     },
+    { folder: "hamsapaksha",  name: "Hamsapaksha",  meaning: "Swan wing",           level: "Advanced"     },
+    { folder: "sandamsha",    name: "Sandamsha",    meaning: "Tongs",               level: "Advanced"     },
+    { folder: "mukula",       name: "Mukula",       meaning: "Bud",                 level: "Advanced"     },
+    { folder: "tamrachuda",   name: "Tamrachuda",   meaning: "Rooster",             level: "Advanced"     },
+    { folder: "trishula",     name: "Trishula",     meaning: "Trident",             level: "Advanced"     },
 ];
 
-const HOLD_DURATION_MS = 1500;
-
-const LEVEL_COLORS = {
-    Basic:        { bg: "rgba(16, 185, 129, 0.1)", text: "#10B981", border: "rgba(16, 185, 129, 0.3)" },
-    Intermediate: { bg: "rgba(245, 158, 11, 0.1)", text: "#F59E0B", border: "rgba(245, 158, 11, 0.3)" },
-    Advanced:     { bg: "rgba(220, 38, 38, 0.1)",  text: "#DC2626", border: "rgba(220, 38, 38, 0.3)"  },
-};
-
-let _socket = null;
-function getSocket() {
-    if (!_socket) {
-        _socket = io(import.meta.env.VITE_BACKEND_URL, { transports: ['websocket'], reconnectionAttempts: 5 });
-    }
-    return _socket;
-}
+const HOLD_MS = 1800;
+const FLASK = import.meta.env.VITE_FLASK_URL || '';
 
 export default function Detect() {
-    const { user }   = useAuth();
-    const navigate   = useNavigate();
+    const { user } = useAuth();
+    const navigate = useNavigate();
 
-    // ── Language + Voice ──────────────────────────────────────
     const [lang, setLang] = useState('en');
-    const { speak, stop, test, unlock, announce } = useVoiceGuide({ language: lang });
+    const { stop, test, unlock, announce } = useVoiceGuide({ language: lang });
 
-    // ── Core state ────────────────────────────────────────────
-    const [cameraOn,      setCameraOn]      = useState(false);
-    const [voiceEnabled,  setVoiceEnabled]  = useState(false);
-    const [detected,      setDetected]      = useState({ name: '', confidence: 0, detected: false });
-    const [progress,      setProgress]      = useState([]);
-    const [saved,         setSaved]         = useState(false);
-    const [visible,       setVisible]       = useState(false);
+    // Core state
+    const [cameraOn, setCameraOn]     = useState(false);
+    const [voiceOn, setVoiceOn]       = useState(false);
     const [selectedMudra, setSelectedMudra] = useState('');
-    const [holdState,     setHoldState]     = useState('idle');
-    const [holdProgress,  setHoldProgress]  = useState(0);
-    const [landmarks,       setLandmarks]       = useState(null);
-    const [autoResult,      setAutoResult]      = useState(null);
-    const [show3D,        setShow3D]        = useState(true);
+    const [show3D, setShow3D]         = useState(false);
 
-    const holdStartRef        = useRef(null);
-    const savedRef            = useRef(false);
-    const manualHoldPct       = useRef(0);
-    const videoRef            = useRef(null);
-    const canvasRef           = useRef(null);
-    const streamRef           = useRef(null);
-    const landmarksRef        = useRef(null);
-    const lastResultTimeRef   = useRef(Date.now());
-    const isDetectingRef      = useRef(false);
-    const handsRef            = useRef(null);
-    const requestRef          = useRef(null);
-    const recoveryIntervalRef = useRef(null);
-    // Voice stability: only announce correction after seeing it 2x in a row
+    // Detection state
+    const [result, setResult]         = useState(null);
+    const [landmarks, setLandmarks]   = useState([]);
+    const [holdPct, setHoldPct]       = useState(0);
+    const [holdState, setHoldState]   = useState('idle'); // idle | holding | done
+    const [saved, setSaved]           = useState(false);
+    const [progress, setProgress]     = useState(null);
 
-    // ── Init ──────────────────────────────────────────────────
-    // ── Init MediaPipe ───────────────────────────────────────
+    // Refs
+    const videoRef      = useRef(null);
+    const canvasRef     = useRef(null);
+    const streamRef     = useRef(null);
+    const handsRef      = useRef(null);
+    const rafRef        = useRef(null);
+    const landmarksRef  = useRef(null); // latest landmarks, updated every frame
+    const detectTimerRef = useRef(null);
+    const holdStartRef  = useRef(null);
+    const savedRef      = useRef(false);
+    const voiceTimerRef = useRef(0); // last time voice fired
+
+    // Fetch progress once
     useEffect(() => {
-        if (user && user.role !== 'student') { navigate('/'); return; }
-        
-        handsRef.current = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
+        if (user?.role !== 'student') { navigate('/'); return; }
+        axios.get('/api/user/progress').then(r => setProgress(r.data.progress)).catch(() => {});
+        return () => cleanup();
+    }, []);
 
-        handsRef.current.setOptions({
+    const cleanup = () => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        if (detectTimerRef.current) clearInterval(detectTimerRef.current);
+        if (handsRef.current) { handsRef.current.close(); handsRef.current = null; }
+        stop();
+    };
+
+    // ── MediaPipe init ──────────────────────────────────────
+    const initMediaPipe = useCallback(() => {
+        if (handsRef.current) return;
+        const h = new Hands({
+            locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+        });
+        h.setOptions({
             maxNumHands: 1,
             modelComplexity: 1,
             minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
+            minTrackingConfidence: 0.5,
         });
-        handsRef.current.onResults((results) => {
-            lastResultTimeRef.current = Date.now();
-            const canvas = canvasRef.current;
-            const video  = videoRef.current;
-            if (!canvas || !video) return;
-            
-            const ctx = canvas.getContext('2d');
-            
-            // Sync canvas size to visible video size for perfect alignment
-            canvas.width  = video.clientWidth;
-            canvas.height = video.clientHeight;
-            
-            ctx.save();
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Handle Mirroring for 2D UI matching (CSS scaleX(-1))
-            // Since the video is mirrored via CSS, we mirror the drawing context
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-            
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                let landmarks = results.multiHandLandmarks[0];
-                let handedness = results.multiHandedness[0]?.label || 'Right';
-                const score = results.multiHandedness[0]?.score || 0;
-                
-                // ── Frontend Mirroring (Trick Backend) ──
-                // If it's a left hand, we mirror it horizontally to treat it as a right hand.
-                if (handedness === 'Left') {
-                    landmarks = landmarks.map(lm => ({
-                        ...lm,
-                        x: 1 - lm.x
-                    }));
-                    handedness = 'Right'; // Now seen as Right by everything downstream
-                }
-                
-                landmarksRef.current = { landmarks, score, handedness };
+        h.onResults(onResults);
+        handsRef.current = h;
+    }, []);
 
-                // SYNC: Update landmarks state for the 3D visualizer
-                setLandmarks(landmarks);
-                
-                // Draw skeleton (Now perfectly aligned with mirrored video)
-                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
-                drawLandmarks(ctx, landmarks, { color: '#ffffff', lineWidth: 1, radius: 2 });
-            } else {
-                landmarksRef.current = null;
+    const onResults = useCallback((results) => {
+        const canvas = canvasRef.current;
+        const video  = videoRef.current;
+        if (!canvas || !video) return;
+
+        const ctx = canvas.getContext('2d');
+        canvas.width  = video.clientWidth  || 640;
+        canvas.height = video.clientHeight || 480;
+
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Mirror the drawing to match the mirrored video
+        ctx.scale(-1, 1);
+        ctx.translate(-canvas.width, 0);
+
+        if (results.multiHandLandmarks?.length > 0) {
+            let lms       = results.multiHandLandmarks[0];
+            const handed  = results.multiHandedness[0]?.label || 'Right';
+            const score   = results.multiHandedness[0]?.score || 0;
+
+            // DO NOT mirror X here — send raw coords + handedness label to Flask
+            // Flask's extract_features() mirrors Left hands internally
+            landmarksRef.current = { landmarks: lms, handedness: handed, score };
+            setLandmarks(lms);
+
+            drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 3 });
+            drawLandmarks(ctx, lms, { color: '#fff', lineWidth: 1, radius: 2 });
+        } else {
+            landmarksRef.current = null;
+            setLandmarks([]);
+        }
+        ctx.restore();
+    }, []);
+
+    // ── Frame loop ──────────────────────────────────────────
+    const startFrameLoop = useCallback(() => {
+        const loop = async () => {
+            if (videoRef.current?.readyState >= 2 && handsRef.current) {
+                await handsRef.current.send({ image: videoRef.current }).catch(() => {});
             }
-            ctx.restore();
-        });
-
-        // ── Auto-Recovery Monitor ──
-        recoveryIntervalRef.current = setInterval(() => {
-            if (cameraOn && (Date.now() - lastResultTimeRef.current > 3000)) {
-                console.warn("[MediaPipe] Stale results detected. Re-initializing worker...");
-                lastResultTimeRef.current = Date.now(); // reset to avoid loop
-                if (handsRef.current) handsRef.current.dispatchEvent({type: 'error', message: 'recovery'});
-            }
-        }, 1000);
-
-        setTimeout(() => setVisible(true), 100);
-        fetchProgress();
-        return () => {
-            stop();
-            if (recoveryIntervalRef.current) clearInterval(recoveryIntervalRef.current);
-            if (handsRef.current) handsRef.current.close();
-            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            rafRef.current = requestAnimationFrame(loop);
         };
-    }, [user, navigate]);
+        rafRef.current = requestAnimationFrame(loop);
+    }, []);
 
-    // ── Socket: auto_evaluation from Flask ────────────────────
-    useEffect(() => {
-        const socket = getSocket();
-        const onAutoEval = (result) => {
-            setAutoResult(result);
-            setDetected(result);
-            if (voiceEnabled) {
-                if (result.accuracy >= 75) {
-                    announce.correct();
-                } else if (result.corrections?.length > 0) {
-                    const wrongMsg   = result.corrections.find(c => c.startsWith('Wrong mudra'));
-                    const fingerCorr = result.corrections.find(c => !c.startsWith('Wrong mudra'));
-                    if (wrongMsg) announce.correction(wrongMsg);
-                    else if (fingerCorr) announce.correction(fingerCorr);
-                }
-            }
-            if (result.detected && result.accuracy >= 75 && !savedRef.current) {
-                savedRef.current = true;
-                saveProgress(result.name);
-            }
-        };
-        socket.on('auto_evaluation', onAutoEval);
-        return () => socket.off('auto_evaluation', onAutoEval);
-    }, [voiceEnabled]);
-
-    // ── Notify Flask when target changes ──────────────────────
-    useEffect(() => {
-        if (selectedMudra && cameraOn) getSocket().emit('set_free_practice_target', { target: selectedMudra });
-        setAutoResult(null);
-        savedRef.current = false;
-    }, [selectedMudra, cameraOn]);
-
-    // ── Webcam ────────────────────────────────────────────────
-    const startWebcam = async () => {
+    // ── Camera start/stop ───────────────────────────────────
+    const startCamera = async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, facingMode: 'user' }
+            });
             streamRef.current = stream;
+            initMediaPipe();
             setCameraOn(true);
-            unlock(); // FIX: Audio Unlock on user interaction
-            if (voiceEnabled) announce.cameraActive();
-        } catch (err) {
-            console.error("Webcam Error:", err);
-            alert('Camera access denied. Please allow camera permission and use HTTPS.');
+            unlock();
+        } catch (e) {
+            alert('Camera permission denied. Please allow camera access and use HTTPS.');
         }
     };
 
-    const stopWebcam = () => {
+    const stopCamera = useCallback(() => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        if (detectTimerRef.current) clearInterval(detectTimerRef.current);
         streamRef.current?.getTracks().forEach(t => t.stop());
         streamRef.current = null;
         if (videoRef.current) videoRef.current.srcObject = null;
         setCameraOn(false);
+        setResult(null);
+        setLandmarks([]);
+        setHoldPct(0);
         setHoldState('idle');
-        setHoldProgress(0);
-        setAutoResult(null);
+        holdStartRef.current = null;
+        savedRef.current = false;
+        landmarksRef.current = null;
         stop();
-    };
+    }, [stop]);
 
-    const captureFrame = () => {
-        const video = videoRef.current, canvas = canvasRef.current;
-        if (!video || !canvas || video.readyState < video.HAVE_ENOUGH_DATA) return null;
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-        const ctx = canvas.getContext('2d');
-        ctx.save(); ctx.scale(-1, 1);
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-        ctx.restore();
-        return canvas.toDataURL('image/jpeg', 0.6);
-    };
-
+    // Set video src when camera turns on
     useEffect(() => {
         if (cameraOn && streamRef.current && videoRef.current) {
             videoRef.current.srcObject = streamRef.current;
             videoRef.current.play().catch(() => {});
-            if (selectedMudra) getSocket().emit('set_free_practice_target', { target: selectedMudra });
-            
-            // Start MediaPipe processing loop
-            const process = async () => {
-                if (videoRef.current && videoRef.current.readyState >= 2) {
-                    await handsRef.current.send({ image: videoRef.current });
-                }
-                requestRef.current = requestAnimationFrame(process);
-            };
-            requestRef.current = requestAnimationFrame(process);
-        }
-        if (!cameraOn) {
-            holdStartRef.current = null;
-            manualHoldPct.current = 0;
-            savedRef.current = false;
-            if (requestRef.current) cancelAnimationFrame(requestRef.current);
-            stop();
+            startFrameLoop();
+            startDetectionLoop();
         }
     }, [cameraOn]);
 
-    // ── Detection polling (Landmarks JSON) ───────────────────
-    useEffect(() => {
-        if (!cameraOn) return;
-        const interval = setInterval(async () => {
-            if (isDetectingRef.current) return;
-            const dataObj = landmarksRef.current;
-            if (!dataObj) return;
-
-            isDetectingRef.current = true;
-            try {
-                const res  = await fetch(`${import.meta.env.VITE_FLASK_URL || ''}/api/detect_landmarks`, {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        landmarks: dataObj.landmarks,
-                        presenceScore: dataObj.score,
-                        handedness: dataObj.handedness,
-                        targetMudra: selectedMudra || '' 
-                    })
-                });
-                const data = await res.json();
-                if (holdState !== 'evaluating') setDetected(data);
-
-                const accuracy    = data.accuracy    || 0;
-                const confidence  = data.confidence  || 0;
-                const corrections = data.corrections || [];
-                const isGood      = data.detected && confidence >= 70 && accuracy >= 70 && corrections.length === 0;
-
-                if (voiceEnabled && holdState === 'idle') {
-                    announce.fromResult(data);
-                }
-
-                if (isGood) {
-                    if (!holdStartRef.current) holdStartRef.current = Date.now();
-                    const elapsed = Date.now() - holdStartRef.current;
-                    manualHoldPct.current = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
-                    if (holdState === 'idle') setHoldProgress(manualHoldPct.current);
-                    if (elapsed >= HOLD_DURATION_MS && !savedRef.current) {
-                        savedRef.current = true;
-                        saveProgress(data.name);
-                    }
-                } else {
-                    if (holdStartRef.current) {
-                        holdStartRef.current = null;
-                        manualHoldPct.current = 0;
-                        if (holdState === 'idle') setHoldProgress(0);
-                    }
-                }
-            } catch (err) { 
-                console.error("Landmark API error:", err);
-            }
-            finally { isDetectingRef.current = false; }
-        }, 150); // Polling faster now (150ms) since payload is small
-        return () => { clearInterval(interval); holdStartRef.current = null; };
-    }, [cameraOn, voiceEnabled, selectedMudra, holdState]);
-
-    // ── Poll /mudra_data for Flask hold state ─────────────────
-    useEffect(() => {
-        if (!cameraOn) return;
-        const interval = setInterval(async () => {
-            try {
-                const res  = await fetch(`/mudra_data?target=${selectedMudra || ''}`);
-                const data = await res.json();
-                setHoldState(data.hold_state || 'idle');
-                if (data.hold_state !== 'idle') setHoldProgress(data.hold_progress || 0);
-                if (data.auto_result && data.hold_state === 'evaluating') setAutoResult(data.auto_result);
-            } catch { }
-        }, 300);
-        return () => clearInterval(interval);
-    }, [cameraOn, selectedMudra]);
-
-    // ── Progress ──────────────────────────────────────────────
-    const fetchProgress = async () => {
-        try { 
-            const res = await axios.get('/api/user/progress'); 
-            setProgress(res.data.progress); 
-        } catch { }
+    // ── Single detection loop — no socket, no mudra_data poll ──
+    const startDetectionLoop = () => {
+        if (detectTimerRef.current) clearInterval(detectTimerRef.current);
+        detectTimerRef.current = setInterval(runDetection, 180);
     };
 
-    const saveProgress = async (mudraName) => {
+    const runDetection = useCallback(async () => {
+        const data = landmarksRef.current;
+        if (!data) {
+            setHoldPct(0);
+            holdStartRef.current = null;
+            return;
+        }
+
+        try {
+            const res = await fetch(`${FLASK}/api/detect_landmarks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    landmarks:    data.landmarks,
+                    handedness:   data.handedness,
+                    presenceScore: data.score,
+                    targetMudra:  selectedMudra || '',
+                })
+            });
+            const json = await res.json();
+            setResult(json);
+
+            // ── Voice — only fire when stable and cooldown passed ──
+            if (voiceOn && json.is_stable) {
+                const now = Date.now();
+                if (now - voiceTimerRef.current > 5000) {
+                    voiceTimerRef.current = now;
+                    announce.fromResult(json);
+                }
+            }
+
+            // ── Hold detection ──
+            const confidence = json.confidence || 0;
+            const accuracy   = json.accuracy   || 0;
+            const isGood = json.detected &&
+                           confidence >= 65 &&
+                           accuracy   >= 65 &&
+                           (json.corrections || []).filter(c => !c.startsWith('Wrong')).length === 0;
+
+            if (isGood) {
+                if (!holdStartRef.current) holdStartRef.current = Date.now();
+                const pct = Math.min(100, ((Date.now() - holdStartRef.current) / HOLD_MS) * 100);
+                setHoldPct(pct);
+                if (pct < 100) setHoldState('holding');
+
+                if (pct >= 100 && !savedRef.current) {
+                    savedRef.current = true;
+                    setHoldState('done');
+                    handleSaveProgress(json.name);
+                    if (voiceOn) announce.mastered({ mudra: json.name, score: Math.round(accuracy), attempts: 1 });
+                }
+            } else {
+                holdStartRef.current = null;
+                setHoldPct(0);
+                if (holdState === 'holding') setHoldState('idle');
+            }
+
+        } catch (err) {
+            // Flask not running — silently ignore
+        }
+    }, [selectedMudra, voiceOn, holdState, announce]);
+
+    // Re-create detection loop when selectedMudra changes
+    useEffect(() => {
+        if (cameraOn) {
+            holdStartRef.current = null;
+            savedRef.current = false;
+            setHoldPct(0);
+            setHoldState('idle');
+            setResult(null);
+            if (detectTimerRef.current) clearInterval(detectTimerRef.current);
+            startDetectionLoop();
+        }
+    }, [selectedMudra]);
+
+    const handleSaveProgress = async (mudraName) => {
         setSaved(true);
         try {
-            const res = await axios.post('/api/user/progress/update', { mudraName });
-            setProgress(res.data);
-            if (voiceEnabled) announce.saved(mudraName);
-        } catch { }
-        setTimeout(() => { setSaved(false); savedRef.current = false; }, 3000);
+            const r = await axios.post('/api/user/progress/update', { mudraName });
+            setProgress(r.data);
+        } catch {}
+        setTimeout(() => {
+            setSaved(false);
+            savedRef.current = false;
+            setHoldState('idle');
+            setHoldPct(0);
+        }, 3000);
     };
 
-    // ── Derived display ───────────────────────────────────────
-    const displayData   = (holdState === 'evaluating' && autoResult) ? autoResult : detected;
-    const mudraInfo     = MUDRAS.find(m => m.folder === displayData.name);
-    const confidence    = displayData.confidence || 0;
-    const accuracy      = displayData.accuracy   || 0;
-    const isDetected    = displayData.detected;
-    const corrections   = displayData.corrections || [];
-    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.startsWith('Wrong mudra'));
+    // ── Derived ──────────────────────────────────────────────
+    const mudraInfo    = MUDRAS.find(m => m.folder === result?.name);
+    const confidence   = result?.confidence  || 0;
+    const accuracy     = result?.accuracy    || 0;
+    const corrections  = result?.corrections || [];
+    const isDetected   = result?.detected    || false;
+    const wrongMsg     = corrections.find(c => c.startsWith('Wrong mudra'));
+    const mastered     = progress?.detectedMudras || [];
+    const mastPct      = Math.round((mastered.length / 28) * 100);
+
+    const scoreColor   = accuracy >= 75 ? '#10b981' : accuracy >= 50 ? '#f59e0b' : '#ef4444';
+    const confColor    = confidence >= 70 ? '#10b981' : confidence >= 40 ? '#f59e0b' : '#ef4444';
 
     return (
-        <div className={`max-w-6xl mx-auto px-6 py-10 transition-all duration-700 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+        <div className="max-w-7xl mx-auto px-4 py-8">
 
             {/* Header */}
-            <div className="text-center mb-10">
-                <div className="text-[10px] tracking-[6px] uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Live Recognition</div>
-                <h2 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>Mudra Detection</h2>
+            <div className="text-center mb-8">
+                <div className="text-[10px] tracking-[6px] uppercase mb-1"
+                    style={{ color: 'var(--text-muted)' }}>Live AI Recognition</div>
+                <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>Mudra Detect</h1>
                 <BorderPattern />
-                <p className="text-xs tracking-widest mt-2 uppercase" style={{ color: 'var(--text-muted)' }}>
-                    Hold your hand clearly · Good lighting · Face the camera
-                </p>
             </div>
 
             {/* Toolbar */}
-            <div className="flex flex-wrap items-center gap-3 mb-6">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+                {/* Target selector */}
                 <div className="flex items-center gap-2">
-                    <span className="text-[9px] tracking-[4px] uppercase" style={{ color: 'var(--text-muted)' }}>Target:</span>
-                    <select value={selectedMudra} onChange={e => setSelectedMudra(e.target.value)}
+                    <span className="text-[10px] tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Target:</span>
+                    <select
+                        value={selectedMudra}
+                        onChange={e => setSelectedMudra(e.target.value)}
                         className="text-xs px-3 py-1.5 rounded border outline-none"
-                        style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', color: 'var(--text)' }}>
-                        <option value="">Free Detect (Any Mudra)</option>
-                        {MUDRAS.map(m => <option key={m.folder} value={m.folder}>{m.name}</option>)}
+                        style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    >
+                        <option value="">Free Practice (Any)</option>
+                        {MUDRAS.map(m => (
+                            <option key={m.folder} value={m.folder}>
+                                {mastered.includes(m.folder) ? '✓ ' : ''}{m.name}
+                            </option>
+                        ))}
                     </select>
                 </div>
 
-                <button onClick={() => setShow3D(v => !v)}
-                    className="px-3 py-1.5 rounded border text-[9px] tracking-[3px] uppercase transition-all"
+                {/* Language */}
+                <LanguageSelector lang={lang} onChange={setLang} />
+
+                {/* Voice toggle */}
+                <button
+                    onClick={() => { const n = !voiceOn; setVoiceOn(n); if (n) { unlock(); setTimeout(() => test(), 300); } }}
+                    className="px-4 py-1.5 rounded border text-[10px] tracking-widest uppercase font-bold transition-all"
                     style={{
-                        backgroundColor: show3D ? 'rgba(139,92,246,0.15)' : 'transparent',
-                        borderColor:     show3D ? 'rgba(139,92,246,0.5)'  : 'var(--border)',
-                        color:           show3D ? '#a78bfa'               : 'var(--text-muted)',
-                    }}>
-                    {show3D ? '◈ 3D On' : '◈ 3D Off'}
+                        backgroundColor: voiceOn ? 'var(--accent)' : 'transparent',
+                        borderColor: voiceOn ? 'var(--accent)' : 'var(--border)',
+                        color: voiceOn ? '#fff' : 'var(--text-muted)',
+                    }}
+                >
+                    {voiceOn ? '🔊 Voice On' : '🔇 Voice Off'}
                 </button>
 
-                {holdState !== 'idle' && (
+                {/* 3D toggle */}
+                <button
+                    onClick={() => setShow3D(v => !v)}
+                    className="px-4 py-1.5 rounded border text-[10px] tracking-widest uppercase transition-all"
+                    style={{
+                        backgroundColor: show3D ? 'rgba(139,92,246,0.15)' : 'transparent',
+                        borderColor: show3D ? 'rgba(139,92,246,0.5)' : 'var(--border)',
+                        color: show3D ? '#a78bfa' : 'var(--text-muted)',
+                    }}
+                >
+                    ◈ 3D {show3D ? 'On' : 'Off'}
+                </button>
+
+                {/* Status pill */}
+                {cameraOn && holdState !== 'idle' && (
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full border"
                         style={{
-                            backgroundColor: holdState === 'evaluating' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                            borderColor:     holdState === 'evaluating' ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)',
+                            backgroundColor: holdState === 'done' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+                            borderColor: holdState === 'done' ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)',
                         }}>
-                        <div className={`w-2 h-2 rounded-full ${holdState === 'evaluating' ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
-                        <span className="text-[9px] tracking-[3px] uppercase font-bold"
-                            style={{ color: holdState === 'evaluating' ? '#34d399' : '#fbbf24' }}>
-                            {holdState === 'evaluating' ? `Auto Eval · ${accuracy}%` : 'Detecting hold…'}
+                        <div className={`w-2 h-2 rounded-full ${holdState === 'done' ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
+                        <span className="text-[9px] tracking-widest uppercase font-bold"
+                            style={{ color: holdState === 'done' ? '#34d399' : '#fbbf24' }}>
+                            {holdState === 'done' ? `Saved! ${Math.round(accuracy)}%` : `Holding ${Math.round(holdPct)}%`}
                         </span>
                     </div>
                 )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-                {/* Left Column — Camera & 3D */}
-                <div className="lg:col-span-8 flex flex-col gap-8">
-                    {/* Camera */}
+                {/* ── LEFT: Camera + 3D ── */}
+                <div className="lg:col-span-8 space-y-4">
+
+                    {/* Camera view */}
                     {cameraOn ? (
-                        <div className="w-full rounded-lg overflow-hidden border relative"
-                            style={{ borderColor: 'var(--border)', height: '65vh', minHeight: '450px' }}>
+                        <div className="relative rounded-xl overflow-hidden border"
+                            style={{ borderColor: 'var(--border)', height: '60vh', minHeight: '420px', backgroundColor: '#000' }}>
+
+                            {/* Video */}
+                            <video ref={videoRef} autoPlay playsInline muted
+                                className="w-full h-full object-cover"
+                                style={{ transform: 'scaleX(-1)' }} />
+
+                            {/* Skeleton overlay */}
+                            <canvas ref={canvasRef}
+                                className="absolute inset-0 pointer-events-none"
+                                style={{ width: '100%', height: '100%' }} />
 
                             {/* Top bar */}
-                            <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-2 px-4 py-2"
-                                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                                <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-                                <span className="text-[9px] tracking-[4px] text-white/60 uppercase">Live Feed · MediaPipe Hands</span>
-                                {selectedMudra && (
-                                    <span className="ml-auto text-[9px] tracking-[3px] uppercase text-yellow-400/80">
-                                        Target: {MUDRAS.find(m => m.folder === selectedMudra)?.name}
-                                    </span>
+                            <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2 px-3 py-1 rounded-full"
+                                    style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
+                                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                    <span className="text-[9px] text-white/70 uppercase tracking-widest">Live</span>
+                                    {selectedMudra && (
+                                        <span className="text-[9px] text-yellow-400 uppercase tracking-widest">
+                                            · {MUDRAS.find(m => m.folder === selectedMudra)?.name}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Live score badge */}
+                                {isDetected && (
+                                    <div className="px-3 py-1 rounded-full text-[10px] font-bold"
+                                        style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: scoreColor }}>
+                                        {Math.round(accuracy)}%
+                                    </div>
                                 )}
                             </div>
 
-                            {/* Status + wrong mudra badge */}
-                            {isDetected && (
-                                <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 w-full max-w-[85%]">
-                                    <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${accuracy >= 70 && confidence >= 70 && corrections.length === 0 ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
-                                        {accuracy >= 70 && confidence >= 70 && corrections.length === 0 ? '✓ Good Form' : '↻ Adjust Position'}
-                                    </div>
-                                    {wrongMudraMsg && (
-                                        <div className="px-4 py-2 rounded-lg text-[10px] tracking-widest uppercase font-black border bg-red-600/95 border-red-400 text-white shadow-2xl backdrop-blur-md text-center animate-pulse">
-                                            ⚠️ {wrongMudraMsg}
-                                        </div>
-                                    )}
+                            {/* Wrong mudra warning */}
+                            {wrongMsg && (
+                                <div className="absolute top-14 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border text-center animate-pulse"
+                                    style={{ backgroundColor: 'rgba(220,38,38,0.9)', borderColor: '#f87171', color: '#fff', whiteSpace: 'nowrap' }}>
+                                    ⚠ {wrongMsg}
                                 </div>
                             )}
 
-                            {/* Manual hold bar */}
-                            {holdState === 'idle' && holdProgress > 0 && (
-                                <div className="absolute top-12 left-4 z-10 bg-black/70 px-3 py-2 rounded-lg border border-green-500/30">
-                                    <div className="text-[8px] tracking-[3px] uppercase text-green-400 mb-1">Saving…</div>
-                                    <div className="w-24 h-1.5 bg-white/10 rounded-full">
-                                        <div className="h-full rounded-full bg-green-400 transition-all duration-200" style={{ width: `${holdProgress}%` }} />
+                            {/* Hold progress bar */}
+                            {holdPct > 0 && holdState !== 'done' && (
+                                <div className="absolute bottom-16 left-4 right-4">
+                                    <div className="flex justify-between text-[9px] text-white/60 mb-1">
+                                        <span>Hold steady...</span>
+                                        <span>{Math.round(holdPct)}%</span>
+                                    </div>
+                                    <div className="h-1.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
+                                        <div className="h-full rounded-full transition-all duration-200"
+                                            style={{ width: `${holdPct}%`, backgroundColor: '#10b981' }} />
                                     </div>
                                 </div>
                             )}
-
-                            <canvas ref={canvasRef} 
-                                width="640" height="480"
-                                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} />
-                            <video ref={videoRef} autoPlay playsInline muted
-                                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
-
-                            {/* Hold Detection Ring */}
-                            <HoldDetectionRing
-                                holdProgress={holdProgress}
-                                holdState={holdState}
-                                mudraName={autoResult?.name || displayData.name || ''}
-                                accuracy={autoResult?.accuracy || accuracy}
-                            />
 
                             {/* Saved overlay */}
                             {saved && (
-                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 px-6 py-3 rounded-xl border bg-green-500/20 border-green-500/40 text-green-300 text-sm font-bold tracking-widest uppercase">
-                                    ✓ Progress Saved!
+                                <div className="absolute inset-0 flex items-center justify-center"
+                                    style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}>
+                                    <div className="text-center">
+                                        <div className="text-4xl mb-2">✓</div>
+                                        <div className="text-white font-bold text-lg uppercase tracking-widest">
+                                            Mudra Saved!
+                                        </div>
+                                        <div className="text-white/60 text-sm">{mudraInfo?.name} · {Math.round(accuracy)}%</div>
+                                    </div>
                                 </div>
                             )}
 
                             {/* Bottom controls */}
-                            <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <button onClick={test}
-                                        className="px-3 py-1.5 rounded text-white text-[9px] tracking-widest uppercase border border-white/20 bg-white/5 hover:bg-white/10 transition-all">
-                                        Test Voice
-                                    </button>
-                                    <LanguageSelector lang={lang} onChange={setLang} compact />
-                                    <button onClick={() => {
-                                            const next = !voiceEnabled;
-                                            setVoiceEnabled(next);
-                                        }}
-                                        className="px-4 py-2 rounded text-white text-100% tracking-widest uppercase flex items-center gap-2 border border-white/10 transition-all font-bold"
-                                        style={{ backgroundColor: voiceEnabled ? '#b87333' : 'rgba(255,255,255,0.05)' }}>
-                                        {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
-                                    </button>
+                            <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 py-3"
+                                style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}>
+                                <div className="flex items-center gap-2">
+                                    {isDetected && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: confColor }} />
+                                            <span className="text-[10px] text-white/70">
+                                                {mudraInfo?.name || result?.name} · {Math.round(confidence)}%
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
-                                <button onClick={stopWebcam}
-                                    className="px-6 py-2 rounded text-white text-xs tracking-widest uppercase border border-red-500/30 bg-red-500/20 hover:bg-red-500/30 transition-all">
-                                    ■ Stop Camera
+                                <button onClick={stopCamera}
+                                    className="px-4 py-2 rounded text-[9px] uppercase tracking-widest font-bold border border-red-500/40 text-red-400 hover:bg-red-500/20 transition-all">
+                                    ■ Stop
                                 </button>
                             </div>
                         </div>
                     ) : (
-                        <div className="w-full rounded-lg flex flex-col items-center justify-center gap-5 border"
-                            style={{ height: '65vh', minHeight: '450px', backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
-                            <div className="text-6xl" style={{ color: 'var(--text-muted)' }}>◎</div>
-                            <p className="text-xs tracking-[4px] uppercase" style={{ color: 'var(--text-muted)' }}>Camera ready to start</p>
-                            <button onClick={startWebcam}
-                                className="px-10 py-3 rounded text-white text-xs tracking-[4px] uppercase"
+                        /* Start camera placeholder */
+                        <div className="rounded-xl flex flex-col items-center justify-center border"
+                            style={{ height: '60vh', minHeight: '420px', backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)' }}>
+                            <div className="text-6xl mb-4 opacity-20">◎</div>
+                            <p className="text-[10px] tracking-widest uppercase mb-6" style={{ color: 'var(--text-muted)' }}>
+                                Camera ready
+                            </p>
+                            {selectedMudra && (
+                                <p className="text-sm mb-4 font-bold" style={{ color: 'var(--accent)' }}>
+                                    Target: {MUDRAS.find(m => m.folder === selectedMudra)?.name}
+                                </p>
+                            )}
+                            <button onClick={startCamera}
+                                className="px-10 py-3 rounded text-white text-[10px] tracking-widest uppercase"
                                 style={{ backgroundColor: 'var(--accent)' }}>
                                 ▶ Start Camera
                             </button>
                         </div>
                     )}
 
-                    {/* 3D Hand Visualiser */}
-                    {show3D && (
-                        <div className="w-full rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                            <div className="text-[9px] tracking-[5px] uppercase mb-4 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
-                                <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Angle Analysis
-                                {selectedMudra && (
-                                    <span className="ml-auto text-[9px]" style={{ color: '#a78bfa' }}>
-                                        Gold = {MUDRAS.find(m => m.folder === selectedMudra)?.name} reference pose
-                                    </span>
-                                )}
+                    {/* 3D Visualiser — only render when camera is on */}
+                    {show3D && cameraOn && (
+                        <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                            <div className="text-[9px] uppercase tracking-widest mb-3 flex items-center gap-2"
+                                style={{ color: 'var(--text-muted)' }}>
+                                <span style={{ color: '#8b5cf6' }}>◈</span> 3D Joint Analysis
                             </div>
-                            <HandVisualiser 
-                                targetMudra={selectedMudra} 
-                                landmarks={landmarks || []}
-                                deviations={autoResult?.deviations || {}}
-                                infoOverride={autoResult}
-                                apiBase={import.meta.env.VITE_FLASK_URL || ""} 
-                                loading={!landmarks}
+                            <HandVisualiser
+                                landmarks={landmarks}
+                                deviations={result?.deviations || {}}
+                                targetMudra={selectedMudra}
+                                infoOverride={result}
                             />
                         </div>
                     )}
                 </div>
 
-                {/* Right Column — Information Panel */}
-                <div className="lg:col-span-4 flex flex-col gap-6">
+                {/* ── RIGHT: Info Panel ── */}
+                <div className="lg:col-span-4 flex flex-col gap-4">
 
-                    {/* Card 1 — Name */}
-                    <div className="rounded-lg border p-6 transition-all duration-500 shadow-sm"
-                        style={{ borderColor: isDetected ? 'var(--accent)' : 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="text-[9px] tracking-[5px] uppercase mb-4" style={{ color: 'var(--text-muted)' }}>✦ Detected Mudra</div>
-                        <div className="text-3xl font-bold mb-2 transition-colors duration-500" style={{ color: isDetected ? 'var(--accent)' : 'var(--border)' }}>
+                    {/* Detected mudra card */}
+                    <div className="rounded-xl border p-5"
+                        style={{
+                            borderColor: isDetected ? 'var(--accent)' : 'var(--border)',
+                            backgroundColor: 'var(--bg-card)',
+                        }}>
+                        <div className="text-[9px] uppercase tracking-widest mb-3"
+                            style={{ color: 'var(--text-muted)' }}>✦ Detected Mudra</div>
+                        <div className="text-3xl font-bold mb-1 transition-all"
+                            style={{ color: isDetected ? 'var(--accent)' : 'var(--border)' }}>
                             {isDetected && mudraInfo ? mudraInfo.name : 'Waiting…'}
                         </div>
-                        {isDetected && mudraInfo && <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>{mudraInfo.meaning}</p>}
-                        
-                        {holdState === 'evaluating' && autoResult && (
-                            <div className="mt-4 px-3 py-2 rounded border text-[9px] tracking-[3px] uppercase font-bold animate-pulse"
-                                style={{ backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.3)', color: '#10B981' }}>
-                                ⚡ Auto-detected on hold
-                            </div>
+                        {isDetected && mudraInfo && (
+                            <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>
+                                {mudraInfo.meaning}
+                            </p>
                         )}
-                        {saved && (
-                            <div className="mt-4 border rounded p-3 text-center bg-green-500/10 border-green-500/20 text-green-400">
-                                <span className="text-[9px] tracking-[3px] uppercase font-bold">✓ Progress Saved</span>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Card 2 — Confidence + Accuracy */}
-                    <div className="rounded-lg border p-6 shadow-sm" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="text-[9px] tracking-[5px] uppercase mb-4" style={{ color: 'var(--text-muted)' }}>Recognition Confidence</div>
-                        <div className="text-4xl font-bold mb-3" style={{ color: confidence >= 70 ? '#4ade80' : confidence >= 40 ? '#fbbf24' : 'var(--accent)' }}>
-                            {confidence.toFixed(1)}%
-                        </div>
-                        <div className="h-2.5 rounded-full overflow-hidden mb-6" style={{ backgroundColor: 'var(--bg-card2)' }}>
-                            <div className="h-full rounded-full transition-all duration-700 ease-out"
-                                style={{ width: `${confidence}%`, backgroundColor: confidence >= 70 ? '#4ade80' : confidence >= 40 ? '#fbbf24' : '#dc2626' }} />
-                        </div>
-                        
-                        {isDetected && (
-                            <div className="pt-4 border-t border-white/5">
-                                <div className="flex justify-between items-end mb-2">
-                                    <div className="text-[9px] tracking-[3px] uppercase" style={{ color: 'var(--text-muted)' }}>Pose Accuracy</div>
-                                    <div className="text-lg font-bold" style={{ color: accuracy > 75 ? '#4ade80' : '#fbbf24' }}>{accuracy.toFixed(0)}%</div>
-                                </div>
-                                <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-card2)' }}>
-                                    <div className="h-full rounded-full transition-all duration-700 delay-100 ease-out"
-                                        style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : '#fbbf24' }} />
-                                </div>
+                        {result?.is_stable && isDetected && (
+                            <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold"
+                                style={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                                ● Stable detection
                             </div>
                         )}
                     </div>
 
-                    {/* Card 3 — Corrections & Position */}
-                    <div className="rounded-lg border p-6 shadow-sm flex-grow" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
-                        <div className="flex justify-between items-center mb-5">
-                            <div className="text-[9px] tracking-[5px] uppercase" style={{ color: 'var(--text-muted)' }}>Hand Position</div>
-                            {isDetected && mudraInfo && (
-                                <span className="text-[8px] tracking-[2px] uppercase px-2 py-1 rounded-sm border font-bold"
-                                    style={{ backgroundColor: LEVEL_COLORS[mudraInfo.level].bg, borderColor: LEVEL_COLORS[mudraInfo.level].border, color: LEVEL_COLORS[mudraInfo.level].text }}>
-                                    {mudraInfo.level}
-                                </span>
-                            )}
+                    {/* Scores */}
+                    <div className="rounded-xl border p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                        <div className="text-[9px] uppercase tracking-widest mb-4" style={{ color: 'var(--text-muted)' }}>
+                            Scores
                         </div>
 
-                        {isDetected && mudraInfo ? (
-                            <div className="space-y-5">
-                                <div className="p-3 rounded bg-white/5 border border-white/5">
-                                    <p className="text-xs leading-relaxed" style={{ color: 'var(--text)' }}>{mudraInfo.fingers}</p>
+                        <div className="space-y-3">
+                            {[
+                                { label: 'Confidence', value: confidence, color: confColor },
+                                { label: 'Accuracy',   value: accuracy,   color: scoreColor },
+                            ].map(({ label, value, color }) => (
+                                <div key={label}>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{label}</span>
+                                        <span className="text-sm font-bold" style={{ color }}>{Math.round(value)}%</span>
+                                    </div>
+                                    <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--bg-card2)' }}>
+                                        <div className="h-full rounded-full transition-all duration-500"
+                                            style={{ width: `${value}%`, backgroundColor: color }} />
+                                    </div>
                                 </div>
+                            ))}
+                        </div>
+                    </div>
 
-                                {corrections.length > 0 && (
-                                    <div className="p-4 rounded border bg-red-500/10 border-red-500/20">
-                                        <div className="text-[9px] tracking-[4px] uppercase text-red-500 mb-3 font-black">Correction Needed</div>
-                                        <ul className="text-xs space-y-2 text-red-400/90 font-medium">
-                                            {corrections.map((c, i) => (
-                                                <li key={i} className="flex items-start gap-2">
-                                                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                                                    <span>{c}</span>
+                    {/* Corrections */}
+                    <div className="rounded-xl border p-5 flex-1" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card)' }}>
+                        <div className="text-[9px] uppercase tracking-widest mb-4" style={{ color: 'var(--text-muted)' }}>
+                            Hand Position Guide
+                        </div>
+
+                        {isDetected ? (
+                            <div className="space-y-3">
+                                {corrections.filter(c => !c.startsWith('Wrong')).length > 0 ? (
+                                    <div className="p-3 rounded-lg border"
+                                        style={{ backgroundColor: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.2)' }}>
+                                        <div className="text-[9px] uppercase tracking-widest text-red-500 mb-2 font-bold">
+                                            Corrections
+                                        </div>
+                                        <ul className="space-y-1.5">
+                                            {corrections.filter(c => !c.startsWith('Wrong')).slice(0, 3).map((c, i) => (
+                                                <li key={i} className="text-xs text-red-400/90 flex gap-2">
+                                                    <span className="mt-1 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                                                    {c}
                                                 </li>
                                             ))}
                                         </ul>
                                     </div>
-                                )}
-
-                                {accuracy >= 70 && confidence >= 70 && corrections.length === 0 && (
-                                    <div className="p-4 rounded border bg-green-500/10 border-green-500/20">
-                                        <div className="text-[9px] tracking-[4px] uppercase text-green-500 font-black flex items-center gap-2">
-                                            <span className="text-lg">✓</span> Correct Pose
+                                ) : accuracy >= 65 ? (
+                                    <div className="p-3 rounded-lg border"
+                                        style={{ backgroundColor: 'rgba(16,185,129,0.05)', borderColor: 'rgba(16,185,129,0.2)' }}>
+                                        <div className="text-[9px] uppercase tracking-widest text-green-500 mb-1 font-bold flex items-center gap-1">
+                                            <span className="text-base">✓</span> Good Form!
                                         </div>
+                                        <p className="text-xs text-green-400/80">
+                                            Hold still for {Math.ceil((1 - holdPct/100) * (HOLD_MS/1000))}s to save
+                                        </p>
+                                    </div>
+                                ) : null}
+
+                                {result?.meaning && (
+                                    <div className="mt-2 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                                        <div className="text-[9px] uppercase tracking-widest mb-1" style={{ color: 'var(--text-muted)' }}>
+                                            Meaning
+                                        </div>
+                                        <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>{result.meaning}</p>
                                     </div>
                                 )}
-
-                                <div>
-                                    <div className="text-[9px] tracking-[5px] uppercase mb-2" style={{ color: 'var(--text-muted)' }}>Common Usage</div>
-                                    <p className="text-xs italic leading-relaxed" style={{ color: 'var(--text-muted)' }}>{mudraInfo.usage}</p>
-                                </div>
                             </div>
                         ) : (
-                            <div className="h-full flex flex-col items-center justify-center py-10 opacity-40">
-                                <div className="text-4xl mb-4">✋</div>
-                                <p className="text-[10px] tracking-[3px] uppercase text-center">Position hand in camera to see details</p>
+                            <div className="flex flex-col items-center justify-center py-8 opacity-30">
+                                <div className="text-3xl mb-3">✋</div>
+                                <p className="text-[10px] uppercase tracking-widest text-center">
+                                    Show your hand to the camera
+                                </p>
                             </div>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* Progress Bar (Full Width Below) */}
+            {/* Progress bar */}
             {progress && (
-                <div className="mt-8 border rounded-lg p-6 shadow-sm" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-3">
-                            <div className="text-[9px] tracking-[4px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Learning Journey</div>
-                            <div className="h-px w-12 bg-white/10"></div>
-                            <span className="text-[10px] font-bold tracking-widest uppercase" style={{ color: 'var(--copper)' }}>
-                                {progress.detectedMudras?.length || 0} of 28 Mastered
-                            </span>
-                        </div>
-                        <span className="text-[10px] tracking-widest uppercase font-bold text-white/40">
-                            {Math.round(((progress.detectedMudras?.length || 0) / 28) * 100)}% Complete
+                <div className="mt-6 border rounded-xl p-5"
+                    style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] uppercase tracking-widest font-bold"
+                            style={{ color: 'var(--text-muted)' }}>
+                            Learning Journey — {mastered.length}/28 Mastered
                         </span>
+                        <span className="text-[10px] uppercase tracking-widest font-bold"
+                            style={{ color: 'var(--copper)' }}>{mastPct}%</span>
                     </div>
-                    <div className="h-2 rounded-full overflow-hidden bg-black/20" style={{ border: '1px solid var(--border)' }}>
-                        <div className="h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(184,115,51,0.3)]"
-                            style={{ width: `${((progress.detectedMudras?.length || 0) / 28) * 100}%`, backgroundColor: 'var(--copper)' }} />
+                    <div className="h-2 rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+                        <div className="h-full rounded-full transition-all duration-1000"
+                            style={{ width: `${mastPct}%`, backgroundColor: 'var(--copper)' }} />
                     </div>
-                    <div className="flex justify-between mt-3">
-                        <span className="text-[9px] tracking-[3px] uppercase text-white/30 font-medium">Session Count: {progress.practiceCount || 0}</span>
-                        <div className="flex gap-4">
-                            <span className="text-[9px] tracking-[3px] uppercase text-white/30 font-medium italic">GestureIQ Bharatnatyam Guide</span>
-                        </div>
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                        {MUDRAS.map(m => (
+                            <div key={m.folder}
+                                className="px-2 py-0.5 rounded text-[8px] uppercase tracking-wider"
+                                style={{
+                                    backgroundColor: mastered.includes(m.folder) ? 'rgba(16,185,129,0.15)' : 'rgba(0,0,0,0.05)',
+                                    color: mastered.includes(m.folder) ? '#10b981' : 'var(--text-muted)',
+                                    border: `0.5px solid ${mastered.includes(m.folder) ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
+                                }}>
+                                {mastered.includes(m.folder) ? '✓ ' : ''}{m.name}
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
         </div>
     );
-
 }

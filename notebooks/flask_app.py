@@ -572,11 +572,11 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None):
         if mudra_key == "pataka":
             ring_a = current_angles.get("ring", 175)
             if ring_a < 130:
-                total_error += 200  # disqualifying — ring bent = tripataka not pataka
-                deviations.append((200, "Straighten your ring finger — Pataka needs ALL 4 fingers straight"))
+                total_error += 60  # SOFTENED: was 200 (disqualifying)
+                deviations.append((60, "Straighten your ring finger — Pataka needs all 4 fingers straight"))
             elif ring_a < 155:
-                total_error += 80
-                deviations.append((80, "Straighten your ring finger more for Pataka"))
+                total_error += 30
+                deviations.append((30, "Straighten your ring finger more for Pataka"))
             for f in ["index", "middle", "pinky"]:
                 if current_angles.get(f, 175) < 145:
                     total_error += 50
@@ -1084,8 +1084,29 @@ def run_madm(landmarks, target_mudra='', label="Right"):
         raw_probs   = model.predict_proba([features])[0]
         raw_conf    = float(max(raw_probs)) * 100
         
-        # ── Confidence Gating (0.65 Floor for Modern 3D Pipeline) ─────────────
-        if raw_conf < 65:
+        raw_angles = get_finger_angles_dict(smooth_lm)
+        angle_buffer.append(raw_angles)
+        finger_angles = {f: sum(a[f] for a in angle_buffer)/len(angle_buffer) for f in raw_angles}
+        lm_wrapper = LMWrapper(smooth_lm)
+
+        # ── TARGET-PRIORITY HYBRID LOGIC ──────────────────────────────────────
+        # NEW POSITION: Move this above the ML confidence gate so precise geometry 
+        # can 'save' a detection even if the ML model is uncertain.
+        geom_acc = 0
+        if target_mudra:
+            target_key = target_mudra.lower().strip()
+            if target_key in MUDRA_REFERENCE_ANGLES:
+                _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper)
+                
+                # ── Hamsasya Over-Override ──
+                if target_key == "hamsasya":
+                    if dist_lm(lm_wrapper, 4, 8, palm_size) < 0.12 and finger_angles.get("index", 180) < 110:
+                        geom_acc = 95.0
+
+        # ── Confidence Gating (Reduced Floor when practicing target) ──────────
+        # If we have a target or high geometric accuracy, we are more lenient.
+        conf_floor = 40 if (target_mudra or geom_acc > 50) else 65
+        if raw_conf < conf_floor:
             return {
                 "detected": False, 
                 "name": "", 
@@ -1102,33 +1123,13 @@ def run_madm(landmarks, target_mudra='', label="Right"):
         stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p)
         print(f"[INFO] Mudra: {stable_name}, Conf: {smooth_conf:.2f}")
 
-        raw_angles = get_finger_angles_dict(smooth_lm)
-        angle_buffer.append(raw_angles)
-        finger_angles = {f: sum(a[f] for a in angle_buffer)/len(angle_buffer) for f in raw_angles}
-
-        lm_wrapper = LMWrapper(smooth_lm)
-
-        if target_mudra:
-            # ── TARGET-PRIORITY HYBRID LOGIC ──────────────────────────────────
-            # If a specific mudra is being practiced, prioritize its geometry.
-            # This handles cases where ML confidence is low but finger angles match.
+        if target_mudra and geom_acc > 70:
             target_key = target_mudra.lower().strip()
-            if target_key in MUDRA_REFERENCE_ANGLES:
-                _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper)
-                
-                # ── Hamsasya Over-Override ──
-                # If target is hamsasya and we have contact + index bent, it's hamsasya 
-                # even if ML says Arala.
-                if target_key == "hamsasya":
-                    if dist_lm(lm_wrapper, 4, 8, palm_size) < 0.12 and finger_angles.get("index", 180) < 110:
-                        geom_acc = 95.0
-                
-                if geom_acc > 70:
-                    if stable_name != target_key:
-                        print(f"[HYBRID] Force Matching Target: ML={stable_name}({smooth_conf:.1f}%) -> Target={target_key}({geom_acc:.1f}%)")
-                    stable_name = target_key
-                    smooth_conf = max(smooth_conf, geom_acc)
-                    is_stable   = True
+            if stable_name != target_key:
+                print(f"[HYBRID] Force Matching Target: ML={stable_name}({smooth_conf:.1f}%) -> Target={target_key}({geom_acc:.1f}%)")
+            stable_name = target_key
+            smooth_conf = max(smooth_conf, geom_acc)
+            is_stable   = True
         else:
             # ── GLOBAL HYBRID OVERRIDES (Only if ML confidence is low) ─────────
             if smooth_conf < 60:
@@ -1464,7 +1465,7 @@ def detect_landmarks():
         presence_score = body.get('presenceScore', 1.0) 
         handedness     = body.get('handedness', 'Right') # "Left" or "Right"
         
-        if presence_score < 0.7:
+        if presence_score < 0.4:  # RELAXED: was 0.7
              return jsonify({
                  "detected": False, 
                  "status": "No Hand Detected", 

@@ -274,6 +274,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     // Last mudra state (prevent repeating same "correct" message)
     const lastSpokenMudraRef    = useRef('');
     const lastFeedbackRef       = useRef('');
+    const globalVoiceCooldownRef = useRef(0); // timestamp of last any voice
 
     useEffect(() => { langRef.current = language; }, [language]);
 
@@ -287,10 +288,13 @@ export function useVoiceGuide({ language = 'en' } = {}) {
 
     // ── Core internal speak (bypasses throttle — for pre-translated strings) ──
     const _doSpeak = useCallback((message, priority = PRIO.LOW) => {
-        if (!unlockedRef.current) return;  // must be unlocked first
-        if (!message) return;
-
-        // NEW: Always cancel existing speech to prevent queue backup and lag
+        if (!unlockedRef.current || !message) return;
+        
+        // Global 3-second minimum between any speech (priority override for critical info)
+        const now = Date.now();
+        if (now - globalVoiceCooldownRef.current < 3000 && priority < PRIO.HIGH) return;
+        globalVoiceCooldownRef.current = now;
+        
         window.speechSynthesis.cancel();
 
         const lang = langRef.current;
@@ -526,15 +530,18 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             const name = getMudraName(lang, mudra);
             let msg = '';
 
+            const attemptsText = attempts <= 1 ? "just one attempt" : `${attempts} attempts`;
+            const attemptsTextTa = attempts <= 1 ? "ஒரே முயற்சியில்" : `${attempts} முயற்சிகளில்`;
+
             if (lang === 'ta') {
-                const label = score > 85 ? "மிகச் சிறப்பு" : score > 75 ? "மிகவும் நன்று" : score > 60 ? "நன்று" : "இன்னும் முயற்சி தேவை";
-                msg = `${label}! நீங்கள் ${name} முத்திரையை ${attempts} முயற்சிகளில், ${score} சதவீத மதிப்பெண்களுடன் கற்றுக்கொண்டீர்கள். அருமை!`;
+                const label = score > 85 ? "அற்புதம்" : score > 75 ? "மிகவும் நன்று" : score > 60 ? "நன்று" : "தொடர்ந்து முயற்சியுங்கள்";
+                msg = `${label}! நீங்கள் ${name} முத்திரையை ${attemptsTextTa}, ${score} சதவீத துல்லியத்துடன் கற்றுக்கொண்டீர்கள். அருமை!`;
             } else if (lang === 'hi') {
-                const label = score > 85 ? "बहुत बढ़िया" : score > 75 ? "बहुत अच्छा" : score > 60 ? "अच्छा" : "और सुधार की आवश्यकता है";
-                msg = `${label}! आपने ${attempts} प्रयासों में, ${score} प्रतिशत स्कोर के साथ ${name} मुद्रा में महारत हासिल की है।`;
+                const label = score > 85 ? "बहुत बढ़िया" : score > 75 ? "बहुत अच्छा" : score > 60 ? "अच्छा" : "कोशिश करते रहें";
+                msg = `${label}! आपने ${attempts} प्रयासों में, ${score} प्रतिशत सटीकता के साथ ${name} मुद्रा सीख ली है।`;
             } else {
-                const label = score > 85 ? "Excellent" : score > 75 ? "Very Good" : score > 60 ? "Good" : "Keep Practicing";
-                msg = `${label}! You mastered ${mudra} with a score of ${score} percent in ${attempts} attempts.`;
+                const label = score > 85 ? "Excellent" : score > 75 ? "Very Good" : score > 60 ? "Good Job" : "Keep Practicing";
+                msg = `${label}! You mastered ${mudra} with ${score} percent accuracy in ${attemptsText}. Great work!`;
             }
 
             _doSpeak(msg, PRIO.HIGH);
