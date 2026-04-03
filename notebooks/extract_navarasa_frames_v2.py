@@ -34,11 +34,8 @@ RASA_ALIASES = {
     "shringaram": "shringara",
 }
 
-#VIDEO_FOLDER  = "D:/GestureIQ/dataset/navarasa/raw_videos"
-#FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
-
-VIDEO_FOLDER  = "E:/GestureIQ/dataset/navarasa/raw_videos"
-FRAMES_FOLDER = "E:/GestureIQ/dataset/navarasa/frames"
+VIDEO_FOLDER  = "D:/GestureIQ/dataset/navarasa/raw_videos"
+FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
 
 def detect_rasa_from_frame(frame):
     """Try reading rasa name from multiple regions of frame."""

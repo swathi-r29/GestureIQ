@@ -11,8 +11,8 @@ hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_co
 #]
 
 data_folders = [
-    "E:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras",
-    "E:/GestureIQ/dataset/bharatanatyam_mudras/real_hands"
+    "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras",
+    "D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands"
 ]
 
 bad_images = []

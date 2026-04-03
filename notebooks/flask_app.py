@@ -66,11 +66,11 @@ cap = cv2.VideoCapture(0)
 # =============================================================================
 # EMA + STABILITY PARAMETERS
 # =============================================================================
-EMA_ALPHA          = 0.55
+EMA_ALPHA          = 0.45
 LANDMARK_EMA_ALPHA = 0.60
-MIN_STABLE_FRAMES  = 4
-STABLE_THRESHOLD   = 0.52
-FAST_BREAK_FRAMES  = 4
+MIN_STABLE_FRAMES  = 6
+STABLE_THRESHOLD   = 0.58
+FAST_BREAK_FRAMES  = 5
 
 ema_probs     = None
 ema_landmarks = None
@@ -225,7 +225,7 @@ MUDRA_REFERENCE_ANGLES = {
     "mayura":       {'thumb': 101.2, 'index': 175.4, 'middle': 174.5, 'ring': 120.4, 'pinky': 175.2},
     "mrigashira":   {'thumb': 175.1, 'index':  70.2, 'middle':  70.4, 'ring':  70.1, 'pinky': 175.2},
     "mukula":       {'thumb':  59.8, 'index':  60.2, 'middle':  61.4, 'ring':  59.5, 'pinky':  61.2},
-    "mushti":       {'thumb': 161.0, 'index': 125.6, 'middle':  81.9, 'ring':  84.2, 'pinky':  95.8},
+    "mushti":       {'thumb':  55.0, 'index':  45.0, 'middle':  45.0, 'ring':  45.0, 'pinky':  45.0},
     "padmakosha":   {'thumb': 111.2, 'index': 110.5, 'middle': 112.4, 'ring': 111.2, 'pinky': 110.8},
     "palli":        {'thumb':  44.2, 'index': 174.5, 'middle': 174.2, 'ring':  45.1, 'pinky':  46.2},
     "pataka":       {'thumb':  70.4, 'index': 175.1, 'middle': 175.4, 'ring': 174.2, 'pinky': 174.8},
@@ -1008,19 +1008,26 @@ def run_madm(landmarks, target_mudra='', label="Right"):
             smooth_conf = max(smooth_conf, geom_acc)
             is_stable   = True
         else:
-            if smooth_conf < 60:
-                best_geom_acc  = 0
-                best_geom_name = ""
-                geom_scores    = {}
-                for m_name in MUDRA_REFERENCE_ANGLES.keys():
-                    _, acc = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
-                    geom_scores[m_name] = acc
-                    if acc > best_geom_acc:
-                        best_geom_acc  = acc
-                        best_geom_name = m_name
+            # BROAD GEOMETRIC SWEEP (For Free Practice Accuracy)
+            best_geom_acc  = 0
+            best_geom_name = ""
+            geom_scores    = {}
+            for m_name in MUDRA_REFERENCE_ANGLES.keys():
+                _, acc = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
+                geom_scores[m_name] = acc
+                if acc > best_geom_acc:
+                    best_geom_acc  = acc
+                    best_geom_name = m_name
 
+            # If ML is weak (conf < 70) and Geoscore is strong (acc > 85), prefer the Geometric match
+            if not target_key and best_geom_acc > 85 and (smooth_conf < 70 or best_geom_name != stable_name):
+                print(f"[GEOM-SWEEP] Overriding ML={stable_name}({smooth_conf:.1f}%) with GEOM={best_geom_name}({best_geom_acc:.1f}%)")
+                stable_name = best_geom_name
+                smooth_conf = max(smooth_conf, best_geom_acc * 0.90)
+                is_stable   = True
+
+            elif smooth_conf < 60:
                 print(f"DEBUG: ML={stable_name}({smooth_conf:.1f}%) | GeomBest={best_geom_name}({best_geom_acc:.1f}%)")
-
                 ring_angle = finger_angles.get("ring", 175)
 
                 if stable_name == "pataka" and ring_angle < 110:
@@ -1048,10 +1055,21 @@ def run_madm(landmarks, target_mudra='', label="Right"):
                                finger_angles.get("pinky",  180) < 110)
                 index_dist      = dist_lm(lm_wrapper, 8, 0, palm_size)
                 thumb_dist      = dist_lm(lm_wrapper, 4, 0, palm_size)
+                
+                # Absolute Fist Check (Loosened to 2.2 for inclusive detection)
+                total_fist_dist = sum([dist_lm(lm_wrapper, t, 0, palm_size) for t in [8, 12, 16, 20]])
+                is_fist_shape   = total_fist_dist < 2.2 
+                
                 signature_force = False
 
-                if is_curled_3 and index_dist > 0.22:
-                    if thumb_dist > 0.22:
+                if is_fist_shape and not target_key:
+                    stable_name     = "mushti"
+                    smooth_conf     = 95.0
+                    is_stable       = True
+                    signature_force = True
+                
+                elif is_curled_3 and index_dist > 0.45:
+                    if thumb_dist > 0.45:
                         stable_name     = "chandrakala"
                         smooth_conf     = max(smooth_conf, 92.0)
                         is_stable       = True
@@ -1084,6 +1102,17 @@ def run_madm(landmarks, target_mudra='', label="Right"):
 
         eval_mudra = target_key if target_key else stable_name
         corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
+
+        # SANITY CHECK: If ML picked an Open Mudra but it needs 'Straighten', 'Extend' etc.
+        # and we have a high-accuracy Geometric Match (e.g. Pataka), SWAP!
+        swap_keywords = ["Straighten", "Uncurl", "Extend", "Bend", "Tuck"]
+        if not target_key and any(k in c for k in swap_keywords for c in corrections):
+            if best_geom_acc > 88 and best_geom_name != stable_name:
+                print(f"[SANITY-SWAP] Conflict Case: ML={stable_name} -> GEOM={best_geom_name}")
+                stable_name = best_geom_name
+                eval_mudra  = stable_name
+                corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
+                is_stable   = True
 
         # FIX: Use stable_name (post-hybrid) not top_name for wrong mudra check
         wrong_mudra = (

@@ -1,14 +1,8 @@
 import cv2
 import os
 
-# Path to your videos folder
-#videos_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_videos"
-
-# Path to save frames
-#output_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
-
-videos_folder = "E:/GestureIQ/dataset/bharatanatyam_mudras/raw_videos"
-output_folder = "E:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
+videos_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_videos"
+output_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
 
 os.makedirs(output_folder, exist_ok=True)
 

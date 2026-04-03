@@ -10,7 +10,6 @@ face_mesh = mp_face.FaceMesh(
     refine_landmarks=True,
     min_detection_confidence=0.4,
 )
-
 #FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
 #OUTPUT_CSV    = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 
