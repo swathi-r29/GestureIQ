@@ -1,55 +1,57 @@
-// src/pages/Learn.jsx — FIXED voice feedback: wrong mudra + corrections + scoring
-// Key fixes:
-//  1. Separate voice cooldown timers (wrong-mudra vs corrections vs correct)
-//  2. Wrong mudra announced every 7s with clear message
-//  3. Top correction spoken every 5s 
-//  4. Voice fires on first occurrence, no double-fire requirement
-//  5. Proper landmark serialization to Flask
-
+// src/pages/Learn.jsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import HandVisualiser from '../components/HandVisualiser';
-import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
+import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
 
 const MUDRAS = [
-    { name: "Pataka",       meaning: "Flag",                usage: "Clouds, forest, a straight line, river, horse",   fingers: "All four fingers straight together, thumb bent",            level: "Basic",        folder: "pataka"       },
-    { name: "Tripataka",    meaning: "Three parts of flag", usage: "Crown, tree, flame, arrow",                        fingers: "Ring finger bent, others straight",                        level: "Basic",        folder: "tripataka"    },
-    { name: "Ardhapataka",  meaning: "Half flag",           usage: "Knife, two meanings, leaves",                      fingers: "Ring and little finger bent, others straight",             level: "Basic",        folder: "ardhapataka"  },
-    { name: "Kartarimukha", meaning: "Scissors face",       usage: "Separation, lightning, falling",                   fingers: "Index and middle separated like scissors",                 level: "Basic",        folder: "kartarimukha" },
-    { name: "Mayura",       meaning: "Peacock",             usage: "Peacock, applying tilak, braid",                   fingers: "Thumb touches ring fingertip, others spread",              level: "Basic",        folder: "mayura"       },
-    { name: "Ardhachandra", meaning: "Half moon",           usage: "Moon, plate, spear, beginning prayer",             fingers: "All fingers open, thumb extended sideways",                level: "Basic",        folder: "ardhachandra" },
-    { name: "Arala",        meaning: "Bent",                usage: "Drinking nectar, wind, poison",                    fingers: "Index finger bent inward, others straight",                level: "Intermediate", folder: "arala"        },
-    { name: "Shukatunda",   meaning: "Parrot beak",         usage: "Shooting arrow, throwing",                         fingers: "Thumb presses ring finger, others straight",               level: "Intermediate", folder: "shukatunda"   },
-    { name: "Mushti",       meaning: "Fist",                usage: "Grasping, wrestling, holding hair",                fingers: "All fingers curled into fist, thumb over them",           level: "Intermediate", folder: "mushti"       },
-    { name: "Shikhara",     meaning: "Spire",               usage: "Bow, pillar, husband, question",                   fingers: "Thumb raised from fist position",                          level: "Intermediate", folder: "shikhara"     },
-    { name: "Kapittha",     meaning: "Wood apple",          usage: "Lakshmi, Saraswati, holding cymbals",              fingers: "Index finger curled, thumb presses it",                    level: "Intermediate", folder: "kapittha"     },
-    { name: "Katakamukha",  meaning: "Opening in bracelet", usage: "Picking flowers, garland, pulling bow",            fingers: "Thumb, index, middle form a circle",                       level: "Intermediate", folder: "katakamukha"  },
-    { name: "Suchi",        meaning: "Needle",              usage: "Universe, number one, city, this",                 fingers: "Index finger pointing straight up",                        level: "Basic",        folder: "suchi"        },
-    { name: "Chandrakala",  meaning: "Digit of moon",       usage: "Moon crescent, forehead mark",                     fingers: "Thumb and index form crescent shape",                      level: "Intermediate", folder: "chandrakala"  },
-    { name: "Padmakosha",   meaning: "Lotus bud",           usage: "Lotus flower, fruits, ball, bell",                 fingers: "All fingers spread and curved like a cup",                 level: "Intermediate", folder: "padmakosha"   },
-    { name: "Sarpashira",   meaning: "Snake head",          usage: "Snake, elephant trunk, water",                     fingers: "All fingers together, hand bent at wrist",                 level: "Advanced",     folder: "sarpashira"   },
-    { name: "Mrigashira",   meaning: "Deer head",           usage: "Deer, forest, gentle touch, woman",                fingers: "Thumb, ring, little finger touch; others straight",        level: "Advanced",     folder: "mrigashira"   },
-    { name: "Simhamukha",   meaning: "Lion face",           usage: "Lion, horse, elephant, pearl",                     fingers: "Three fingers spread like lion mane",                      level: "Advanced",     folder: "simhamukha"   },
-    { name: "Kangula",      meaning: "Bell",                usage: "Bell fruit, fruit, drop of water",                 fingers: "Four fingers together, thumb bent across",                 level: "Advanced",     folder: "kangula"      },
-    { name: "Alapadma",     meaning: "Full bloomed lotus",  usage: "Full moon, beauty, lake, disc",                    fingers: "All five fingers spread wide and curved",                  level: "Advanced",     folder: "alapadma"     },
-    { name: "Chatura",      meaning: "Clever",              usage: "Gold, wind, slight, slow",                         fingers: "Four fingers bent, thumb tucked at side",                  level: "Advanced",     folder: "chatura"      },
-    { name: "Bhramara",     meaning: "Bee",                 usage: "Bee, bird, six seasons",                           fingers: "Index finger touches thumb; middle bent; others up",       level: "Advanced",     folder: "bhramara"     },
-    { name: "Hamsasya",     meaning: "Swan beak",           usage: "Pearl, tying thread, number five",                 fingers: "All fingertips touching thumb tip",                        level: "Advanced",     folder: "hamsasya"     },
-    { name: "Hamsapaksha",  meaning: "Swan wing",           usage: "Swan, number six, waving",                         fingers: "Fingers slightly spread in wave shape",                    level: "Advanced",     folder: "hamsapaksha"  },
-    { name: "Sandamsha",    meaning: "Tongs",               usage: "Picking flowers, tongs, forceful grasp",           fingers: "Index and middle pinch together",                          level: "Advanced",     folder: "sandamsha"    },
-    { name: "Mukula",       meaning: "Bud",                 usage: "Lotus bud, eating, naval",                         fingers: "All fingertips meet at one point",                         level: "Advanced",     folder: "mukula"       },
-    { name: "Tamrachuda",   meaning: "Rooster",             usage: "Rooster, peacock, bird crest",                     fingers: "Thumb up from fist, little finger raised",                 level: "Advanced",     folder: "tamrachuda"   },
-    { name: "Trishula",     meaning: "Trident",             usage: "Shiva trident, three paths, number three",         fingers: "Index, middle, ring fingers raised; others closed",        level: "Advanced",     folder: "trishula"     },
-];
+    { name: "Pataka",       level: "Basic",        folder: "pataka"       },
+    { name: "Tripataka",    level: "Basic",        folder: "tripataka"    },
+    { name: "Ardhapataka",  level: "Basic",        folder: "ardhapataka"  },
+    { name: "Kartarimukha", level: "Basic",        folder: "kartarimukha" },
+    { name: "Mayura",       level: "Basic",        folder: "mayura"       },
+    { name: "Ardhachandra", level: "Basic",        folder: "ardhachandra" },
+    { name: "Arala",        level: "Intermediate", folder: "arala"        },
+    { name: "Shukatunda",   level: "Intermediate", folder: "shukatunda"   },
+    { name: "Mushti",       level: "Intermediate", folder: "mushti"       },
+    { name: "Shikhara",     level: "Intermediate", folder: "shikhara"     },
+    { name: "Kapittha",     level: "Intermediate", folder: "kapittha"     },
+    { name: "Katakamukha",  level: "Intermediate", folder: "katakamukha"  },
+    { name: "Suchi",        level: "Basic",        folder: "suchi"        },
+    { name: "Chandrakala",  level: "Intermediate", folder: "chandrakala"  },
+    { name: "Padmakosha",   level: "Intermediate", folder: "padmakosha"   },
+    { name: "Sarpashira",   level: "Advanced",     folder: "sarpashira"   },
+    { name: "Mrigashira",   level: "Advanced",     folder: "mrigashira"   },
+    { name: "Simhamukha",   level: "Advanced",     folder: "simhamukha"   },
+    { name: "Kangula",      level: "Advanced",     folder: "kangula"      },
+    { name: "Alapadma",     level: "Advanced",     folder: "alapadma"     },
+    { name: "Chatura",      level: "Advanced",     folder: "chatura"      },
+    { name: "Bhramara",     level: "Advanced",     folder: "bhramara"     },
+    { name: "Hamsasya",     level: "Advanced",     folder: "hamsasya"     },
+    { name: "Hamsapaksha",  level: "Advanced",     folder: "hamsapaksha"  },
+    { name: "Sandamsha",    level: "Advanced",     folder: "sandamsha"    },
+    { name: "Mukula",       level: "Advanced",     folder: "mukula"       },
+    { name: "Tamrachuda",   level: "Advanced",     folder: "tamrachuda"   },
+    { name: "Trishula",     level: "Advanced",     folder: "trishula"     },
+].map(m => ({
+    ...m,
+    meaning: MUDRA_CONFIG[m.folder]?.meaning || '',
+    usage:   MUDRA_CONFIG[m.folder]?.usage   || '',
+    fingers: MUDRA_CONFIG[m.folder]?.fingers || '',
+}));
 
-const HOLD_DURATION_MS = 2000;
+const STABLE_GATE        = 4;
+const WRONG_MUDRA_GATE   = 5;
+const ACCURACY_THRESHOLD = 80;
+const HOLD_DURATION_MS   = 800;
+
 const STAGES = { SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
 const LEVEL_CONFIG = {
     'Basic':        { title: 'The Foundations', icon: '✦' },
@@ -84,25 +86,33 @@ export default function Learn() {
     const [frozenFrame,     setFrozenFrame]     = useState(null);
     const [isFrozen,        setIsFrozen]        = useState(false);
 
-    const attemptsRef       = useRef(0);
-    const holdStartRef      = useRef(null);
-    const masteredRef       = useRef(false);
-    const videoRef          = useRef(null);
-    const canvasRef         = useRef(null);
-    const streamRef         = useRef(null);
-    const handsRef          = useRef(null);
-    const landmarksRef      = useRef(null);
-    const isDetectingRef    = useRef(false);
-    const requestRef        = useRef(null);
-    const recoveryRef       = useRef(null);
-    const lastResultTimeRef = useRef(Date.now());
+    const attemptsRef          = useRef(0);
+    const holdStartRef         = useRef(null);
+    const masteredRef          = useRef(false);
+    const saveInProgressRef    = useRef(false);
 
-    // ── Separate voice cooldown refs (KEY FIX) ──────────────────────────────
-    const voiceEnabledRef     = useRef(false);
-    const lastWrongVoiceRef   = useRef({ text: '', time: 0 });  // wrong mudra timer
-    const lastCorrVoiceRef    = useRef({ text: '', time: 0 });  // finger correction timer
-    const lastOkVoiceRef      = useRef(0);                       // correct form timer
-    const lastNoHandRef       = useRef(0);                       // no hand timer
+    const stableFramesRef      = useRef(0);
+    const lastDetectedNameRef  = useRef('');
+    const wrongMudraFramesRef  = useRef(0);
+
+    const videoRef             = useRef(null);
+    const canvasRef            = useRef(null);
+    const streamRef            = useRef(null);
+    const handsRef             = useRef(null);
+    const landmarksRef         = useRef(null);
+    const isDetectingRef       = useRef(false);
+    const requestRef           = useRef(null);
+    const recoveryRef          = useRef(null);
+    const lastResultTimeRef    = useRef(Date.now());
+    const holdAccumulatorRef   = useRef(0);
+    const lastFrameTimeRef     = useRef(0);
+
+    const voiceEnabledRef      = useRef(false);
+    const lastWrongVoiceRef    = useRef({ text: '', time: 0 });
+    const lastCorrVoiceRef     = useRef({ text: '', time: 0 });
+    const lastOkVoiceRef       = useRef(0);
+    const lastNoHandRef        = useRef(0);
+    const stableCorrFramesRef  = useRef(0);
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
 
@@ -125,14 +135,15 @@ export default function Learn() {
         else setMudraContent(null);
     }, [selectedMudra]);
 
-    // Speak mudra instruction when stage becomes PRACTICE and voice is on
     useEffect(() => {
-        if (stage === STAGES.PRACTICE && selectedMudra && voiceEnabledRef.current) {
-            setTimeout(() => announce.start(selectedMudra.folder), 600);
+        if (stage === STAGES.PRACTICE && selectedMudra) {
+            unlock(); // Early unlock for browser audio
+            if (voiceEnabledRef.current) {
+                setTimeout(() => announce.start(selectedMudra.folder), 600);
+            }
         }
     }, [stage, selectedMudra]);
 
-    // ── MediaPipe: Hands Setup ──────────────────────────────────────────────
     useEffect(() => {
         if (!cameraOn) return;
 
@@ -144,7 +155,6 @@ export default function Learn() {
             const canvas = canvasRef.current;
             const video  = videoRef.current;
             if (!canvas || !video) return;
-
             const ctx = canvas.getContext('2d');
             canvas.width  = video.clientWidth;
             canvas.height = video.clientHeight;
@@ -152,7 +162,6 @@ export default function Learn() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.scale(-1, 1);
             ctx.translate(-canvas.width, 0);
-
             if (results.multiHandLandmarks?.length > 0) {
                 const lms  = results.multiHandLandmarks[0];
                 const hand = results.multiHandedness?.[0]?.label || 'Right';
@@ -167,9 +176,8 @@ export default function Learn() {
         });
 
         recoveryRef.current = setInterval(() => {
-            if (cameraOn && Date.now() - lastResultTimeRef.current > 3000) {
+            if (cameraOn && Date.now() - lastResultTimeRef.current > 3000)
                 lastResultTimeRef.current = Date.now();
-            }
         }, 1000);
 
         return () => {
@@ -178,13 +186,11 @@ export default function Learn() {
         };
     }, [cameraOn]);
 
-    // ── Frame Loop ──────────────────────────────────────────────────────────
     useEffect(() => {
         let active = true;
         const processFrame = async () => {
-            if (active && cameraOn && videoRef.current?.readyState >= 2 && handsRef.current) {
+            if (active && cameraOn && videoRef.current?.readyState >= 2 && handsRef.current)
                 await handsRef.current.send({ image: videoRef.current }).catch(() => {});
-            }
             if (active && cameraOn) requestRef.current = requestAnimationFrame(processFrame);
         };
         if (cameraOn) requestRef.current = requestAnimationFrame(processFrame);
@@ -194,7 +200,6 @@ export default function Learn() {
         };
     }, [cameraOn]);
 
-    // ── Webcam ──────────────────────────────────────────────────────────────
     const startWebcam = useCallback(async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
@@ -233,12 +238,17 @@ export default function Learn() {
         return canvas.toDataURL('image/jpeg', 0.7);
     }, []);
 
-    // ── DETECTION POLLING — voice logic is the main fix ─────────────────────
+    // ── DETECTION POLLING ─────────────────────────────────────────────────────
     useEffect(() => {
         if (stage !== STAGES.PRACTICE || !cameraOn || !selectedMudra) return;
-        masteredRef.current = false;
+        masteredRef.current       = false;
+        saveInProgressRef.current = false;
 
-        // Reset voice cooldowns when mudra changes
+        stableFramesRef.current     = 0;
+        lastDetectedNameRef.current = '';
+        wrongMudraFramesRef.current = 0;
+
+        announce.resetWrongGate?.();
         lastWrongVoiceRef.current = { text: '', time: 0 };
         lastCorrVoiceRef.current  = { text: '', time: 0 };
         lastOkVoiceRef.current    = 0;
@@ -251,13 +261,16 @@ export default function Learn() {
             try {
                 const dataObj = landmarksRef.current;
 
-                // ── NO HAND ──────────────────────────────────────────────────
+                // ── NO HAND ───────────────────────────────────────────────────
                 if (!dataObj || !dataObj.landmarks) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
                     setHoldProgress(0);
                     holdStartRef.current = null;
 
-                    // Voice: no hand reminder every 6s
+                    stableFramesRef.current     = 0;
+                    lastDetectedNameRef.current = '';
+                    wrongMudraFramesRef.current = 0;
+
                     if (voiceEnabledRef.current) {
                         const now = Date.now();
                         if (now - lastNoHandRef.current > 6000) {
@@ -271,17 +284,14 @@ export default function Learn() {
 
                 attemptsRef.current += 1;
 
-                // Convert MediaPipe landmarks to plain array
                 const lmArray = Array.from(dataObj.landmarks).map(lm => ({
-                    x: lm.x ?? lm[0],
-                    y: lm.y ?? lm[1],
-                    z: lm.z ?? lm[2],
+                    x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
                 }));
 
                 const res = await fetch(`${FLASK_URL}/api/detect_landmarks`, {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({
+                    body: JSON.stringify({
                         landmarks:     lmArray,
                         handedness:    dataObj.handedness || 'Right',
                         presenceScore: dataObj.score      || 1.0,
@@ -291,59 +301,97 @@ export default function Learn() {
                 });
 
                 const data = await res.json();
-                setDetected(data);
 
-                // ═══════════════════════════════════════════════════════════
-                // VOICE FEEDBACK — COMPLETELY REWRITTEN (the main fix)
-                // Uses separate timers so wrong-mudra never blocks corrections
-                // ═══════════════════════════════════════════════════════════
-                if (voiceEnabledRef.current && data) {
-                    const now         = Date.now();
-                    const accuracy    = data.accuracy    || 0;
-                    const corrections = data.corrections || [];
-                    const detected    = data.detected    || false;
-                    const mudraName   = data.name        || '';
+                // ── STABLE EVALUATION WINDOW ──────────────────────────────────
+                const detectedName = data.name || '';
+                const isStableAPI  = data.is_stable || false;
+                const confidence   = data.confidence || 0;
+                const accuracy     = data.accuracy   || 0;
+                const corrections  = data.corrections || [];
 
-                    // Find messages by type
-                    const wrongMsg   = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-                    const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+                if (detectedName && detectedName === lastDetectedNameRef.current) {
+                    stableFramesRef.current = Math.min(stableFramesRef.current + 1, 10);
+                } else {
+                    stableFramesRef.current     = 1;
+                    lastDetectedNameRef.current = detectedName;
+                }
 
-                    // ── 1. WRONG MUDRA (highest priority, every 7s) ──────────
-                    if (wrongMsg) {
+                const locallyStable = stableFramesRef.current >= STABLE_GATE;
+
+                const wrongMsg   = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+                const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+
+                // ── FIX: Wrong mudra frame counter (for voice gating only) ────
+                // The UI always shows wrongMsg immediately when backend sends it.
+                // Only the VOICE announcement is gated behind wrongMudraFramesRef.
+                if (wrongMsg) {
+                    wrongMudraFramesRef.current = Math.min(6, wrongMudraFramesRef.current + 1);
+                } else {
+                    wrongMudraFramesRef.current = Math.max(0, wrongMudraFramesRef.current - 0.5);
+                }
+
+                // displayCorrections passes wrongMsg through untouched — no UI gate
+                const displayCorrections = [...corrections];
+                const hasWrongMudraInDisplay = displayCorrections.some(
+                    c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra')
+                );
+
+                const displayData = {
+                    ...data,
+                    corrections: displayCorrections,
+                    // ── FIX: isAdjusting checks raw wrongMsg, not the filtered display list ──
+                    // If backend sent a wrongMsg, suppress "Adjusting…" and show the alert instead
+                    _isAdjusting: !locallyStable && !isStableAPI && accuracy < 80 && !wrongMsg,
+                };
+
+                setDetected(displayData);
+
+                // ── VOICE — gating is now handled individually inside ──────────────────
+                if (voiceEnabledRef.current) {
+                    const now            = Date.now();
+                    const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
+
+                    // Small gate for finger corrections to avoid jitter
+                    if (fingerCorr.length > 0) {
+                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
+                    } else {
+                        stableCorrFramesRef.current = 0;
+                    }
+                    const stableFingerCorr = stableCorrFramesRef.current >= 3 ? fingerCorr[0] : null;
+
+                    if (stableWrongMsg) {
                         const prev = lastWrongVoiceRef.current;
-                        if (wrongMsg !== prev.text || (now - prev.time) > 7000) {
-                            lastWrongVoiceRef.current = { text: wrongMsg, time: now };
-
-                            // Build clear spoken message
-                            const detMatch = wrongMsg.match(/showing ([a-zA-Z]+)/i);
-                            const tgtMatch = wrongMsg.match(/target is ([a-zA-Z]+)/i);
-                            const detName  = detMatch ? detMatch[1] : mudraName;
+                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4500) {
+                            lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
+                            const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
+                            const tgtMatch = stableWrongMsg.match(/(?:target is|instead of) ([a-zA-Z]+)/i);
+                            const detName  = detMatch ? detMatch[1] : detectedName;
                             const tgtName  = tgtMatch ? tgtMatch[1] : selectedMudra.folder;
+                            const capitalize = (s) => (s && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+                            const detDisp = capitalize(detName);
+                            const tgtDisp = capitalize(tgtName);
 
-                            let voiceMsg;
-                            if (lang === 'ta') {
-                                voiceMsg = `தவறான முத்திரை. நீங்கள் ${detName} காட்டுகிறீர்கள். இலக்கு ${tgtName}.`;
-                            } else if (lang === 'hi') {
-                                voiceMsg = `गलत मुद्रा। आप ${detName} दिखा रहे हैं। लक्ष्य ${tgtName} है।`;
-                            } else {
-                                voiceMsg = `Wrong mudra. You are showing ${detName}. The target mudra is ${tgtName}.`;
+                            let voiceMsg = lang === 'ta'
+                                ? `தவறான முத்திரை. நீங்கள் ${detName} காட்டுகிறீர்கள். சரியான முத்திரை ${tgtName}.`
+                                : lang === 'hi'
+                                ? `गलत मुद्रा। आप ${detName} दिखा रहे हैं। सही मुद्रा ${tgtName} है।`
+                                : `Wrong mudra. You are performing ${detDisp}. The correct one is ${tgtDisp}.`;
+
+                            if (fingerCorr.length > 0) {
+                                voiceMsg += ` ${fingerCorr[0]}`;
+                                // Synchronize to avoid immediate repeat
+                                lastCorrVoiceRef.current = { text: fingerCorr[0], time: now };
                             }
                             announce.raw(voiceMsg, 3);
                         }
-                    }
-
-                    // ── 2. FINGER CORRECTIONS (every 5s, only when correct mudra) ─
-                    else if (fingerCorr.length > 0 && detected && !wrongMsg) {
-                        const topCorr = fingerCorr[0];
-                        const prev    = lastCorrVoiceRef.current;
-                        if (topCorr !== prev.text || (now - prev.time) > 5000) {
-                            lastCorrVoiceRef.current = { text: topCorr, time: now };
-                            announce.raw(topCorr, 1);
+                    } else if (stableFingerCorr) {
+                        // Relaxed stability for corrections — speaks as long as error is consistent for 3 frames
+                        const prev = lastCorrVoiceRef.current;
+                        if (stableFingerCorr !== prev.text || (now - prev.time) > 5000) {
+                            lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
+                            announce.raw(stableFingerCorr, 1);
                         }
-                    }
-
-                    // ── 3. CORRECT FORM (every 8s) ───────────────────────────
-                    else if (detected && accuracy >= 72 && fingerCorr.length === 0 && !wrongMsg) {
+                    } else if (locallyStable && data.detected && accuracy >= 72 && fingerCorr.length === 0 && !stableWrongMsg) {
                         if (now - lastOkVoiceRef.current > 8000) {
                             lastOkVoiceRef.current = now;
                             const msg = lang === 'ta' ? 'சரியானது! அருமையான கோலம்'
@@ -354,23 +402,39 @@ export default function Learn() {
                     }
                 }
 
-                // ── HOLD DETECTION ──────────────────────────────────────────
-                const accuracy    = data.accuracy    || 0;
-                const corrections = data.corrections || [];
-                const fingerOnly  = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong'));
-                const isCorrect   = data.detected && accuracy >= 62 && fingerOnly.length === 0;
+                // ── HOLD + SAVE ───────────────────────────────────────────────
+                const isCorrectMudra = data.detected && (!wrongMsg || accuracy >= ACCURACY_THRESHOLD);
+                const isGoodAccuracy = accuracy >= ACCURACY_THRESHOLD;
+                const isGoodFrame    = isCorrectMudra && isGoodAccuracy;
 
-                if (isCorrect) {
-                    if (!holdStartRef.current) holdStartRef.current = Date.now();
-                    const elapsed = Date.now() - holdStartRef.current;
-                    setHoldProgress(Math.min(100, (elapsed / HOLD_DURATION_MS) * 100));
-                    if (elapsed >= HOLD_DURATION_MS && !masteredRef.current) {
-                        masteredRef.current = true;
-                        handleMudraMastered(selectedMudra.folder, accuracy);
-                    }
+                const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
+                const now = Date.now();
+                const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 0;
+                lastFrameTimeRef.current = now;
+
+                if (isGoodFrame) {
+                    holdAccumulatorRef.current = Math.min(holdMs, holdAccumulatorRef.current + dt);
                 } else {
-                    if (holdStartRef.current) { holdStartRef.current = null; setHoldProgress(0); }
+                    const isPartialGood = isCorrectMudra && accuracy >= 62;
+                    if (isPartialGood) {
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.5);
+                    } else {
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0);
+                    }
                 }
+
+                let displayPct = (holdAccumulatorRef.current / holdMs) * 100;
+                if (!isGoodFrame && (isCorrectMudra && accuracy >= 62)) {
+                    displayPct = Math.min(75, displayPct);
+                }
+                setHoldProgress(displayPct);
+
+                if (holdAccumulatorRef.current >= holdMs && !masteredRef.current && !saveInProgressRef.current) {
+                    masteredRef.current       = true;
+                    saveInProgressRef.current = true;
+                    handleMudraMastered(selectedMudra.folder, accuracy);
+                }
+
             } catch (err) {
                 console.warn('[Learn] Detection error:', err.message);
             } finally {
@@ -378,10 +442,17 @@ export default function Learn() {
             }
         }, 200);
 
-        return () => { clearInterval(interval); holdStartRef.current = null; setHoldProgress(0); };
+        return () => {
+            clearInterval(interval);
+            holdStartRef.current        = null;
+            setHoldProgress(0);
+            stableFramesRef.current     = 0;
+            lastDetectedNameRef.current = '';
+            wrongMudraFramesRef.current = 0;
+        };
     }, [stage, cameraOn, selectedMudra, lang, announce]);
 
-    // ── Data fetching ───────────────────────────────────────────────────────
+    // ── Data fetching ─────────────────────────────────────────────────────────
     const fetchProgress = async () => {
         try {
             const token = localStorage.getItem('token');
@@ -402,24 +473,35 @@ export default function Learn() {
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
         if (!folder) return;
+
+        const score    = Math.round(currentAccuracy);
+        const snapshot = captureFrame();
+        setFrozenFrame(snapshot);
+        setIsFrozen(true);
+        setSessionScore(score);
+        setSessionComplete(true);
+        stopWebcam();
+        setHoldProgress(0);
+
+        if (voiceEnabledRef.current) {
+            announce.mastered({ mudra: selectedMudra?.name || folder, score, attempts: attemptsRef.current });
+        }
+        attemptsRef.current = 0;
+
         try {
             const token = localStorage.getItem('token');
-            const score    = Math.round(currentAccuracy);
-            const snapshot = captureFrame();
-            setFrozenFrame(snapshot);
-            setIsFrozen(true);
-            setSessionScore(score);
-            const res = await axios.post('/api/user/progress/update', { mudraName: folder, score }, { headers: { 'x-auth-token': token } });
+            const res = await axios.post(
+                '/api/user/progress/update',
+                { mudraName: folder, score },
+                { headers: { 'x-auth-token': token }, timeout: 5000 }
+            );
             setProgress(res.data.detectedMudras || []);
             setBestScores(res.data.mudraScores  || {});
-            setSessionComplete(true);
-            stopWebcam();
-            setHoldProgress(0);
-            if (voiceEnabledRef.current) {
-                announce.mastered({ mudra: selectedMudra.name, score, attempts: attemptsRef.current });
-            }
-            attemptsRef.current = 0;
-        } catch { console.error('Failed to update progress'); }
+        } catch {
+            console.warn('[handleMudraMastered] Progress save failed (backend may be offline). UI already updated.');
+        } finally {
+            saveInProgressRef.current = false;
+        }
     };
 
     const enterPractice = (mudra) => {
@@ -427,8 +509,12 @@ export default function Learn() {
         setSessionComplete(false);
         setDetected({ name: '', confidence: 0, detected: false });
         setHoldProgress(0);
-        holdStartRef.current = null;
-        masteredRef.current  = false;
+        holdStartRef.current        = null;
+        masteredRef.current         = false;
+        saveInProgressRef.current   = false;
+        stableFramesRef.current     = 0;
+        lastDetectedNameRef.current = '';
+        wrongMudraFramesRef.current = 0;
         setPracticeStep(0);
         setIsFrozen(false);
         setFrozenFrame(null);
@@ -446,12 +532,17 @@ export default function Learn() {
         else setStage(STAGES.MUDRA_LIST);
     };
 
-    // ── Derived ─────────────────────────────────────────────────────────────
-    const accuracy       = detected.accuracy    || 0;
-    const corrections    = detected.corrections || [];
-    const fingerCorrs    = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
-    const wrongMudraMsg  = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-    const isCorrect      = detected.detected && accuracy > 65 && fingerCorrs.length === 0 && !wrongMudraMsg;
+    // ── Derived display state ─────────────────────────────────────────────────
+    const accuracy      = detected.accuracy    || 0;
+    const corrections   = detected.corrections || [];
+    const fingerCorrs   = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+    const isAdjusting   = detected._isAdjusting;
+    const isCorrect     = detected.detected && (accuracy >= 80 || (accuracy > 65 && fingerCorrs.length === 0 && !wrongMudraMsg));
+
+    const fingerGuideText = selectedMudra
+        ? (MUDRA_CONFIG[selectedMudra.folder]?.fingers || selectedMudra.fingers || '')
+        : '';
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
@@ -488,7 +579,11 @@ export default function Learn() {
                                     <div className="text-4xl mb-6 group-hover:scale-110 transition-transform" style={{ color: 'var(--accent)' }}>{config.icon}</div>
                                     <h3 className="text-2xl font-bold mb-2 uppercase tracking-widest" style={{ color: 'var(--text)' }}>{lvl}</h3>
                                     <p className="text-xs mb-8" style={{ color: 'var(--text-muted)' }}>{config.title}</p>
-                                    {lockReason && <div className="mb-6 px-3 py-1 bg-accent/5 rounded-full inline-block border border-accent/10"><p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{lockReason}</p></div>}
+                                    {lockReason && (
+                                        <div className="mb-6 px-3 py-1 bg-accent/5 rounded-full inline-block border border-accent/10">
+                                            <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{lockReason}</p>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between items-end">
                                         <div>
                                             <div className="text-[10px] tracking-widest uppercase mb-1" style={{ color: 'var(--text-muted)' }}>Completion</div>
@@ -498,7 +593,8 @@ export default function Learn() {
                                             {isLocked ? '🔒' : <ChevronRight size={20} />}
                                         </div>
                                     </div>
-                                    <div className="absolute bottom-0 left-0 h-1 bg-accent transition-all duration-1000" style={{ width: `${(completedCount / levelMudras.length) * 100}%` }} />
+                                    <div className="absolute bottom-0 left-0 h-1 bg-accent transition-all duration-1000"
+                                        style={{ width: `${(completedCount / levelMudras.length) * 100}%` }} />
                                 </div>
                             );
                         })}
@@ -546,7 +642,7 @@ export default function Learn() {
                 </div>
             )}
 
-            {/* ── STAGE C: PRACTICE ──────────────────────────────────────── */}
+            {/* ── STAGE C: PRACTICE ────────────────────────────────────── */}
             {stage === STAGES.PRACTICE && selectedMudra && (
                 <div>
                     {/* Top bar */}
@@ -566,27 +662,31 @@ export default function Learn() {
                                 }}>
                                 {show3D ? '◈ 3D On' : '◈ 3D Off'}
                             </button>
-                            <LanguageSelector lang={lang} onChange={(v) => { setLang(v); lastWrongVoiceRef.current = { text: '', time: 0 }; lastCorrVoiceRef.current = { text: '', time: 0 }; }} compact />
+                            <LanguageSelector lang={lang} onChange={(v) => {
+                                setLang(v);
+                                lastWrongVoiceRef.current = { text: '', time: 0 };
+                                lastCorrVoiceRef.current  = { text: '', time: 0 };
+                            }} compact />
                             <button onClick={test}
                                 className="px-3 py-1.5 rounded text-[9px] tracking-widest uppercase border transition-all"
                                 style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                                 Test Voice
                             </button>
                             <button onClick={() => {
-                                    const next = !voiceEnabled;
-                                    setVoiceEnabled(next);
-                                    voiceEnabledRef.current = next;
-                                    if (next) { unlock(); setTimeout(() => announce.start(selectedMudra.folder), 500); }
-                                    else stop();
-                                    lastWrongVoiceRef.current = { text: '', time: 0 };
-                                    lastCorrVoiceRef.current  = { text: '', time: 0 };
-                                }}
-                                className="px-4 py-2 rounded text-[10px] tracking-widest uppercase font-bold border transition-all"
-                                style={{
-                                    backgroundColor: voiceEnabled ? 'var(--copper)' : 'transparent',
-                                    borderColor:     voiceEnabled ? 'var(--copper)' : 'var(--border)',
-                                    color:           voiceEnabled ? 'white'         : 'var(--text-muted)',
-                                }}>
+                                const next = !voiceEnabled;
+                                setVoiceEnabled(next);
+                                voiceEnabledRef.current = next;
+                                if (next) { unlock(); setTimeout(() => announce.start(selectedMudra.folder), 500); }
+                                else stop();
+                                lastWrongVoiceRef.current = { text: '', time: 0 };
+                                lastCorrVoiceRef.current  = { text: '', time: 0 };
+                            }}
+                            className="px-4 py-2 rounded text-[10px] tracking-widest uppercase font-bold border transition-all"
+                            style={{
+                                backgroundColor: voiceEnabled ? 'var(--copper)' : 'transparent',
+                                borderColor:     voiceEnabled ? 'var(--copper)' : 'var(--border)',
+                                color:           voiceEnabled ? 'white'         : 'var(--text-muted)',
+                            }}>
                                 {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
                             </button>
                         </div>
@@ -613,9 +713,8 @@ export default function Learn() {
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 min-h-[600px]">
 
-                        {/* LEFT: Reference + Info ─────────────────────────── */}
+                        {/* LEFT: Reference + Info ──────────────────────── */}
                         <div className="flex flex-col gap-6">
-
                             {/* Reference image */}
                             <div className="w-full aspect-video rounded-xl border flex items-center justify-center relative overflow-hidden"
                                 style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
@@ -660,7 +759,9 @@ export default function Learn() {
                                 <div className="flex justify-between items-start mb-4">
                                     <div>
                                         <h1 className="text-3xl font-bold uppercase tracking-tight mb-1" style={{ color: 'var(--accent)' }}>{selectedMudra.name}</h1>
-                                        <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>{mudraContent?.description?.meaning || selectedMudra.meaning}</p>
+                                        <p className="text-sm italic" style={{ color: 'var(--text-muted)' }}>
+                                            {mudraContent?.description?.meaning || selectedMudra.meaning}
+                                        </p>
                                     </div>
                                     {bestScores[selectedMudra.folder] && (
                                         <div className="text-right">
@@ -670,13 +771,13 @@ export default function Learn() {
                                     )}
                                 </div>
 
-                                {/* Finger guide */}
+                                {/* Finger Guide */}
                                 <div className="mb-5 p-4 rounded-lg border" style={{ borderColor: 'var(--accent)', backgroundColor: 'var(--bg-card2)' }}>
                                     <div className="text-[9px] tracking-[4px] uppercase mb-2 flex items-center gap-2 font-bold" style={{ color: 'var(--accent)' }}>
                                         <BookOpen size={11} /> Finger Guide
                                     </div>
                                     <p className="text-sm leading-relaxed font-medium" style={{ color: 'var(--text)' }}>
-                                        {selectedMudra.fingers}
+                                        {fingerGuideText}
                                     </p>
                                     {voiceEnabled && (
                                         <button onClick={() => announce.start(selectedMudra.folder)}
@@ -687,8 +788,18 @@ export default function Learn() {
                                     )}
                                 </div>
 
-                                {/* LIVE CORRECTIONS — shown prominently ───────── */}
-                                {cameraOn && (wrongMudraMsg || fingerCorrs.length > 0) && (
+                                {/* Adjusting state */}
+                                {cameraOn && isAdjusting && !isCorrect && (
+                                    <div className="mb-4 p-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5">
+                                        <div className="text-[9px] tracking-[3px] uppercase text-yellow-500 font-bold flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" /> Adjusting…
+                                        </div>
+                                        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Hold your hand steady for a moment</p>
+                                    </div>
+                                )}
+
+                                {/* Live corrections */}
+                                {cameraOn && !isAdjusting && (wrongMudraMsg || fingerCorrs.length > 0) && (
                                     <div className="mb-4 space-y-2">
                                         {wrongMudraMsg && (
                                             <div className="p-4 rounded-xl border bg-red-500/10 border-red-500/30">
@@ -705,7 +816,9 @@ export default function Learn() {
                                                 </div>
                                                 <ul className="text-xs space-y-1.5 text-orange-300">
                                                     {fingerCorrs.slice(0, 3).map((c, i) => (
-                                                        <li key={i} className="flex items-center gap-2"><span className="text-orange-500">•</span>{c}</li>
+                                                        <li key={i} className="flex items-center gap-2">
+                                                            <span className="text-orange-500">•</span>{c}
+                                                        </li>
                                                     ))}
                                                 </ul>
                                             </div>
@@ -713,14 +826,16 @@ export default function Learn() {
                                     </div>
                                 )}
 
-                                {/* Correct form indicator */}
+                                {/* Correct form */}
                                 {cameraOn && isCorrect && (
                                     <div className="mb-4 p-4 rounded-xl border bg-green-500/10 border-green-500/30">
                                         <div className="text-[9px] tracking-[4px] uppercase text-green-500 font-black flex items-center gap-2">
                                             ✓ Correct Form — {Math.round(accuracy)}%
                                         </div>
                                         <p className="text-xs text-green-400 mt-1">
-                                            {holdProgress > 0 ? `Hold for ${Math.ceil((1 - holdProgress/100) * (HOLD_DURATION_MS/1000))}s to save` : 'Hold this position steady'}
+                                            {holdProgress > 0
+                                                ? `Saving in ${Math.ceil((1 - holdProgress / 100) * (HOLD_DURATION_MS / 1000))}s…`
+                                                : 'Hold this position steady'}
                                         </p>
                                     </div>
                                 )}
@@ -729,7 +844,9 @@ export default function Learn() {
                                     <div className="text-[9px] tracking-[4px] uppercase mb-1 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
                                         <Trophy size={11} /> Usage
                                     </div>
-                                    <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>{mudraContent?.description?.usage || selectedMudra.usage}</p>
+                                    <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                                        {mudraContent?.description?.usage || selectedMudra.usage}
+                                    </p>
                                 </div>
 
                                 {sessionComplete && (
@@ -744,7 +861,7 @@ export default function Learn() {
                             </div>
                         </div>
 
-                        {/* RIGHT: Camera ───────────────────────────────────── */}
+                        {/* RIGHT: Camera ───────────────────────────────── */}
                         <div className="flex flex-col">
                             <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner" style={{ borderColor: 'var(--border)', height: '520px' }}>
                                 <canvas ref={canvasRef} className="hidden" />
@@ -758,29 +875,43 @@ export default function Learn() {
                                             <span className="text-[8px] tracking-[3px] uppercase text-white/50">Accuracy</span>
                                             <span className="text-2xl font-mono font-bold"
                                                 style={{ color: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
-                                                {accuracy.toFixed(0)}%
+                                                {isAdjusting ? '…' : `${accuracy.toFixed(0)}%`}
                                             </span>
-                                            <div className="w-24 h-1.5 bg-white/10 rounded-full">
-                                                <div className="h-full rounded-full transition-all duration-300"
-                                                    style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }} />
-                                            </div>
+                                            {!isAdjusting && (
+                                                <div className="w-24 h-1.5 bg-white/10 rounded-full">
+                                                    <div className="h-full rounded-full transition-all duration-300"
+                                                        style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }} />
+                                                </div>
+                                            )}
                                         </div>
 
-                                        {/* Hold progress */}
+                                        {/* Hold progress ring */}
                                         {holdProgress > 0 && (
                                             <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-500/30">
-                                                <span className="text-[8px] tracking-[3px] uppercase text-green-400">Hold</span>
+                                                <span className="text-[8px] tracking-[3px] uppercase text-green-400">
+                                                    {holdProgress >= 100 ? 'Saved ✓' : 'Saving…'}
+                                                </span>
                                                 <div className="w-full h-2 bg-white/10 rounded-full mt-1">
                                                     <div className="h-full rounded-full transition-all duration-200 bg-green-400" style={{ width: `${holdProgress}%` }} />
                                                 </div>
-                                                <span className="text-[9px] text-green-300 font-bold">
-                                                    {Math.ceil((1 - holdProgress / 100) * (HOLD_DURATION_MS / 1000))}s
-                                                </span>
                                             </div>
                                         )}
 
-                                        {/* Wrong mudra overlay */}
-                                        {wrongMudraMsg && (
+                                        {/* Adjusting overlay */}
+                                        {isAdjusting && (
+                                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                                                <div className="px-5 py-2.5 rounded-full backdrop-blur-md"
+                                                    style={{ backgroundColor: 'rgba(0,0,0,0.72)', border: '1px solid rgba(245,158,11,0.18)' }}>
+                                                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold" style={{ color: 'rgba(251,191,36,0.8)' }}>
+                                                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                                                        Adjusting…
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Wrong mudra overlay — shows immediately when backend sends it */}
+                                        {!isAdjusting && wrongMudraMsg && (
                                             <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border text-center z-20 animate-pulse w-[90%]"
                                                 style={{ backgroundColor: 'rgba(220,38,38,0.95)', borderColor: '#f87171', color: '#fff' }}>
                                                 ⚠ {wrongMudraMsg}
@@ -829,18 +960,17 @@ export default function Learn() {
                                         )}
 
                                         {/* Status badge */}
-                                        {!isFrozen && detected.detected && (
+                                        {!isFrozen && detected.detected && !isAdjusting && !wrongMudraMsg && (
                                             <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-[85%] z-10">
-                                                {!wrongMudraMsg && (
-                                                    <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${isCorrect ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
-                                                        {isCorrect ? '✓ Correct Form' : '↻ Adjusting...'}
-                                                    </div>
-                                                )}
+                                                <div className={`px-4 py-1.5 rounded-full text-[9px] tracking-[3px] uppercase font-bold border ${isCorrect ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300'}`}>
+                                                    {isCorrect ? '✓ Correct Form' : '↻ Adjusting...'}
+                                                </div>
                                             </div>
                                         )}
 
                                         {/* Bottom bar */}
-                                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-xl border-t border-white/10 px-5 py-3 flex items-center justify-between">
+                                        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 backdrop-blur-xl"
+                                            style={{ backgroundColor: 'rgba(0,0,0,0.90)', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                                             <div>
                                                 <span className="text-[8px] tracking-[3px] uppercase text-white/40 block mb-0.5">Target</span>
                                                 <span className="text-white font-bold text-sm">{selectedMudra.name}</span>
@@ -891,7 +1021,7 @@ export default function Learn() {
                                 )}
                             </div>
 
-                            {/* Next / status */}
+                            {/* Next / status bar */}
                             <div className="mt-6">
                                 {sessionComplete ? (
                                     <button onClick={nextMudra}
@@ -903,13 +1033,15 @@ export default function Learn() {
                                     <div className="text-[9px] tracking-[4px] uppercase text-center w-full py-3 border rounded-xl"
                                         style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
                                         {cameraOn
-                                            ? wrongMudraMsg
-                                                ? `⚠ ${wrongMudraMsg}`
-                                                : fingerCorrs.length > 0
-                                                    ? `↻ ${fingerCorrs[0]}`
-                                                    : holdProgress > 0
-                                                        ? `Hold steady… ${Math.ceil((1 - holdProgress / 100) * 2)}s`
-                                                        : 'Match the reference image on the left'
+                                            ? isAdjusting
+                                                ? '⟳ Stabilizing — hold your hand steady'
+                                                : wrongMudraMsg
+                                                    ? `⚠ ${wrongMudraMsg}`
+                                                    : fingerCorrs.length > 0
+                                                        ? `↻ ${fingerCorrs[0]}`
+                                                        : holdProgress > 0
+                                                            ? `Hold steady… saving`
+                                                            : 'Match the reference image on the left'
                                             : 'Follow the steps above to begin practice'}
                                     </div>
                                 )}

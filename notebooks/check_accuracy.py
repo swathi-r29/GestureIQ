@@ -18,13 +18,13 @@ def p(r):
     return extract_features(pts)
 
 print("Loading dataset and model...")
-#df = pd.read_csv(r'D:\GestureIQ\dataset\bharatanatyam_mudras\landmarks.csv')
-#with open(r'D:\GestureIQ\models\mudra_model.pkl', 'rb') as f:
-    #m = pickle.load(f)
-
-df = pd.read_csv("../dataset/bharatanatyam_mudras/landmarks.csv")
-with open("../models/mudra_model.pkl", "rb") as f:
+df = pd.read_csv(r'D:\GestureIQ\dataset\bharatanatyam_mudras\landmarks.csv')
+with open(r'D:\GestureIQ\models\mudra_model.pkl', 'rb') as f:
     m = pickle.load(f)
+
+#df = pd.read_csv("../dataset/bharatanatyam_mudras/landmarks.csv")
+#with open("../models/mudra_model.pkl", "rb") as f:
+    #m = pickle.load(f)
     
 print("Extracting features (80/20 split test set)...")
 X_raw = df.drop('mudra_name', axis=1)

@@ -5,15 +5,15 @@ import mediapipe as mp
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.1)
 
-#data_folders = [
- #   "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras",
-  #  "D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands"
-#]
-
 data_folders = [
     "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras",
     "D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands"
 ]
+
+#data_folders = [
+#    "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras",
+#    "D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands"
+#]
 
 bad_images = []
 

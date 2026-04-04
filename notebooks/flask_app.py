@@ -212,7 +212,7 @@ MUDRA_REFERENCE_ANGLES = {
     "alapadma":     {'thumb': 156.4, 'index': 130.2, 'middle': 131.7, 'ring': 122.9, 'pinky': 118.5},
     "arala":        {'thumb': 155.8, 'index':  70.2, 'middle': 174.5, 'ring': 173.2, 'pinky': 171.2},
     "ardhachandra": {'thumb': 170.1, 'index': 175.2, 'middle': 176.4, 'ring': 174.9, 'pinky': 170.2},
-    "ardhapataka":  {'thumb':  75.2, 'index': 174.9, 'middle': 174.2, 'ring':  89.5, 'pinky':  91.2},
+    "ardhapataka":  {'thumb': 160.0, 'index': 174.9, 'middle': 174.2, 'ring':  89.5, 'pinky':  91.2},
     "bhramara":     {'thumb':  59.8, 'index':  58.7, 'middle':  70.4, 'ring': 175.1, 'pinky': 174.2},
     "chandrakala":  {'thumb': 161.2, 'index': 175.4, 'middle':  60.1, 'ring':  59.8, 'pinky':  61.2},
     "chatura":      {'thumb':  61.5, 'index': 175.2, 'middle': 174.9, 'ring': 174.2, 'pinky': 129.5},
@@ -236,7 +236,7 @@ MUDRA_REFERENCE_ANGLES = {
     "simhamukha":   {'thumb':  90.2, 'index': 175.1, 'middle': 101.4, 'ring': 102.5, 'pinky': 175.4},
     "suchi":        {'thumb': 109.5, 'index': 175.1, 'middle':  51.2, 'ring':  50.4, 'pinky':  51.2},
     "tamrachuda":   {'thumb': 174.8, 'index':  34.5, 'middle':  35.2, 'ring':  36.1, 'pinky': 175.2},
-    "tripataka":    {'thumb':  70.2, 'index': 175.1, 'middle': 174.5, 'ring':  39.8, 'pinky': 174.8},
+    "tripataka":    {'thumb': 160.0, 'index': 175.1, 'middle': 174.5, 'ring':  39.8, 'pinky': 174.8},
     "trishula":     {'thumb':  54.5, 'index': 175.1, 'middle': 174.5, 'ring': 174.2, 'pinky':  55.2},
     "vyaaghr":      {'thumb': 175.1, 'index': 174.8, 'middle':  54.7, 'ring':  56.2, 'pinky': 174.5},
 }
@@ -261,8 +261,8 @@ SKIP_CORRECTION_FINGERS = {
     "chandrakala":  {"middle", "ring", "pinky"},
     "pataka":       set(),
     "ardhachandra": {"thumb"},
-    "tripataka":    set(),
-    "ardhapataka":  set(),
+    "tripataka":    {"thumb"},
+    "ardhapataka":  {"thumb"},
     "kartarimukha": {"ring", "pinky"},
     "katakamukha":  {"ring", "pinky"},
     "bhramara":     {"ring", "pinky"},
@@ -449,7 +449,9 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
         actual_angle = current_angles.get(finger, ref_angle)
         abs_dev      = abs(ref_angle - actual_angle)
 
-        if abs_dev > 100:
+        if abs_dev > 90:
+            total_error += (abs_dev * 2.5)
+        elif abs_dev > 50:
             total_error += (abs_dev * 1.5)
         else:
             total_error += abs_dev
@@ -525,12 +527,8 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                 if current_angles.get(f, 175) < 145:
                     total_error += 45
                     deviations.append((45, f"Straighten your {f} finger for Tripataka"))
-            if current_angles.get("thumb", 70) > 120:
-                total_error += 55
-                deviations.append((55, "Bend your thumb inward toward your palm"))
-            if dist_lm(lm, 4, 5, palm_size) > 0.42:
-                total_error += 35
-                deviations.append((35, "Keep your thumb tucked inward"))
+            # Tripataka: thumb should be STRAIGHT (finger guide: "others straight")
+            # No thumb correction needed — only ring bends.
 
         elif mudra_key == "ardhapataka":
             for f in ["index", "middle"]:
@@ -545,9 +543,11 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                 elif a < 50:
                     total_error += 55
                     deviations.append((55, f"Uncurl your {f} finger — only half bent for Ardhapataka"))
-            if current_angles.get("thumb", 75) > 115:
+            # Ardhapataka: thumb should be STRAIGHT (extended), not bent.
+            # Only flag if thumb is unexpectedly curled (< 120)
+            if current_angles.get("thumb", 160) < 120:
                 total_error += 50
-                deviations.append((50, "Bend your thumb inward toward your palm"))
+                deviations.append((50, "Extend your thumb outward — keep it straight for Ardhapataka"))
 
         elif mudra_key == "kangula":
             if dist_lm(lm, 4, 16, palm_size) > 0.05:
@@ -681,9 +681,9 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                 deviations.append((35, "Bring your fingertips a little closer together"))
 
         elif mudra_key == "bhramara":
-            if dist_lm(lm, 4, 12, palm_size) > 0.05:
+            if dist_lm(lm, 4, 8, palm_size) > 0.08:
                 total_error += 85
-                deviations.append((85, "Touch your thumb to your middle tip for Bhramara"))
+                deviations.append((85, "Bring your index finger to touch your thumb for Bhramara"))
             if current_angles.get("index", 70) > 110:
                 total_error += 65
                 deviations.append((65, "Bend your index finger inward for Bhramara"))
@@ -754,6 +754,13 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                 deviations.append((40, "Open your fingers slightly — not a tight fist for Kapittha"))
 
         elif mudra_key == "suchi":
+            if current_angles.get("thumb", 110) > 140:
+                total_error += 600
+                deviations.append((600, "Tuck your thumb inward — do not extend it for Suchi"))
+            elif current_angles.get("thumb", 110) > 125:
+                total_error += 200
+                deviations.append((200, "Tuck your thumb tighter against your hand"))
+
             if current_angles.get("index", 175) < 150:
                 total_error += 70
                 deviations.append((70, "Point your index finger straight up for Suchi"))
@@ -1088,6 +1095,17 @@ def run_madm(landmarks, target_mudra='', label="Right"):
                         smooth_conf = max(smooth_conf, best_geom_acc * 0.88)
                         is_stable   = True
 
+                # --- TARGET LOCK CHECK ---
+                # If we are in Learn mode (target_key is set) and the user is attempting the target mudra 
+                # (target geometric accuracy is decent >= 60%), force the prediction to the target mudra.
+                # However, if another mudra flawlessly matches (e.g. Pataka = 98%) while the target is barely passing (66%), DO NOT lock.
+                if target_key:
+                    target_geom_acc = geom_scores.get(target_key, 0)
+                    if target_geom_acc >= 60 and (best_geom_acc - target_geom_acc < 25):
+                        stable_name = target_key
+                        smooth_conf = max(smooth_conf, target_geom_acc * 0.88)
+                        is_stable   = True
+
         if raw_conf < 20 and smooth_conf < 25:
             return {
                 "detected": False, "feedback": "Show your hand more clearly",
@@ -1112,11 +1130,15 @@ def run_madm(landmarks, target_mudra='', label="Right"):
                 is_stable   = True
 
         # FIX: Use stable_name (post-hybrid) not top_name for wrong mudra check
-        wrong_mudra = (
-            target_key and
-            stable_name.lower().strip() != target_key and
-            raw_conf >= 20
-        )
+        wrong_mudra = False
+        if target_key:
+            if stable_name.lower().strip() != target_key and raw_conf >= 20:
+                wrong_mudra = True
+            # Also catch cases where the ML hallucinates the target, but geometry proves it's totally wrong
+            elif geom_scores.get(target_key, 0) < 40 and best_geom_acc > 70 and best_geom_name != target_key:
+                wrong_mudra = True
+                stable_name = best_geom_name
+
         if wrong_mudra:
             wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
             corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
