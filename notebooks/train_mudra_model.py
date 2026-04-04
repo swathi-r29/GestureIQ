@@ -11,8 +11,11 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
-csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
-model_path = "D:/GestureIQ/models/mudra_model.pkl"
+#csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+#model_path = "D:/GestureIQ/models/mudra_model.pkl"
+
+csv_path = "../dataset/bharatanatyam_mudras/landmarks.csv"
+model_path = "../models/mudra_model.pkl"
 
 if not os.path.exists(csv_path):
     print(f"ERROR: Dataset not found at {csv_path}")

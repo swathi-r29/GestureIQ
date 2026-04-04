@@ -1,3 +1,5 @@
+# python extract_landmarks.py
+
 import os
 import csv
 import mediapipe as mp
@@ -13,9 +15,9 @@ from functools import partial
 #OUTPUT_CSV = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
 
 DATA_FOLDERS = [
-    "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
+    "../dataset/bharatanatyam_mudras/sorted_mudras"
 ]
-OUTPUT_CSV = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+OUTPUT_CSV = "../dataset/bharatanatyam_mudras/landmarks.csv"
 
 def get_versions(img):
     versions = []

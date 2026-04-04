@@ -46,11 +46,19 @@ print("\nPer-class results:")
 print(classification_report(y_test, y_pred))
 
 # ── Save ───────────────────────────────────────────────────────────────────
-import os
-os.makedirs("D:/GestureIQ/models", exist_ok=True)
+#import os
+#os.makedirs("D:/GestureIQ/models", exist_ok=True)
 
-with open("D:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
+#with open("D:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
+    #pickle.dump(model, f)
+
+#print("✅ Saved: D:/GestureIQ/models/navarasa_model.pkl")
+import os
+os.makedirs("../models", exist_ok=True)
+
+with open("../models/navarasa_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-print("✅ Saved: D:/GestureIQ/models/navarasa_model.pkl")
+print("✅ Saved: ../models/navarasa_model.pkl")
+
 print("Training complete!")

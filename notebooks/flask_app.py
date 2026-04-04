@@ -930,10 +930,7 @@ def run_madm(landmarks, target_mudra='', label="Right"):
         if palm_size < 1e-6:
             palm_size = 1.0
 
-        wrist         = lm_list[0]
-        normalized_lm = [LM(p.x - wrist.x, p.y - wrist.y, p.z - wrist.z) for p in lm_list]
-
-        smoothed_arr = ema_smooth_landmarks(normalized_lm)
+        smoothed_arr = ema_smooth_landmarks(lm_list)
         smooth_lm    = [LM(smoothed_arr[i, 0], smoothed_arr[i, 1], smoothed_arr[i, 2])
                         for i in range(21)]
 
@@ -1440,6 +1437,87 @@ def handle_free_target(data):
         class_targets["free_practice"] = t
         class_targets["video_feed"]    = t
 
+
+
+# ============================================================================
+# /api/predict  — STATELESS endpoint used ONLY by Detect.jsx
+# ============================================================================
+# Key differences from /api/detect_landmarks (used by Learn.jsx):
+#   • Tries BOTH Right and Left hand feature extraction
+#   • Picks whichever handedness gives higher model confidence
+#   • Does NOT touch any global EMA / stability state
+#   • No corrections, no scoring — just raw mudra name + confidence
+#
+# This completely isolates Detect.jsx from Learn.jsx.
+# Add this route to flask_app.py just before `if __name__ == '__main__':`.
+# ============================================================================
+
+@app.route('/api/predict', methods=['POST'])
+def predict_mudra():
+    """
+    Stateless mudra prediction for the Detect page.
+    Tries Right-hand and Left-hand feature extraction, returns the best match.
+    Does NOT modify any global state (no EMA, no stable_mudra, nothing).
+    """
+    try:
+        body = request.get_json(force=True)
+        if not body or 'landmarks' not in body:
+            return jsonify({"name": "", "confidence": 0.0, "top3": []}), 400
+
+        raw_lms = body['landmarks']
+        if len(raw_lms) != 21:
+            return jsonify({"name": "", "confidence": 0.0, "top3": []}), 400
+
+        # Build LM objects from JSON
+        lm_list = [LM(float(p['x']), float(p['y']), float(p['z'])) for p in raw_lms]
+
+
+        best_name  = ""
+        best_conf  = 0.0
+        best_probs = None
+
+                # Try both handedness options; pick the one the model is more confident about.
+        # This compensates for the browser CSS mirror flip that inverts Left/Right labels.
+        for hand_label in ('Right', 'Left'):
+            try:
+                feats = extract_features(lm_list, label=hand_label)
+                probs = model.predict_proba([feats])[0]
+                top_i = int(np.argmax(probs))
+                conf  = float(probs[top_i]) * 100.0
+                if conf > best_conf:
+                    best_conf  = conf
+                    best_name  = str(model.classes_[top_i])
+                    best_probs = probs
+            except Exception as e:
+                print(f"[predict_mudra] {hand_label} error: {e}")
+                continue
+
+        # Build top-3 list for the Detect UI debug display
+        top3 = []
+        if best_probs is not None:
+            idxs = np.argsort(best_probs)[::-1][:3]
+            top3 = [
+                {
+                    "name": str(model.classes_[i]),
+                    "conf": round(float(best_probs[i]) * 100.0, 1),
+                }
+                for i in idxs
+            ]
+        
+
+
+        print(f"[predict_mudra] {best_name} ({best_conf:.1f}%)  top3={[t['name'] for t in top3]}")
+
+        return jsonify({
+            "name":       best_name,
+            "confidence": round(best_conf, 1),
+            "top3":       top3,
+        })
+
+    except Exception as e:
+        print(f"[predict_mudra] Error: {e}")
+        import traceback; traceback.print_exc()
+        return jsonify({"name": "", "confidence": 0.0, "top3": []}), 500
 # =============================================================================
 # ENTRY POINT
 # =============================================================================
