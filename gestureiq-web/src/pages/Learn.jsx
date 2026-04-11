@@ -47,8 +47,8 @@ const MUDRAS = [
     fingers: MUDRA_CONFIG[m.folder]?.fingers || '',
 }));
 
-const STABLE_GATE        = 4;
-const WRONG_MUDRA_GATE   = 5;
+const STABLE_GATE        = 2; // Reduced from 4 for better responsiveness with painted hands
+const WRONG_MUDRA_GATE   = 2;
 const ACCURACY_THRESHOLD = 80;
 const HOLD_DURATION_MS   = 800;
 
@@ -148,8 +148,12 @@ export default function Learn() {
         if (!cameraOn) return;
 
         handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        handsRef.current.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-
+        handsRef.current.setOptions({ 
+            maxNumHands: 1, 
+            modelComplexity: 1, 
+            minDetectionConfidence: 0.3, // Lowered from 0.5 to detect hands with red paint
+            minTrackingConfidence: 0.3    // Lowered from 0.5
+        }); 
         handsRef.current.onResults((results) => {
             lastResultTimeRef.current = Date.now();
             const canvas = canvasRef.current;
@@ -341,7 +345,8 @@ export default function Learn() {
                     corrections: displayCorrections,
                     // ── FIX: isAdjusting checks raw wrongMsg, not the filtered display list ──
                     // If backend sent a wrongMsg, suppress "Adjusting…" and show the alert instead
-                    _isAdjusting: !locallyStable && !isStableAPI && accuracy < 80 && !wrongMsg,
+                    // ── RELAXED ADJUSTING LOGIC: Show accuracy immediately if detection is live ──
+                    _isAdjusting: !locallyStable && !isStableAPI && accuracy === 0 && !wrongMsg,
                 };
 
                 setDetected(displayData);
@@ -403,7 +408,7 @@ export default function Learn() {
                 }
 
                 // ── HOLD + SAVE ───────────────────────────────────────────────
-                const isCorrectMudra = data.detected && (!wrongMsg || accuracy >= ACCURACY_THRESHOLD);
+                const isCorrectMudra = data.detected && !wrongMsg;
                 const isGoodAccuracy = accuracy >= ACCURACY_THRESHOLD;
                 const isGoodFrame    = isCorrectMudra && isGoodAccuracy;
 
@@ -415,11 +420,12 @@ export default function Learn() {
                 if (isGoodFrame) {
                     holdAccumulatorRef.current = Math.min(holdMs, holdAccumulatorRef.current + dt);
                 } else {
-                    const isPartialGood = isCorrectMudra && accuracy >= 62;
-                    if (isPartialGood) {
-                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.5);
+                    if (wrongMsg) {
+                        // Wrong mudra — drain instantly
+                        holdAccumulatorRef.current = 0;
                     } else {
-                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0);
+                        const isPartialGood = isCorrectMudra && accuracy >= 62;
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.5 : 2.0));
                     }
                 }
 
@@ -538,7 +544,7 @@ export default function Learn() {
     const fingerCorrs   = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
     const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
     const isAdjusting   = detected._isAdjusting;
-    const isCorrect     = detected.detected && (accuracy >= 80 || (accuracy > 65 && fingerCorrs.length === 0 && !wrongMudraMsg));
+    const isCorrect     = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0;
 
     const fingerGuideText = selectedMudra
         ? (MUDRA_CONFIG[selectedMudra.folder]?.fingers || selectedMudra.fingers || '')

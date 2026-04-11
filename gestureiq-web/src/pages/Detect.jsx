@@ -38,17 +38,16 @@ const MUDRA_DATA = {
   trishula:     { name: 'Trishula',    meaning: 'Trident',             description: 'Trishula represents Lord Shiva\'s sacred trident and the three paths of dharma. Index, middle, and ring fingers extend upward while the thumb and little finger curl inward.', usage: "Shiva's trident, three paths", symbol: '🔱' },
 };
 
-const FLASK_URL   = (import.meta.env.VITE_FLASK_URL || '').replace(/\/$/, '');
-const BUFFER_SIZE = 10;
-const MIN_VOTES   = 6;
-const MIN_CONF    = 20;
+const scoreColor = (s) => s >= 75 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626';
+const scoreBg   = (s) => s >= 75 ? '#ECFDF5' : s >= 50 ? '#FFFBEB' : '#FEF2F2';
+const scoreBorder = (s) => s >= 75 ? '#A7F3D0' : s >= 50 ? '#FDE68A' : '#FECACA';
 
 const STATUS = {
-  idle:      { label: 'Camera Off',        color: 'var(--text-muted)', pulse: false },
-  no_hand:   { label: 'Show Your Hand',    color: 'var(--text-muted)', pulse: false },
-  analyzing: { label: 'Analyzing…',        color: '#fbbf24',               pulse: true  },
-  detected:  { label: 'Mudra Identified',  color: '#f59e0b',               pulse: true  },
-  no_mudra:  { label: 'No Mudra Detected', color: '#6b7280',               pulse: false },
+  idle:      { label: 'Camera Off',        color: '#94A3B8', pulse: false },
+  no_hand:   { label: 'Show Your Hand',    color: '#94A3B8', pulse: false },
+  analyzing: { label: 'Analyzing…',        color: '#D97706', pulse: true  },
+  detected:  { label: 'Mudra Identified',  color: '#059669', pulse: true  },
+  no_mudra:  { label: 'No Mudra Detected', color: '#64748B', pulse: false },
 };
 
 export default function Detect() {
@@ -76,40 +75,55 @@ export default function Detect() {
   const inFlightRef  = useRef(false);
   const lockRef      = useRef({ name: null, until: 0 });
   const prevKeyRef   = useRef(null);
+  const modalTimerRef  = useRef(null);
+  const engineErrCount = useRef(0);
+
+  const FLASK_URL   = (import.meta.env.VITE_FLASK_URL || '').replace(/\/$/, '');
+  const BUFFER_SIZE = 8;
+  const MIN_VOTES   = 7;
+  const MIN_CONF    = 20;
 
   useEffect(() => {
     if (!user || user.role !== 'student') { navigate('/'); return; }
     return () => doCleanup();
-  }, []);
+  }, [user, navigate]);
 
   // Auto-show modal and Voice Announcement when new mudra detected
   useEffect(() => {
-    // Always cancel ongoing speech immediately on state change
     window.speechSynthesis.cancel();
-
     if (detectedKey && detectedKey !== prevKeyRef.current) {
       prevKeyRef.current = detectedKey;
       const m = MUDRA_DATA[detectedKey];
-      setModalMudra(m);
-      setShowModal(true);
 
-      // Create and configure the speech utterance
-      const text = `${m.name} mudra detected. ${m.meaning}. Used for ${m.usage}.`;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang  = 'en-IN';
-      utterance.rate  = 0.9;
-      utterance.pitch = 1.0;
-      window.speechSynthesis.speak(utterance);
+      // Clear any pending modal timer
+      if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
 
-      const t = setTimeout(() => setShowModal(false), 4000);
+      // Wait 1.5s hold before showing modal
+      modalTimerRef.current = setTimeout(() => {
+        setModalMudra(m);
+        setShowModal(true);
+
+        const text = `${m.name} mudra detected. ${m.meaning}. Used for ${m.usage}.`;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang  = 'en-IN';
+        utterance.rate  = 0.9;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+
+        // Auto-close after 4s
+        modalTimerRef.current = setTimeout(() => setShowModal(false), 4000);
+      }, 1500);
+
       return () => {
-        clearTimeout(t);
+        if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
         window.speechSynthesis.cancel();
       };
     }
     
     if (!detectedKey) {
       prevKeyRef.current = null;
+      if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
+      setShowModal(false);
     }
   }, [detectedKey]);
 
@@ -138,8 +152,8 @@ export default function Detect() {
       if (results.multiHandLandmarks?.length > 0) {
         const lms = results.multiHandLandmarks[0];
         landmarksRef.current = lms;
-        drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 3 });
-        drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+        drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#7C3AED', lineWidth: 3 });
+        drawLandmarks(ctx, lms, { color: '#A78BFA', lineWidth: 1, radius: 3 });
       } else {
         landmarksRef.current = null;
       }
@@ -148,6 +162,65 @@ export default function Detect() {
     handsRef.current = h;
   }, []);
 
+  const runDetection = useCallback(async () => {
+    if (inFlightRef.current) return;
+    const lms = landmarksRef.current;
+    if (!lms || lms.length !== 21) {
+      setHandPresent(false);
+      bufferRef.current = [];
+      lockRef.current   = { name: null, until: 0 };
+      setDetectedKey(null);
+      prevKeyRef.current = null; // reset so modal can fire
+      setConfidence(0);
+      setBufSize(0);
+      return;
+    }
+    setHandPresent(true);
+    inFlightRef.current = true;
+    try {
+      const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
+      const res = await fetch(`${FLASK_URL}/api/predict`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(800),
+      });
+      if (!res.ok) throw new Error('Flask error');
+      const json = await res.json();
+      setEngineOk(true);
+      engineErrCount.current = 0;
+      const isValid = (json.confidence || 0) >= MIN_CONF && !!json.name;
+      bufferRef.current.push(isValid ? json.name : '__none__');
+      if (bufferRef.current.length > BUFFER_SIZE) bufferRef.current.shift();
+      setBufSize(bufferRef.current.length);
+      const votes = {};
+      bufferRef.current.forEach(n => { votes[n] = (votes[n] || 0) + 1; });
+      const sorted  = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+      const topName = sorted[0]?.[0] ?? '__none__';
+      const topVot  = sorted[0]?.[1] ?? 0;
+      const bufFull = bufferRef.current.length >= BUFFER_SIZE;
+      const now     = Date.now();
+      if (topVot >= MIN_VOTES && topName !== '__none__') {
+        // If mudra changed, flush buffer so old votes don't linger
+        if (lockRef.current.name && lockRef.current.name !== topName) {
+           bufferRef.current = bufferRef.current.filter(n => n === topName);
+        }
+        lockRef.current = { name: topName, until: now + 800 };
+        setDetectedKey(topName);
+        const votes2 = bufferRef.current.filter(n => n === topName).length;
+        setConfidence(Math.min(95, (votes2 / BUFFER_SIZE) * 100 + (json.confidence || 0) * 0.3));
+      } else if (bufFull && now > lockRef.current.until) {
+        setDetectedKey(null);
+        setConfidence(0);
+        lockRef.current = { name: null, until: 0 };
+      }
+      setTop3(json.top3 || []);
+    } catch { 
+      engineErrCount.current++;
+      if (engineErrCount.current >= 3) setEngineOk(false);
+    } finally { 
+      inFlightRef.current = false; 
+    }
+  }, [FLASK_URL, MIN_CONF, MIN_VOTES, BUFFER_SIZE]);
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
@@ -155,7 +228,9 @@ export default function Detect() {
       initHands();
       setCameraOn(true);
     } catch {
-      alert('Camera permission denied. Please allow camera access and use HTTPS.');
+      engineErrCount.current++;
+      if (engineErrCount.current >= 3) setEngineOk(false);
+      console.warn('[AI Engine] Unreachable or Camera denied.');
     }
   };
 
@@ -188,56 +263,7 @@ export default function Detect() {
     rafRef.current = requestAnimationFrame(loop);
     intervalRef.current = setInterval(runDetection, 150);
     return () => { cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
-  }, [cameraOn]);
-
-  const runDetection = useCallback(async () => {
-    if (inFlightRef.current) return;
-    const lms = landmarksRef.current;
-    if (!lms || lms.length !== 21) {
-      setHandPresent(false);
-      bufferRef.current = [];
-      lockRef.current   = { name: null, until: 0 };
-      setDetectedKey(null);
-      setConfidence(0);
-      setBufSize(0);
-      return;
-    }
-    setHandPresent(true);
-    inFlightRef.current = true;
-    try {
-      const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
-      const res = await fetch(`${FLASK_URL}/api/predict`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(800),
-      });
-      if (!res.ok) throw new Error('Flask error');
-      const json = await res.json();
-      setEngineOk(true);
-      const isValid = (json.confidence || 0) >= MIN_CONF && !!json.name;
-      bufferRef.current.push(isValid ? json.name : '__none__');
-      if (bufferRef.current.length > BUFFER_SIZE) bufferRef.current.shift();
-      setBufSize(bufferRef.current.length);
-      const votes = {};
-      bufferRef.current.forEach(n => { votes[n] = (votes[n] || 0) + 1; });
-      const sorted  = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-      const topName = sorted[0]?.[0] ?? '__none__';
-      const topVot  = sorted[0]?.[1] ?? 0;
-      const bufFull = bufferRef.current.length >= BUFFER_SIZE;
-      const now     = Date.now();
-      if (topVot >= MIN_VOTES && topName !== '__none__') {
-        lockRef.current = { name: topName, until: now + 800 };
-        setDetectedKey(topName);
-        const votes2 = bufferRef.current.filter(n => n === topName).length;
-        setConfidence(Math.min(95, (votes2 / BUFFER_SIZE) * 100 + (json.confidence || 0) * 0.3));
-      } else if (bufFull && now > lockRef.current.until) {
-        setDetectedKey(null);
-        setConfidence(0);
-        lockRef.current = { name: null, until: 0 };
-      }
-      setTop3(json.top3 || []);
-    } catch { setEngineOk(false); }
-    finally { inFlightRef.current = false; }
-  }, []);
+  }, [cameraOn, runDetection]);
 
   const mudra      = detectedKey ? MUDRA_DATA[detectedKey] : null;
   const isDetected = !!(detectedKey && mudra);
@@ -247,389 +273,340 @@ export default function Detect() {
   const confColor  = confidence >= 70 ? '#34d399' : confidence >= 45 ? '#fbbf24' : '#ef4444';
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 min-h-screen" style={{ fontFamily: "'Georgia', serif" }}>
-      <style>{`
-        .detect-text { color: var(--text) !important; }
-        .detect-muted { color: var(--text-muted) !important; }
-      `}</style>
-
-      {/* ── Header ── */}
-      <div className="text-center mb-10">
-        <div className="text-[10px] tracking-[8px] uppercase mb-2" style={{ color: 'var(--text-muted)' }}>
-          Live AI Recognition · Both Hands
-        </div>
-        <h1 className="text-4xl font-black tracking-tight" style={{ color: 'var(--text)' }}>
-          Mudra Detect
-        </h1>
-        <div className="max-w-xs mx-auto mt-3"><BorderPattern /></div>
-        <p className="text-xs mt-3 max-w-sm mx-auto leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          Show any Bharatanatyam hand gesture — the AI names it instantly.
-          Works with left <em>and</em> right hand.
-        </p>
-      </div>
-
-      {!engineOk && (
-        <div className="mb-4 px-4 py-3 rounded-xl border text-xs font-bold text-center"
-          style={{ backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.25)', color: '#ef4444' }}>
-          ⚠ AI Engine offline — ensure Flask is running on port 5001
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-
-        {/* ── Camera ── */}
-        <div className="lg:col-span-8">
-          <div className="relative rounded-2xl overflow-hidden border"
-            style={{
-              height: '62vh', minHeight: '440px', backgroundColor: '#060606',
-              borderColor: isDetected ? 'rgba(245,158,11,0.50)' : handPresent ? 'rgba(255,255,255,0.10)' : 'var(--border)',
-              boxShadow: isDetected ? '0 0 60px rgba(245,158,11,0.14)' : 'none',
-              transition: 'border-color 0.6s ease, box-shadow 0.6s ease',
-            }}>
-            {cameraOn ? (
-              <>
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
-                <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }} />
-
-                {/* Live badge */}
-                <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-md"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.75)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-[8px] text-white/60 uppercase tracking-[3px] font-bold">Live · AI Detection</span>
-                </div>
-
-                {/* Detected overlay top-right */}
-                {isDetected && (
-                  <div className="absolute top-4 right-4">
-                    <div className="px-4 py-2.5 rounded-xl backdrop-blur-md text-right"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.88)', border: '1px solid rgba(245,158,11,0.4)' }}>
-                      <div className="text-[8px] uppercase tracking-[3px] mb-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>Detected</div>
-                      <div className="text-lg font-black uppercase tracking-tight" style={{ color: '#fbbf24' }}>{mudra?.name}</div>
-                      <div className="text-[9px] italic" style={{ color: 'rgba(245,158,11,0.55)' }}>{mudra?.meaning}</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Center states */}
-                {status === 'no_hand' && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="text-center opacity-25">
-                      <div className="text-6xl mb-3">✋</div>
-                      <p className="text-[10px] uppercase tracking-widest text-white font-bold">Show your hand to the camera</p>
-                    </div>
-                  </div>
-                )}
-                {status === 'analyzing' && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="px-5 py-2.5 rounded-full backdrop-blur-md"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.72)', border: '1px solid rgba(245,158,11,0.18)' }}>
-                      <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold" style={{ color: 'rgba(251,191,36,0.8)' }}>
-                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                        Analyzing gesture…
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {status === 'no_mudra' && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="px-5 py-2.5 rounded-full backdrop-blur-md"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.72)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: 'rgba(255,255,255,0.35)' }}>No Mudra Detected</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Progress bar */}
-                {status === 'analyzing' && (
-                  <div className="absolute bottom-14 left-4 right-4 pointer-events-none">
-                    <div className="h-0.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
-                      <div className="h-full rounded-full transition-all duration-200"
-                        style={{ width: `${(bufSize / BUFFER_SIZE) * 100}%`, backgroundColor: 'rgba(245,158,11,0.55)' }} />
-                    </div>
-                  </div>
-                )}
-
-                {/* ── MODAL CARD — pops up when mudra detected ── */}
-                {showModal && modalMudra && (
-                  <div className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none"
-                    style={{ zIndex: 20 }}>
-                    <div className="mx-4 rounded-2xl p-5 pointer-events-auto"
-                      style={{
-                        background: 'linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(20,10,5,0.97) 100%)',
-                        border: '1px solid rgba(245,158,11,0.5)',
-                        boxShadow: '0 0 40px rgba(245,158,11,0.2), 0 20px 60px rgba(0,0,0,0.8)',
-                        maxWidth: '580px', width: '100%',
-                        animation: 'slideUp 0.4s cubic-bezier(0.16,1,0.3,1)',
-                      }}>
-                      <div className="flex items-start gap-4">
-                        {/* Symbol */}
-                        <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 text-3xl"
-                          style={{ backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>
-                          {modalMudra.symbol}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="text-xl font-black uppercase tracking-tight" style={{ color: '#fbbf24' }}>
-                              {modalMudra.name}
-                            </h3>
-                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest"
-                              style={{ backgroundColor: 'rgba(245,158,11,0.15)', color: 'rgba(245,158,11,0.8)' }}>
-                              {modalMudra.meaning}
-                            </span>
-                          </div>
-                          <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>
-                            {modalMudra.description}
-                          </p>
-                          <div className="mt-2 pt-2 border-t flex items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                            <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: 'rgba(245,158,11,0.5)' }}>Usage</span>
-                            <span className="text-[10px] italic" style={{ color: 'rgba(255,255,255,0.35)' }}>{modalMudra.usage}</span>
-                          </div>
-                        </div>
-                        <button onClick={() => setShowModal(false)}
-                          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs"
-                          style={{ backgroundColor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.4)' }}>
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Bottom bar */}
-                <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-5 py-3 backdrop-blur-xl"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.90)', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${si.pulse ? 'animate-pulse' : ''}`} style={{ backgroundColor: si.color }} />
-                    <span className="text-[9px] uppercase tracking-[3px] font-bold" style={{ color: si.color }}>{si.label}</span>
-                  </div>
-                  <button onClick={stopCamera}
-                    className="px-4 py-1.5 rounded text-[9px] uppercase tracking-widest font-bold border transition-all hover:bg-red-500/20"
-                    style={{ borderColor: 'rgba(239,68,68,0.35)', color: '#f87171' }}>
-                    ■ Stop Camera
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center px-10 text-center">
-                <div className="w-24 h-24 rounded-full flex items-center justify-center mb-6 border"
-                  style={{ backgroundColor: 'rgba(245,158,11,0.05)', borderColor: 'rgba(245,158,11,0.15)' }}>
-                  <span className="text-4xl" style={{ color: 'rgba(245,158,11,0.4)' }}>◎</span>
-                </div>
-                <h3 className="text-xl font-bold mb-3 tracking-tight" style={{ color: 'var(--text)' }}>Mudra Recognition</h3>
-                <p className="text-xs leading-relaxed mb-8 max-w-xs" style={{ color: 'var(--text-muted)', opacity: 0.55 }}>
-                  Show any Bharatanatyam hand gesture. The AI identifies it instantly — use either hand.
-                </p>
-                <button onClick={startCamera}
-                  className="px-12 py-3.5 rounded-xl text-white text-[10px] tracking-[5px] uppercase font-bold hover:scale-105 transition-all shadow-xl"
-                  style={{ backgroundColor: 'var(--accent)' }}>
-                  ▶ Start Camera
-                </button>
-              </div>
-            )}
+    <div className="min-h-screen p-6" style={{ background: 'linear-gradient(135deg, #F8F7FF 0%, #EDE9FE 100%)' }}>
+      <div className="max-w-7xl mx-auto">
+        
+        {/* ── Header ── */}
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-100 mb-4 shadow-sm border border-violet-200">
+            <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-[3px] text-violet-600">Premium AI Detection</span>
           </div>
+          <h1 className="text-5xl font-black tracking-tight text-slate-900 mb-2">
+            Mudra Detect
+          </h1>
+          <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+            Real-time hand gesture recognition powered by GestureIQ AI. 
+            Show your hand to identify any Bharatanatyam mudra instantly.
+          </p>
         </div>
 
-        {/* ── Right Panel ── */}
-        <div className="lg:col-span-4 flex flex-col gap-4">
-
-          {/* Detection card */}
-          <div className="rounded-2xl border p-6 relative overflow-hidden"
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderColor: isDetected ? 'rgba(245,158,11,0.50)' : 'var(--border)',
-              boxShadow: isDetected ? '0 0 60px rgba(245,158,11,0.14)' : 'none',
-              minHeight: '280px',
-              transition: 'all 0.6s ease',
-            }}>
-            {isDetected && (
-              <div className="absolute inset-0 pointer-events-none"
-                style={{ background: 'radial-gradient(circle at 50% 15%, rgba(245,158,11,0.07) 0%, transparent 65%)' }} />
-            )}
-            <div className="relative z-10">
-              <div className="flex items-center gap-2 mb-5">
-                <div className={`w-2.5 h-2.5 rounded-full ${si.pulse ? 'animate-pulse' : ''}`} style={{ backgroundColor: si.color }} />
-                <span className="text-[8px] uppercase tracking-[4px] font-bold" style={{ color: si.color }}>{si.label}</span>
+        {!engineOk && (
+          <div className="mb-6 max-w-2xl mx-auto px-6 py-4 rounded-3xl border shadow-lg flex items-center justify-between gap-4"
+            style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA' }}>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div>
+                <p className="text-sm font-bold text-red-700">AI Engine Offline</p>
+                <p className="text-[10px] text-red-500 font-medium">Ensure your Flask server is running on port 5001 or check your ngrok URL.</p>
               </div>
+            </div>
+            <button onClick={() => { setEngineOk(true); runDetection(); }}
+              className="px-4 py-2 bg-white rounded-xl text-[10px] font-black uppercase tracking-widest text-red-600 border border-red-200 hover:bg-red-50 transition-all">
+              Retry
+            </button>
+          </div>
+        )}
 
-              {isDetected && mudra ? (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+
+          {/* ── Left Side: Camera ── */}
+          <div className="lg:col-span-8">
+            <div className="relative rounded-[40px] overflow-hidden shadow-2xl shadow-violet-200/50 bg-slate-900"
+              style={{
+                height: '65vh', minHeight: '480px',
+                border: isDetected ? '4px solid #7C3AED' : '4px solid #DDD6FE',
+                transition: 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}>
+              {cameraOn ? (
                 <>
-                  {/* Symbol + Name */}
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
-                      style={{ backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      {mudra.symbol}
-                    </div>
-                    <div>
-                      <h2 className="font-black uppercase leading-none tracking-tighter"
-                        style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.8rem)', color: 'var(--accent)' }}>
-                        {mudra.name}
-                      </h2>
-                      <p className="text-sm italic mt-0.5" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
-                    </div>
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+                  <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }} />
+
+                  {/* Status Overlay */}
+                  <div className="absolute top-6 left-6 flex items-center gap-3 px-4 py-2 rounded-2xl backdrop-blur-xl border border-white/20 bg-white/10 shadow-lg">
+                    <div className={`w-2 h-2 rounded-full ${si.pulse ? 'animate-pulse' : ''}`} style={{ backgroundColor: si.color }} />
+                    <span className="text-[10px] text-white font-bold uppercase tracking-[2px]">{si.label}</span>
                   </div>
 
-                  {/* Description */}
-                  <p className="text-[11px] leading-relaxed mb-4" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    {mudra.description.substring(0, 120)}…
-                  </p>
-
-                  {/* Confidence */}
-                  <div className="mb-4">
-                    <div className="flex justify-between items-center mb-1.5">
-                      <span className="text-[9px] uppercase tracking-[3px]" style={{ color: 'var(--text-muted)' }}>Confidence</span>
-                      <span className="text-sm font-bold" style={{ color: confColor }}>{Math.round(confidence)}%</span>
+                  {/* Prediction Pill Overlay */}
+                  {isDetected && (
+                    <div className="absolute top-6 right-6">
+                      <div className="px-6 py-3 rounded-2xl backdrop-blur-2xl text-right shadow-2xl border border-white/20"
+                        style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)' }}>
+                        <div className="text-[9px] uppercase tracking-[3px] text-white/60 mb-1 font-bold">Identified</div>
+                        <div className="text-2xl font-black text-white uppercase tracking-tight">{mudra?.name}</div>
+                        <div className="text-[10px] italic text-white/80">{mudra?.meaning}</div>
+                      </div>
                     </div>
-                    <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
-                      <div className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, confidence)}%`, backgroundColor: confColor }} />
+                  )}
+
+                  {/* Prompt: No Hand */}
+                  {status === 'no_hand' && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="text-center space-y-4 animate-bounce">
+                        <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center mx-auto backdrop-blur-md border border-white/20">
+                          <span className="text-4xl text-white">✋</span>
+                        </div>
+                        <p className="text-[10px] uppercase tracking-widest text-white font-black drop-shadow-lg">Show your hand</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Usage */}
-                  <div className="pt-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-                    <div className="text-[9px] uppercase tracking-[3px] mb-1" style={{ color: 'var(--text-muted)' }}>Usage in Dance</div>
-                    <p className="text-[10px] italic leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>{mudra.usage}</p>
-                  </div>
+                  {/* Analyzer Bar */}
+                  {status === 'analyzing' && (
+                    <div className="absolute bottom-20 left-10 right-10 pointer-events-none">
+                      <div className="flex justify-between items-center mb-2 px-2">
+                         <span className="text-[10px] font-black uppercase tracking-[3px] text-white/80">Analyzing Signature...</span>
+                         <span className="text-[10px] font-mono text-white/50">{bufSize}/{BUFFER_SIZE}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/5 border border-white/10 overflow-hidden">
+                        <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300"
+                          style={{ width: `${(bufSize / BUFFER_SIZE) * 100}%` }} />
+                      </div>
+                    </div>
+                  )}
 
-                  {/* Info button */}
-                  <button onClick={() => { setModalMudra(mudra); setShowModal(true); }}
-                    className="mt-3 w-full py-2 rounded-lg text-[9px] uppercase tracking-widest font-bold transition-all hover:opacity-80"
-                    style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: 'rgba(245,158,11,0.8)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                    View Full Description
-                  </button>
+                  {/* Bottom HUD */}
+                  <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-8 py-5 backdrop-blur-2xl"
+                    style={{ backgroundColor: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <div className="flex items-center gap-6">
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/40 font-bold mb-1">Mudra Engine</span>
+                        <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-2">
+                           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                           Enabled
+                        </span>
+                      </div>
+                      <div className="h-8 w-px bg-white/10" />
+                      <div className="flex flex-col">
+                        <span className="text-[8px] uppercase tracking-widest text-white/40 font-bold mb-1">Confidence</span>
+                        <span className="text-sm font-black text-white">{Math.round(confidence)}%</span>
+                      </div>
+                    </div>
+                    <button onClick={stopCamera}
+                      className="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-red-500/10 border border-red-500/30 text-red-400 transition-all hover:bg-red-500/20">
+                      Stop Camera
+                    </button>
+                  </div>
                 </>
               ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <div className="text-5xl mb-4 opacity-30">🤲</div>
-                  <h2 className="font-black uppercase tracking-tighter mb-2"
-                    style={{ fontSize: '2rem', color: 'var(--text-muted)' }}>
-                    {status === 'no_mudra' ? 'No Mudra' : status === 'analyzing' ? '…' : '—'}
-                  </h2>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {status === 'no_mudra' ? 'Adjust your hand and try again'
-                     : status === 'analyzing' ? 'Reading your gesture…'
-                     : cameraOn ? 'Show a mudra to detect' : 'Start camera to begin'}
+                <div className="w-full h-full flex flex-col items-center justify-center p-12 text-center">
+                  <div className="w-32 h-32 rounded-[40px] bg-violet-100/50 flex items-center justify-center mb-8 border border-violet-100 shadow-inner">
+                    <span className="text-5xl text-violet-300">👋</span>
+                  </div>
+                  <h3 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">AI Recognition Shield</h3>
+                  <p className="text-sm text-slate-400 max-w-xs leading-relaxed mb-10">
+                    Identify any hand gesture using your webcam. Our AI is trained on 32+ classical Bharatanatyam mudras.
                   </p>
+                  <button onClick={startCamera}
+                    className="px-12 py-5 rounded-3xl text-white text-[12px] font-black tracking-[4px] uppercase transition-all hover:scale-[1.05] hover:shadow-2xl shadow-violet-500/40"
+                    style={{ background: 'linear-gradient(135deg, #7C3AED, #6D28D9)' }}>
+                    Start Detection
+                  </button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Top predictions */}
-          {cameraOn && top3.length > 0 && (
-            <div className="rounded-2xl border p-4" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              <div className="text-[9px] uppercase tracking-[4px] mb-3 font-bold" style={{ color: 'var(--text-muted)' }}>Top Predictions</div>
-              <div className="space-y-2.5">
-                {top3.map((p, i) => {
-                  const d = MUDRA_DATA[p.name];
-                  const isWinner = i === 0 && isDetected;
-                  return (
-                    <div key={i} className="flex items-center gap-3">
-                      <span className="text-[9px] font-black w-4 text-center" style={{ color: 'var(--text-muted)' }}>{i + 1}</span>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center mb-0.5">
-                          <span className="text-[10px] font-bold capitalize" style={{ color: isWinner ? 'var(--accent)' : 'var(--text)' }}>
-                            {d?.name || p.name}
-                          </span>
-                          <span className="text-[9px] font-bold" style={{ color: isWinner ? 'var(--accent)' : 'var(--text-muted)' }}>
-                            {p.conf.toFixed(0)}%
-                          </span>
-                        </div>
-                        <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
-                          <div className="h-full rounded-full transition-all duration-300"
-                            style={{ width: `${Math.min(100, p.conf)}%`, backgroundColor: isWinner ? 'var(--accent)' : 'rgba(255,255,255,0.14)' }} />
-                        </div>
+          {/* ── Right Side: Insights ── */}
+          <div className="lg:col-span-4 space-y-6">
+
+            {/* Results Card */}
+            <div className="rounded-[40px] p-8 border shadow-xl transition-all duration-700 relative overflow-hidden bg-white"
+              style={{
+                borderColor: isDetected ? '#A78BFA' : '#E2E8F0',
+                boxShadow: isDetected ? '0 20px 50px rgba(124, 58, 237, 0.12)' : '0 10px 30px rgba(0,0,0,0.02)',
+              }}>
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-8">
+                  <span className="text-[10px] font-black uppercase tracking-[4px] text-slate-400">Target Intel</span>
+                  {isDetected && (
+                    <div className="px-2 py-0.5 rounded-full bg-emerald-100 text-[8px] font-black text-emerald-600 uppercase tracking-widest">
+                       Optimal Match
+                    </div>
+                  )}
+                </div>
+
+                {isDetected && mudra ? (
+                  <div className="space-y-6">
+                    <div className="flex items-start gap-4">
+                      <div className="w-16 h-16 rounded-3xl bg-violet-50 border border-violet-100 flex items-center justify-center text-4xl shrink-0 shadow-sm">
+                        {mudra.symbol}
+                      </div>
+                      <div>
+                        <h2 className="text-4xl font-black text-slate-900 leading-none mb-1 tracking-tighter uppercase">
+                          {mudra.name}
+                        </h2>
+                        <p className="text-sm text-violet-500 font-bold italic">{mudra.meaning}</p>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
-          {/* How it works */}
-          {!cameraOn && (
-            <div className="rounded-2xl border p-5" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              <div className="text-[9px] uppercase tracking-[4px] mb-4 font-bold" style={{ color: 'var(--text-muted)' }}>How It Works</div>
-              <div className="space-y-3.5">
-                {[['①','Start Camera','Allow camera access in your browser'],
-                  ['②','Show a Mudra','Use left or right hand — both work'],
-                  ['③','AI Identifies','The mudra name + description appears instantly']
-                ].map(([num, title, desc]) => (
-                  <div key={num} className="flex gap-3 items-start">
-                    <span className="text-base font-black shrink-0" style={{ color: 'var(--accent)' }}>{num}</span>
+                    <div className="p-5 rounded-3xl bg-slate-50 border border-slate-100 space-y-3">
+                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[2px] text-slate-400">
+                         <span>AI Signature Match</span>
+                         <span style={{ color: confColor }}>{Math.round(confidence)}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-700 ease-out"
+                          style={{ width: `${Math.round(confidence)}%`, background: confColor }} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-[10px] font-black uppercase tracking-[3px] text-slate-400 mb-2">Description</h4>
+                        <p className="text-xs leading-relaxed text-slate-600">{mudra.description.substring(0, 150)}...</p>
+                      </div>
+                      <div className="pt-4 border-t border-slate-100">
+                         <h4 className="text-[10px] font-black uppercase tracking-[3px] text-slate-400 mb-2">Usage in Dance</h4>
+                         <p className="text-[11px] font-bold text-slate-800 bg-violet-50/50 p-3 rounded-2xl border border-violet-100/50">{mudra.usage}</p>
+                      </div>
+                    </div>
+
+                    <button onClick={() => { setModalMudra(mudra); setShowModal(true); }}
+                      className="w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all bg-slate-900 text-white hover:bg-slate-800 shadow-lg">
+                      Explore Full Mudra
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+                    <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center text-3xl opacity-40">
+                       🤲
+                    </div>
                     <div>
-                      <div className="text-xs font-bold mb-0.5" style={{ color: 'var(--text)' }}>{title}</div>
-                      <div className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>{desc}</div>
+                      <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter mb-2">
+                        {status === 'analyzing' ? 'Reading...' : 'Awaiting Input'}
+                      </h2>
+                      <p className="text-[10px] text-slate-400 font-medium uppercase tracking-[2px]">
+                        Show a hand gesture to identify
+                      </p>
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
-          )}
+
+            {/* Top Predictions Card */}
+            {cameraOn && top3.length > 0 && (
+              <div className="rounded-[40px] p-8 bg-white border border-slate-100 shadow-xl">
+                <h3 className="text-[10px] font-black uppercase tracking-[4px] text-slate-400 mb-6">Top Probabilities</h3>
+                <div className="space-y-5">
+                  {top3.map((p, i) => {
+                    const d = MUDRA_DATA[p.name];
+                    const isWinner = i === 0 && isDetected;
+                    return (
+                      <div key={i} className="flex items-center gap-4">
+                        <span className="text-[10px] font-black p-2 rounded-xl bg-slate-50 text-slate-400 w-8 h-8 flex items-center justify-center">{i + 1}</span>
+                        <div className="flex-1">
+                          <div className="flex justify-between items-center mb-1.5">
+                            <span className="text-[11px] font-black text-slate-700 capitalize">
+                              {d?.name || p.name}
+                            </span>
+                            <span className="text-[10px] font-black" style={{ color: isWinner ? '#7C3AED' : '#94A3B8' }}>
+                              {p.conf.toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-500"
+                              style={{ width: `${Math.min(100, p.conf)}%`, background: isWinner ? 'linear-gradient(to right, #7C3AED, #A78BFA)' : '#CBD5E1' }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* Guide Card */}
+            {!cameraOn && (
+              <div className="rounded-[40px] p-8 bg-white border border-slate-100 shadow-xl space-y-6">
+                 <h3 className="text-[10px] font-black uppercase tracking-[4px] text-slate-400">Quick Guide</h3>
+                 <div className="space-y-4">
+                    {[
+                      { icon: '🎥', title: 'Allow Camera', desc: 'Secure local processing only.' },
+                      { icon: '👋', title: 'Position Hand', desc: 'Keep hand visible in center.' },
+                      { icon: '📖', title: 'Learn Meaning', desc: 'AI provides usage & context.' }
+                    ].map((step, i) => (
+                      <div key={i} className="flex gap-4">
+                        <div className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center shrink-0">
+                           {step.icon}
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">{step.title}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">{step.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                 </div>
+              </div>
+            )}
+
+          </div>
         </div>
       </div>
 
-      {/* ── Full Modal Overlay ── */}
+      {/* ── Modal Overlay ── */}
       {showModal && modalMudra && (
         <div className="fixed inset-0 flex items-center justify-center z-50 px-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(16px)' }}
           onClick={() => setShowModal(false)}>
-          <div className="rounded-3xl p-8 max-w-lg w-full relative"
-            style={{
-              background: 'linear-gradient(135deg, #0f0a08 0%, #1a0e06 50%, #0f0a08 100%)',
-              border: '1px solid rgba(245,158,11,0.4)',
-              boxShadow: '0 0 80px rgba(245,158,11,0.15), 0 40px 100px rgba(0,0,0,0.9)',
-              animation: 'slideUp 0.4s cubic-bezier(0.16,1,0.3,1)',
-            }}
+          <div className="bg-white rounded-[48px] p-10 max-w-xl w-full relative shadow-2xl overflow-hidden scale-in-center"
             onClick={e => e.stopPropagation()}>
+            
+            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-br from-violet-600 to-fuchsia-600 opacity-5" />
 
-            {/* Close */}
-            <button onClick={() => setShowModal(false)}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all hover:bg-white/10"
-              style={{ color: 'rgba(255,255,255,0.4)' }}>✕</button>
-
-            {/* Symbol */}
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-5xl"
-                style={{ backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)' }}>
+            {/* Header */}
+            <div className="flex items-center gap-6 mb-10 relative">
+              <div className="w-24 h-24 rounded-[32px] bg-white shadow-2xl flex items-center justify-center text-6xl border border-slate-100 transform -rotate-3 hover:rotate-0 transition-all duration-500">
                 {modalMudra.symbol}
               </div>
               <div>
-                <h2 className="text-3xl font-black uppercase tracking-tight" style={{ color: '#fbbf24' }}>
+                <h2 className="text-4xl font-black text-slate-900 tracking-tighter mb-1 uppercase">
                   {modalMudra.name}
                 </h2>
-                <p className="text-base italic mt-1" style={{ color: 'rgba(245,158,11,0.6)' }}>{modalMudra.meaning}</p>
+                <div className="flex items-center gap-2">
+                   <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                   <p className="text-sm font-bold text-emerald-600 uppercase tracking-widest">{modalMudra.meaning}</p>
+                </div>
               </div>
+              <button onClick={() => setShowModal(false)}
+                className="absolute -top-4 -right-4 w-12 h-12 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-all">
+                ✕
+              </button>
             </div>
 
-            {/* Divider */}
-            <div className="h-px mb-6" style={{ background: 'linear-gradient(90deg, rgba(245,158,11,0.3), transparent)' }} />
+            {/* Content */}
+            <div className="space-y-8 relative">
+              <div>
+                <h4 className="text-[10px] font-black uppercase tracking-[4px] text-slate-400 mb-4">Mudra Context</h4>
+                <p className="text-base text-slate-600 leading-relaxed font-serif">
+                  {modalMudra.description}
+                </p>
+              </div>
 
-            {/* Description */}
-            <p className="text-sm leading-relaxed mb-6" style={{ color: 'rgba(255,255,255,0.6)', fontFamily: 'Georgia, serif' }}>
-              {modalMudra.description}
-            </p>
+              <div className="p-6 rounded-[32px] bg-violet-50 border border-violet-100">
+                <h4 className="text-[10px] font-black uppercase tracking-[4px] text-violet-400 mb-3">Ritual Usage</h4>
+                <p className="text-sm font-black text-violet-700 italic leading-relaxed">
+                  {modalMudra.usage}
+                </p>
+              </div>
 
-            {/* Usage tag */}
-            <div className="flex items-start gap-3 p-4 rounded-xl" style={{ backgroundColor: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.12)' }}>
-              <span className="text-[9px] uppercase tracking-widest font-black mt-0.5 shrink-0" style={{ color: 'rgba(245,158,11,0.6)' }}>Used For</span>
-              <p className="text-xs italic" style={{ color: 'rgba(255,255,255,0.45)' }}>{modalMudra.usage}</p>
+              <button onClick={() => setShowModal(false)}
+                className="w-full py-5 rounded-[24px] bg-slate-900 text-white font-black text-[10px] uppercase tracking-[4px] transition-all hover:bg-slate-800 hover:scale-[1.02] shadow-2xl">
+                Return to Recognition
+              </button>
             </div>
-
-            <button onClick={() => setShowModal(false)}
-              className="mt-6 w-full py-3 rounded-xl text-[10px] uppercase tracking-[4px] font-bold transition-all hover:opacity-80"
-              style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: 'rgba(245,158,11,0.8)', border: '1px solid rgba(245,158,11,0.2)' }}>
-              Close
-            </button>
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(20px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
+        .scale-in-center { animation: scale-in-center 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        @keyframes scale-in-center {
+          0% { transform: scale(0.95); opacity: 0; }
+          100% { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>

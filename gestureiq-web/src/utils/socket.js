@@ -1,10 +1,12 @@
+//src/utils/socket.js
+
 import { io } from 'socket.io-client';
 
 let _socket = null;
 
 export const getSocket = () => {
     if (!_socket) {
-        _socket = io(import.meta.env.VITE_BACKEND_URL || '/', {
+        _socket = io('/', {
             path: '/socket.io',
             secure: false, // development
             rejectUnauthorized: false,

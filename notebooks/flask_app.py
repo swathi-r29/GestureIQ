@@ -14,6 +14,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features, get_angle, get_distance
+from scipy.spatial.distance import cosine
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -42,6 +43,12 @@ with open(navarasa_model_path, "rb") as f:
 print(f"[INFO] Mudra model loaded from {mudra_model_path}")
 print(f"[INFO] Navarasa model loaded from {navarasa_model_path}")
 print("[INFO] Navarasa classes:", list(navarasa_model.classes_))
+
+# Load MUDRA_LIBRARY for Ghost Hand
+mudra_library_path = os.path.join(MODEL_DIR, "mudra_library.pkl")
+with open(mudra_library_path, "rb") as f:
+    MUDRA_LIBRARY = pickle.load(f)
+print(f"[INFO] Mudra Library loaded from {mudra_library_path}")
 
 mp_hands = mp.solutions.hands
 mp_draw  = mp.solutions.drawing_utils
@@ -394,8 +401,10 @@ def update_ema_probs(raw_probs):
         ema_probs = EMA_ALPHA * raw_probs + (1 - EMA_ALPHA) * ema_probs
     return ema_probs
 
-def update_stability(current_name, ema_prob_vector):
+def update_stability(current_name, ema_prob_vector, min_frames_override=None):
     global stable_mudra, stable_count
+
+    target_frames = min_frames_override if min_frames_override is not None else MIN_STABLE_FRAMES
 
     classes     = model.classes_
     top_idx     = list(classes).index(current_name) if current_name in list(classes) else 0
@@ -406,20 +415,20 @@ def update_stability(current_name, ema_prob_vector):
     if len(raw_history) == FAST_BREAK_FRAMES and len(set(raw_history)) == 1:
         if current_name != stable_mudra:
             stable_mudra = current_name
-            stable_count = MIN_STABLE_FRAMES
+            stable_count = target_frames
         return stable_mudra, True, smooth_conf
 
     top_prob = ema_prob_vector[top_idx] if top_idx < len(ema_prob_vector) else 0.0
     if top_prob >= STABLE_THRESHOLD:
         if current_name == stable_mudra:
-            stable_count = min(stable_count + 1, MIN_STABLE_FRAMES)
+            stable_count = min(stable_count + 1, target_frames)
         else:
             stable_count = 1
             stable_mudra = current_name
     else:
         stable_count = max(stable_count - 1, 0)
 
-    is_stable = (stable_count >= MIN_STABLE_FRAMES)
+    is_stable = (stable_count >= target_frames)
     return stable_mudra, is_stable, smooth_conf
 
 # =============================================================================
@@ -920,7 +929,7 @@ def is_hand_held(landmarks):
 # =============================================================================
 # CORE MADM PIPELINE
 # =============================================================================
-def run_madm(landmarks, target_mudra='', label="Right"):
+def run_madm(landmarks, target_mudra='', label="Right", min_frames=None):
     global last_landmarks, last_stable_name
 
     try:
@@ -966,7 +975,7 @@ def run_madm(landmarks, target_mudra='', label="Right"):
         ema_p      = update_ema_probs(raw_probs)
         top_idx    = int(np.argmax(ema_p))
         top_name   = str(model.classes_[top_idx])
-        stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p)
+        stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p, min_frames_override=min_frames)
 
         # Dynamic confidence floor
         conf_floor = 35 if (target_mudra or geom_acc > 50) else 25
@@ -1374,14 +1383,14 @@ def detect_landmarks():
         presence_score = body.get('presenceScore', 1.0)
         handedness     = body.get('handedness', 'Right')
 
-        if presence_score < 0.4:
+        if presence_score < 0.25:
             return jsonify({
                 "detected": False, "status": "No Hand Detected",
                 "confidence": 0, "feedback": "Hand presence too low",
                 "accuracy": 0, "corrections": [], "hold_progress": 0, "hold_state": "idle",
             })
 
-        mudra_result = run_madm(landmarks, target, label=handedness)
+        mudra_result = run_madm(landmarks, target, label=handedness, min_frames=3)
         mudra_result.update(current_navarasa)
         current_mudra.update(mudra_result)
 
@@ -1543,6 +1552,102 @@ def predict_mudra():
 # =============================================================================
 # ENTRY POINT
 # =============================================================================
+
+# =============================================================================
+# GHOST HAND EVALUATION
+# =============================================================================
+@app.route('/api/evaluate_session', methods=['POST'])
+def evaluate_session():
+    try:
+        data = request.json
+        landmarks = data.get('landmarks')
+        active_mudras = [m.lower().strip() for m in data.get('activeMudras', [])]
+
+        if not landmarks or len(landmarks) != 21:
+            return jsonify({"error": "Invalid landmarks"}), 400
+
+        lm_list = [LM(float(p['x']), float(p['y']), float(p['z'])) for p in landmarks]
+        classes = list(model.classes_)
+
+        # Try both hand orientations, collect all probs
+        all_probs = []
+        for hand_label in ('Right', 'Left'):
+            try:
+                feats = extract_features(lm_list, label=hand_label)
+                probs = model.predict_proba([feats])[0]
+                all_probs.append(probs)
+            except Exception as e:
+                print(f"[evaluate_session] {hand_label} error: {e}")
+
+        if not all_probs:
+            return jsonify({"matchedMudra": "", "score": 0, "status": "Incorrect / Not Detected", "detected": False})
+
+        # Use the hand orientation with highest overall top confidence
+        best_probs = max(all_probs, key=lambda p: float(max(p)))
+
+        # If active_mudras specified, only score against those
+        search_list = active_mudras if active_mudras else classes
+
+        best_name = ""
+        best_raw_conf = 0.0
+        for m_name in search_list:
+            if m_name not in classes:
+                continue
+            idx = classes.index(m_name)
+            conf = float(best_probs[idx])
+            if conf > best_raw_conf:
+                best_raw_conf = conf
+                best_name = m_name
+
+        # Always normalize against ALL classes, then scale up
+        # This keeps scores meaningful regardless of list size
+        normalized_conf = best_raw_conf * 100.0
+
+        # Boost: if the winner is clearly dominating among active mudras
+        if active_mudras:
+            active_sum = sum(
+                float(best_probs[classes.index(m)])
+                for m in active_mudras if m in classes
+            )
+            if active_sum > 0:
+                subset_normalized = (best_raw_conf / active_sum) * 100.0
+                # Take the higher of the two — raw or subset-normalized
+                normalized_conf = max(normalized_conf, subset_normalized)
+
+        score_pct = round(min(normalized_conf, 100.0), 1)
+
+        # Also run geometry check for target mudra if only one target
+        if len(active_mudras) == 1 and active_mudras[0] in MUDRA_REFERENCE_ANGLES:
+            target_key = active_mudras[0]
+            finger_angles = get_finger_angles_dict(lm_list)
+            lm_wrapper = LMWrapper(lm_list)
+            p_w = [lm_list[0].x, lm_list[0].y, lm_list[0].z]
+            p_m = [lm_list[9].x, lm_list[9].y, lm_list[9].z]
+            palm_size = get_distance(p_w, p_m) or 1.0
+            _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
+            # Blend ML score (60%) + geometry (40%) for single-target mode
+            score_pct = round((score_pct * 0.6) + (geom_acc * 0.4), 1)
+            if best_name != target_key and geom_acc > score_pct:
+                best_name = target_key
+
+        status = "Correct" if score_pct >= 75 else \
+                 "Needs Improvement" if score_pct >= 50 else \
+                 "Incorrect / Not Detected"
+
+        print(f"[evaluate_session] target={active_mudras} matched={best_name} score={score_pct}%")
+
+        return jsonify({
+            "matchedMudra": best_name,
+            "score": score_pct,
+            "status": status,
+            "detected": bool(score_pct >= 50)
+        })
+
+    except Exception as e:
+        print(f"[evaluate_session] Error: {e}")
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")
     socketio.run(app, host='0.0.0.0', port=5001, debug=False,

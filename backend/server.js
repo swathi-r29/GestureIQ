@@ -41,8 +41,8 @@ app.use(cors({
             return callback(null, true);
         }
 
-        // Allow any local network IP (192.168.x.x or 10.x.x.x)
-        if (/^https?:\/\/(192\.168\.|10\.)\d+\.\d+\.\d+(:\d+)?$/.test(origin)) {
+        // Allow any ngrok subdomain (dev flexibility)
+        if (/^https?:\/\/.*\.ngrok-free\.(app|dev)$/.test(origin)) {
             return callback(null, true);
         }
 
@@ -178,6 +178,10 @@ io.on('connection', (socket) => {
         io.to(data.classId).emit('score_update', data);
     });
 
+    socket.on('student_performance_update', (data) => {
+        io.to(data.classId).emit('student_performance_update', data);
+    });
+
     socket.on('class_ended', (classId) => {
         io.to(classId).emit('class_ended_broadcast');
     });
@@ -232,5 +236,4 @@ io.on('connection', (socket) => {
     });
 });
 
-//>>>>>>> Stashed changes
 server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));

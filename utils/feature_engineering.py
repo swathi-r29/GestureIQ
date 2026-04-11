@@ -21,7 +21,9 @@ def extract_features(landmarks, label="Right"):
     label: "Left" or "Right" — Left hand X coords are mirrored so model always sees Right.
     """
     # 1. Extract raw points first (0.0 - 1.0 range)
-    if hasattr(landmarks[0], 'x'):
+    if isinstance(landmarks[0], dict):
+        pts = [[lm.get('x', 0), lm.get('y', 0), lm.get('z', 0)] for lm in landmarks]
+    elif hasattr(landmarks[0], 'x'):
         pts = [[lm.x, lm.y, lm.z] for lm in landmarks]
     else:
         pts = [[lm[0], lm[1], lm[2]] for lm in landmarks]

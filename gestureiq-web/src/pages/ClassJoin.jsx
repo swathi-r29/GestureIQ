@@ -3,13 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { 
-  Calendar, 
-  Clock, 
-  User, 
-  Briefcase, 
-  ArrowRight, 
-  LogIn, 
+import {
+  Calendar,
+  Clock,
+  User,
+  Briefcase,
+  ArrowRight,
+  LogIn,
   AlertCircle,
   Video,
   CheckCircle,
@@ -138,7 +138,7 @@ const ClassJoin = () => {
             <h1 className="text-2xl font-black mb-2" style={{ color: 'var(--text)' }}>Waiting for Teacher</h1>
             <p style={{ color: 'var(--text-muted)' }}>The class will start as soon as your instructor goes live.</p>
           </div>
-          
+
           <div className="p-6 rounded-2xl bg-black/5 space-y-4">
             <p className="text-xs font-bold uppercase tracking-widest opacity-50">Countdown</p>
             <p className="text-4xl font-black tracking-tighter" style={{ color: 'var(--accent)' }}>{countdown || '--:--'}</p>
@@ -156,7 +156,7 @@ const ClassJoin = () => {
   return (
     <div className="min-h-screen p-4 flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
       <div className="max-w-3xl w-full grid grid-cols-1 md:grid-cols-2 gap-8">
-        
+
         {/* Class Info */}
         <div className="p-10 rounded-3xl space-y-8" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
           <div>
@@ -188,7 +188,7 @@ const ClassJoin = () => {
             </div>
           )}
 
-          <button 
+          <button
             disabled={joining}
             onClick={handleJoin}
             className="w-full py-4 rounded-2xl font-black text-white transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-accent/30"
@@ -218,7 +218,7 @@ const ClassJoin = () => {
               ))}
             </div>
           </div>
-          
+
           <div className="p-6 rounded-2xl bg-black/5 border border-dashed flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
             <div className="flex items-center space-x-3">
               <Briefcase className="w-6 h-6 opacity-30" />

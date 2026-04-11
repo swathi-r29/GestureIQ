@@ -6,13 +6,15 @@ from sklearn.metrics import classification_report, accuracy_score
 import pickle
 
 # ── Load CSV ───────────────────────────────────────────────────────────────
+
+
 #CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 #df   = pd.read_csv(CSV)
 #print("Shape:", df.shape)
 #print("\nSamples per rasa:")
 #print(df['label'].value_counts())
 
-CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
+CSV  = "../dataset/navarasa/navarasa_landmarks.csv"
 df   = pd.read_csv(CSV)
 print("Shape:", df.shape)
 print("\nSamples per rasa:")
