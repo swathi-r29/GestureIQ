@@ -8,17 +8,17 @@ import pickle
 # ── Load CSV ───────────────────────────────────────────────────────────────
 
 
-#CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
-#df   = pd.read_csv(CSV)
-#print("Shape:", df.shape)
-#print("\nSamples per rasa:")
-#print(df['label'].value_counts())
-
-CSV  = "../dataset/navarasa/navarasa_landmarks.csv"
+CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 df   = pd.read_csv(CSV)
 print("Shape:", df.shape)
 print("\nSamples per rasa:")
 print(df['label'].value_counts())
+
+#CSV  = "../dataset/navarasa/navarasa_landmarks.csv"
+#df   = pd.read_csv(CSV)
+#print("Shape:", df.shape)
+#print("\nSamples per rasa:")
+#print(df['label'].value_counts())
 
 # ── Prepare ────────────────────────────────────────────────────────────────
 X = df.drop('label', axis=1).values

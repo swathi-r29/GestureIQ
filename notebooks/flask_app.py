@@ -14,6 +14,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features, get_angle, get_distance
+from utils.double_feature_engineering import extract_double_features
 from scipy.spatial.distance import cosine
 
 app = Flask(__name__)
@@ -22,10 +23,6 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path=
 
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "../models")
-
-mudra_model_path = os.path.join(MODEL_DIR, "mudra_model.pkl")
-with open(mudra_model_path, "rb") as f:
-    model = pickle.load(f)
 
 class LM:
     __slots__ = ('x', 'y', 'z')
@@ -36,25 +33,73 @@ class LMWrapper:
     def __init__(self, lm_list): self._lm = lm_list
     def __getitem__(self, i):    return self._lm[i]
 
-navarasa_model_path = os.path.join(MODEL_DIR, "navarasa_model.pkl")
-with open(navarasa_model_path, "rb") as f:
-    navarasa_model = pickle.load(f)
+# ── Model Loading ─────────────────────────────────────────────
+model = None
+mudra_model_path = os.path.join(MODEL_DIR, "mudra_model.pkl")
+if os.path.exists(mudra_model_path):
+    try:
+        with open(mudra_model_path, "rb") as f:
+            model = pickle.load(f)
+        print(f"[INFO] Mudra model loaded from {mudra_model_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load mudra model: {e}")
+else:
+    print(f"[WARNING] Mudra model not found at {mudra_model_path}")
 
-print(f"[INFO] Mudra model loaded from {mudra_model_path}")
-print(f"[INFO] Navarasa model loaded from {navarasa_model_path}")
-print("[INFO] Navarasa classes:", list(navarasa_model.classes_))
+navarasa_model = None
+navarasa_model_path = os.path.join(MODEL_DIR, "navarasa_model.pkl")
+if os.path.exists(navarasa_model_path):
+    try:
+        with open(navarasa_model_path, "rb") as f:
+            navarasa_model = pickle.load(f)
+        print(f"[INFO] Navarasa model loaded from {navarasa_model_path}")
+        print("[INFO] Navarasa classes:", list(navarasa_model.classes_))
+    except Exception as e:
+        print(f"[ERROR] Failed to load navarasa model: {e}")
+else:
+    print(f"[WARNING] Navarasa model not found at {navarasa_model_path}")
 
 # Load MUDRA_LIBRARY for Ghost Hand
+MUDRA_LIBRARY = {}
 mudra_library_path = os.path.join(MODEL_DIR, "mudra_library.pkl")
-with open(mudra_library_path, "rb") as f:
-    MUDRA_LIBRARY = pickle.load(f)
-print(f"[INFO] Mudra Library loaded from {mudra_library_path}")
+if os.path.exists(mudra_library_path):
+    try:
+        with open(mudra_library_path, "rb") as f:
+            MUDRA_LIBRARY = pickle.load(f)
+        print(f"[INFO] Mudra Library loaded from {mudra_library_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load mudra library: {e}")
+else:
+    print(f"[WARNING] Mudra library not found at {mudra_library_path}. Ghost hand feature disabled.")
+
+
 
 mp_hands = mp.solutions.hands
 mp_draw  = mp.solutions.drawing_utils
 hands    = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=1,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+# Load double mudra model (Optional)
+double_model = None
+double_model_path = os.path.join(MODEL_DIR, "double_mudra_model.pkl")
+if os.path.exists(double_model_path):
+    try:
+        with open(double_model_path, "rb") as f:
+            double_model = pickle.load(f)
+        print(f"[INFO] Double mudra model loaded from {double_model_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load double mudra model: {e}")
+else:
+    print(f"[WARNING] Double mudra model not found at {double_model_path}. Predict-double will be disabled.")
+
+# MediaPipe for double hand detection
+hands_double = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=2,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
@@ -1647,6 +1692,78 @@ def evaluate_session():
         print(f"[evaluate_session] Error: {e}")
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/predict_double', methods=['POST'])
+def predict_double():
+    if double_model is None:
+        return jsonify({
+            "name": "Model not trained",
+            "confidence": 0.0,
+            "detected": False,
+            "message": "Double-hand model (double_mudra_model.pkl) is missing. Please train it first."
+        }), 503
+
+    try:
+        body = request.get_json(force=True)
+        if not body or 'frame' not in body:
+            return jsonify({"name": "", "confidence": 0.0, "detected": False}), 400
+
+        img_data = base64.b64decode(body['frame'].split(',')[-1])
+        nparr    = np.frombuffer(img_data, np.uint8)
+        frame    = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"name": "", "confidence": 0.0, "detected": False})
+
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = hands_double.process(rgb)
+
+        if not result.multi_hand_landmarks or len(result.multi_hand_landmarks) < 2:
+            return jsonify({
+                "name": "", "confidence": 0.0, "detected": False,
+                "message": "Show both hands clearly"
+            })
+
+        lms_list = []
+        for hand_lm in result.multi_hand_landmarks:
+            lms_list.append([LM(lm.x, lm.y, lm.z) for lm in hand_lm.landmark])
+
+        # Assign handedness
+        hand_labels = {}
+        for i, hand_info in enumerate(result.multi_handedness):
+            hand_labels[i] = hand_info.classification[0].label  # 'Left' or 'Right'
+
+        right_lm, left_lm = None, None
+        for i, label in hand_labels.items():
+            if label == 'Right':
+                right_lm = lms_list[i]
+            else:
+                left_lm  = lms_list[i]
+
+        # If both not detected cleanly, use positional fallback
+        if right_lm is None and left_lm is None:
+            return jsonify({"name": "", "confidence": 0.0, "detected": False})
+        if right_lm is None: right_lm = left_lm
+        if left_lm  is None: left_lm  = right_lm
+
+        # Match signature: extract_double_features(left_landmarks, right_landmarks, ...)
+        feats = extract_double_features(left_lm, right_lm)
+        probs = double_model.predict_proba([feats])[0]
+        top_i = int(np.argmax(probs))
+        name  = str(double_model.classes_[top_i])
+        conf  = round(float(probs[top_i]) * 100.0, 1)
+
+        top3 = [
+            {"name": str(double_model.classes_[i]), "conf": round(float(probs[i]) * 100.0, 1)}
+            for i in np.argsort(probs)[::-1][:3]
+        ]
+
+        print(f"[predict_double] {name} ({conf}%)")
+        return jsonify({"name": name, "confidence": conf, "detected": conf >= 50, "top3": top3})
+
+    except Exception as e:
+        print(f"[predict_double] Error: {e}")
+        import traceback; traceback.print_exc()
+        return jsonify({"name": "", "confidence": 0.0, "detected": False}), 500
 
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")

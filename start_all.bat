@@ -4,15 +4,15 @@ echo         Starting GestureIQ - All Services
 echo ================================================
 
 echo [1/4] Starting Flask AI Server (port 5001)...
-start cmd /k "cd E:\GestureIQ\notebooks && python flask_app.py"
+start cmd /k "cd D:\GestureIQ\notebooks && python flask_app.py"
 timeout /t 3 /nobreak
 
 echo [2/4] Starting Node Backend (port 5000)...
-start cmd /k "cd E:\GestureIQ\backend && npm start"
+start cmd /k "cd D:\GestureIQ\backend && npm start"
 timeout /t 3 /nobreak
 
 echo [3/4] Starting Vite Frontend (port 5173)...
-start cmd /k "cd E:\GestureIQ\gestureiq-web && npm run dev"
+start cmd /k "cd D:\GestureIQ\gestureiq-web && npm run dev"
 timeout /t 3 /nobreak
 
 echo [4/4] Starting ngrok tunnel...
