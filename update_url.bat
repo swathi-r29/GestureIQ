@@ -20,7 +20,7 @@ echo New URL: %NEW_URL%
 echo Target:   %ENV_FILE%
 
 :: Use PowerShell to perform the replacement in-place
-powershell -Command "(Get-Content '%ENV_FILE%') -replace 'VITE_PUBLIC_URL=.*', 'VITE_PUBLIC_URL=%NEW_URL%' | Set-Content '%ENV_FILE%'"
+powershell -Command "(Get-Content '%ENV_FILE%') -replace 'VITE_PUBLIC_URL=.*', 'VITE_PUBLIC_URL=%NEW_URL%' -replace 'VITE_BACKEND_URL=.*', 'VITE_BACKEND_URL=%NEW_URL%' -replace 'VITE_FLASK_URL=.*', 'VITE_FLASK_URL=%NEW_URL%' -replace 'VITE_SOCKET_URL=.*', 'VITE_SOCKET_URL=%NEW_URL%' | Set-Content '%ENV_FILE%'"
 
 if %ERRORLEVEL% EQU 0 (
     echo.

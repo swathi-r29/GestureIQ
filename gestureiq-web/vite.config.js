@@ -26,9 +26,12 @@ export default defineConfig({
   server: {
     host: true,
     allowedHosts: true,
+    hmr: {
+      clientPort: 443,
+    },
     headers: {
-      'X-Frame-Options': 'ALLOWALL',
-      'Content-Security-Policy': "frame-src * 'self' https://meet.jit.si https://*.jit.si blob: data:;",
+      'ngrok-skip-browser-warning': 'true',
+      'Content-Security-Policy': "frame-src * 'self' blob: data:;",
     },
     proxy: {
       // ── Flask / AI Services (Port 5001) ──

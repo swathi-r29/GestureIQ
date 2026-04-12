@@ -5,10 +5,17 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import { getSocket } from '../utils/socket';
-import {
-  Camera, Activity, CheckCircle, AlertCircle, Clock,
-  Award, LogOut, Zap, Target, RefreshCw
-} from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
+
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+  ]
+};
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
@@ -49,10 +56,12 @@ const StudentLiveClass = () => {
   const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
   const [rasaData, setRasaData] = useState({ rasa: '', rasa_confidence: 0, rasa_meaning: '', expression_match: false });
   const [bestScore, setBestScore] = useState(0);
-  const [showJitsi, setShowJitsi] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [announcement, setAnnouncement] = useState('');
   const [sessionStatus, setSessionStatus] = useState('Incorrect');
+  const [teacherConnected, setTeacherConnected] = useState(false);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCameraOn, setIsCameraOn] = useState(true);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -67,16 +76,159 @@ const StudentLiveClass = () => {
   const frameCountRef = useRef(0);
   const isDetectingRef = useRef(false);
   const lastVoiceRef = useRef(0);
-  const jitsiContainerRef = useRef(null);
-  const jitsiApiRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const teacherSocketIdRef = useRef(null);
+  const iceCandidatesQueueRef = useRef([]);
   const bestScoreRef = useRef(0);
   const bestMudraRef = useRef('');
   const smoothingBuffer = useRef([]);
   const lastLandmarkTimeRef = useRef(0);
+  const classDataRef = useRef(null);
+
+  // FIX A: store offer that arrives before camera is ready
+  const pendingOfferRef = useRef(null);
+  // FIX B: ICE restart timer
+  const iceRestartTimerRef = useRef(null);
 
   const detectedMudraRef = useRef('');
   const aiScoreRef = useRef(0);
   const sessionStatusRef = useRef('Incorrect');
+
+  useEffect(() => { classDataRef.current = classData; }, [classData]);
+
+  // ── handleReceiveOffer ──────────────────────────────────────
+  const handleReceiveOffer = useCallback(async (offer, fromSocketId) => {
+    console.log('[WebRTC Student] Received offer from:', fromSocketId);
+
+    // FIX C: if camera not started yet, store the offer and return
+    // It will be processed in startWebcam() after getUserMedia succeeds
+    if (!streamRef.current) {
+      console.log('[WebRTC Student] Camera not ready — storing offer for later');
+      pendingOfferRef.current = { offer, fromSocketId };
+      teacherSocketIdRef.current = fromSocketId;
+      return;
+    }
+
+    // Close any existing stale connection
+    const currentPC = peerConnectionRef.current;
+    if (currentPC) {
+      if ((currentPC.iceConnectionState === 'connected' || currentPC.iceConnectionState === 'completed') && currentPC.signalingState === 'stable') {
+        console.log('[WebRTC Student] Already connected and stable — ignoring redundant offer');
+        return;
+      }
+      // Detach handlers before closing to prevent stale events
+      currentPC.ontrack = null;
+      currentPC.onicecandidate = null;
+      currentPC.oniceconnectionstatechange = null;
+      currentPC.close();
+      peerConnectionRef.current = null;
+    }
+
+    if (!offer) {
+      console.warn('[WebRTC Student] Received null offer, skipping');
+      return;
+    }
+
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    peerConnectionRef.current = pc;
+
+    pc.ontrack = (event) => {
+      // FIX D: stale-PC guard
+      if (peerConnectionRef.current !== pc) return;
+      console.log('[WebRTC Student] Got remote track:', event.track.kind);
+      if (remoteVideoRef.current) {
+        if (event.streams && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        } else {
+          if (!remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject = new MediaStream([event.track]);
+          } else {
+            remoteVideoRef.current.srcObject.addTrack(event.track);
+          }
+        }
+        setTeacherConnected(true);
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (peerConnectionRef.current !== pc) return;
+      if (event.candidate && teacherSocketIdRef.current) {
+        socketRef.current?.emit('webrtc_ice_candidate', {
+          to: teacherSocketIdRef.current,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (peerConnectionRef.current !== pc) return;
+      console.log('[WebRTC Student] ICE state:', pc.iceConnectionState);
+
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        setTeacherConnected(true);
+        // Clear any pending restart timer
+        if (iceRestartTimerRef.current) {
+          clearTimeout(iceRestartTimerRef.current);
+          iceRestartTimerRef.current = null;
+        }
+      }
+
+      if (pc.iceConnectionState === 'disconnected') {
+        setTeacherConnected(false);
+        // Give 4s to recover before requesting new offer
+        iceRestartTimerRef.current = setTimeout(() => {
+          if (peerConnectionRef.current !== pc) return;
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            console.log('[WebRTC Student] ICE stuck — requesting new offer');
+            socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+          }
+        }, 4000);
+      }
+
+      if (pc.iceConnectionState === 'failed') {
+        setTeacherConnected(false);
+        console.log('[WebRTC Student] ICE failed — requesting new offer immediately');
+        socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+      }
+
+      if (pc.iceConnectionState === 'closed') {
+        setTeacherConnected(false);
+      }
+    };
+
+    try {
+      if (pc.signalingState === 'stable') {
+        // FIX E: add local tracks BEFORE setRemoteDescription so they're in the offer/answer
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            pc.addTrack(track, streamRef.current);
+            console.log('[WebRTC Student] Adding local track to PC:', track.kind);
+          });
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Drain queued ICE candidates
+        while (iceCandidatesQueueRef.current.length > 0) {
+          const candidate = iceCandidatesQueueRef.current.shift();
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+          catch (e) { console.warn('[WebRTC Student] Queued ICE error:', e); }
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socketRef.current?.emit('webrtc_answer', {
+          to: teacherSocketIdRef.current,
+          answer
+        });
+        console.log('[WebRTC Student] Answer sent to teacher');
+      }
+    } catch (err) {
+      console.error('[WebRTC Student] Error handling offer:', err);
+    }
+  }, [classId]);
 
   // ── 1. Fetch Class Data & Setup Socket ─────────────────────
   useEffect(() => {
@@ -86,13 +238,20 @@ const StudentLiveClass = () => {
           `${import.meta.env.VITE_BACKEND_URL}/api/student/class/join/${classId}`
         );
         setClassData(res.data);
+        classDataRef.current = res.data;
+
         const sock = getSocket();
         socketRef.current = sock;
+
         const join = () => sock.emit('join_class', {
-          classId: classId?.toLowerCase(), userId: user?.id || user?._id || 'unknown', name: user?.name || 'Student'
+          classId: classId?.toLowerCase(),
+          userId: user?.id || user?._id || 'unknown',
+          name: user?.name || 'Student'
         });
+
         join();
         sock.on('reconnect', join);
+
         sock.on('modules_changed', (data) => setActiveModules(data.modules || data));
         sock.on('target_changed', (data) => {
           setClassData(prev => prev ? { ...prev, targetMudra: data.target || data.mudra } : prev);
@@ -102,57 +261,64 @@ const StudentLiveClass = () => {
           setAnnouncement(data.message || '');
           setTimeout(() => setAnnouncement(''), 10000);
         });
+
+        // When teacher starts class, request offer
+        sock.on('class_started', () => {
+          console.log('[WebRTC Student] class_started — requesting offer');
+          setTimeout(() => {
+            sock.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+          }, 500);
+        });
+
+        // Teacher sends offer
+        sock.on('teacher_broadcast_offer', async (data) => {
+          console.log('[WebRTC Student] teacher_broadcast_offer received');
+          teacherSocketIdRef.current = data.from;
+          await handleReceiveOffer(data.offer, data.from);
+        });
+
+        // ICE candidates from teacher
+        sock.on('ice_candidate_received', async (data) => {
+          const pc = peerConnectionRef.current;
+          if (!pc || !data.candidate) return;
+          if (pc.remoteDescription) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }
+            catch (err) { console.warn('[WebRTC Student] ICE add error:', err); }
+          } else {
+            iceCandidatesQueueRef.current.push(data.candidate);
+          }
+        });
+
+        // FIX F: request offer on page load — will be stored as pending if camera not ready yet
+        // This handles the case where teacher is already broadcasting when student opens the page
+        setTimeout(() => {
+          console.log('[WebRTC Student] Requesting initial offer (camera may not be ready — will pend)');
+          sock.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+        }, 2000);
+
       } catch (err) {
         setError('Unable to join class. Please check the link.');
       } finally {
         setLoading(false);
       }
     };
+
     fetchClass();
+
     return () => {
       stopWebcam();
       if (timerRef.current) clearInterval(timerRef.current);
       if (socketRef.current) socketRef.current.disconnect();
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.ontrack = null;
+        peerConnectionRef.current.onicecandidate = null;
+        peerConnectionRef.current.oniceconnectionstatechange = null;
+        peerConnectionRef.current.close();
+      }
+      if (iceRestartTimerRef.current) clearTimeout(iceRestartTimerRef.current);
     };
   }, [classId]);
-
-  useEffect(() => {
-    if (sessionStarted && jitsiContainerRef.current && !jitsiApiRef.current) {
-      const roomName = `gestureiq-${String(classId).toLowerCase().trim().slice(-6)}`.replace(/[^a-z0-9-]/g, '-');
-      console.log('[Jitsi Student] Room:', roomName);
-
-      try {
-        const domain = 'meet.jit.si';
-        const options = {
-          roomName: roomName,
-          width: '100%',
-          height: '100%',
-          parentNode: jitsiContainerRef.current,
-          configOverwrite: {
-            prejoinPageEnabled: false,
-            startWithAudioMuted: true,
-            startWithVideoMuted: true,
-          },
-          interfaceConfigOverwrite: {
-            TOOLBAR_BUTTONS: [
-              'microphone', 'camera', 'fullscreen', 'fodeviceselection',
-              'hangup', 'profile', 'chat', 'settings', 'raisehand',
-              'videoquality', 'tileview', 'help'
-            ],
-          },
-          userInfo: {
-            displayName: user?.name || 'Student'
-          }
-        };
-
-        const api = new window.JitsiMeetExternalAPI(domain, options);
-        jitsiApiRef.current = api;
-      } catch (err) {
-        console.error('Jitsi API Error (Student):', err);
-      }
-    }
-  }, [sessionStarted, user]);
 
   // ── 2. MediaPipe Setup ─────────────────────────────────────
   useEffect(() => {
@@ -210,7 +376,8 @@ const StudentLiveClass = () => {
     setCameraError('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' }
+        video: { width: 320, height: 240, facingMode: 'user' },
+        audio: true  // FIX G: audio was missing — student audio never sent to teacher
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -218,12 +385,35 @@ const StudentLiveClass = () => {
         await videoRef.current.play();
       }
       setWebcamActive(true);
+
+      // FIX H: process pending offer now that camera is ready
+      if (pendingOfferRef.current) {
+        console.log('[WebRTC Student] Camera ready — processing pending offer');
+        const { offer, fromSocketId } = pendingOfferRef.current;
+        pendingOfferRef.current = null;
+        // Call handleReceiveOffer directly — streamRef.current is now set
+        await handleReceiveOffer(offer, fromSocketId);
+      } else if (peerConnectionRef.current &&
+        (peerConnectionRef.current.iceConnectionState === 'connected' ||
+          peerConnectionRef.current.iceConnectionState === 'completed')) {
+        // FIX I: PC already connected (offer was processed without tracks)
+        // Add our tracks now via renegotiation
+        console.log('[WebRTC Student] PC already connected — adding tracks');
+        stream.getTracks().forEach(track => {
+          peerConnectionRef.current.addTrack(track, stream);
+        });
+      } else {
+        // FIX J: no pending offer and no active PC — request a fresh one
+        console.log('[WebRTC Student] No pending offer — requesting fresh offer from teacher');
+        socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+      }
+
       requestRef.current = requestAnimationFrame(processFrame);
     } catch (err) {
       setCameraError('Camera error: ' + err.message);
       setSessionStarted(false);
     }
-  }, []);
+  }, [classId, handleReceiveOffer]);
 
   // ── 4. Main Processing Loop ────────────────────────────────
   const processFrame = useCallback(async () => {
@@ -255,8 +445,9 @@ const StudentLiveClass = () => {
     const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 500;
     const lmData = isFresh ? landmarksRef.current : null;
     const socket = socketRef.current;
+    const currentClassData = classDataRef.current;
 
-    if (socket) {
+    if (socket && socket.connected) {
       socket.emit('student_performance_update', {
         classId: classId?.toLowerCase(),
         studentId: user?.id || user?._id || 'unknown',
@@ -281,9 +472,9 @@ const StudentLiveClass = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           landmarks: lmData.landmarks,
-          activeMudras: (classData?.mudrasList?.length > 0)
-            ? classData.mudrasList
-            : (classData?.targetMudra ? [classData.targetMudra] : [])
+          activeMudras: (currentClassData?.mudrasList?.length > 0)
+            ? currentClassData.mudrasList
+            : (currentClassData?.targetMudra ? [currentClassData.targetMudra] : [])
         })
       });
       if (!res.ok) throw new Error(`Server Error: ${res.status}`);
@@ -303,7 +494,7 @@ const StudentLiveClass = () => {
         setBestScore(data.score);
       }
 
-      if (socket) {
+      if (socket && socket.connected) {
         socket.emit('student_performance_update', {
           classId: classId?.toLowerCase(),
           studentId: user?.id || user?._id || 'unknown',
@@ -329,6 +520,26 @@ const StudentLiveClass = () => {
     }
   };
 
+  const toggleMic = () => {
+    if (streamRef.current) {
+      const audioTrack = streamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMicOn(audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleCamera = () => {
+    if (streamRef.current) {
+      const videoTrack = streamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCameraOn(videoTrack.enabled);
+      }
+    }
+  };
+
   const startSession = useCallback(async () => {
     unlock();
     setTimeout(() => unlock(), 1500);
@@ -338,7 +549,6 @@ const StudentLiveClass = () => {
     setBestScore(0);
     bestScoreRef.current = 0;
     bestMudraRef.current = '';
-    setShowJitsi(true);
     timerRef.current = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 1000);
@@ -380,12 +590,26 @@ const StudentLiveClass = () => {
   const leaveClass = useCallback(async () => {
     stopWebcam(); stop();
     if (timerRef.current) clearInterval(timerRef.current);
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.oniceconnectionstatechange = null;
+      peerConnectionRef.current.close();
+    }
+    if (iceRestartTimerRef.current) clearTimeout(iceRestartTimerRef.current);
     await saveReport();
   }, [stopWebcam, stop, saveReport]);
 
   const handleEndSessionFromTeacher = useCallback(async () => {
     stopWebcam(); stop();
     if (timerRef.current) clearInterval(timerRef.current);
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.ontrack = null;
+      peerConnectionRef.current.onicecandidate = null;
+      peerConnectionRef.current.oniceconnectionstatechange = null;
+      peerConnectionRef.current.close();
+    }
+    if (iceRestartTimerRef.current) clearTimeout(iceRestartTimerRef.current);
     await saveReport();
   }, [stopWebcam, stop, saveReport]);
 
@@ -563,7 +787,6 @@ const StudentLiveClass = () => {
               className="absolute inset-0 w-full h-full pointer-events-none z-10"
               width={1280} height={720} />
 
-            {/* Detected mudra pill */}
             {detectedMudra && (
               <div className="absolute top-5 left-1/2 -translate-x-1/2 px-5 py-2 rounded-full text-xs font-black uppercase tracking-[3px] backdrop-blur-md shadow-lg"
                 style={{
@@ -575,7 +798,6 @@ const StudentLiveClass = () => {
               </div>
             )}
 
-            {/* AI Score overlay */}
             <div className="absolute top-5 right-5 backdrop-blur-md px-4 py-3 rounded-2xl shadow-lg flex flex-col items-end gap-1"
               style={{ background: 'rgba(255,255,255,0.92)', border: '1.5px solid #E2E8F0' }}>
               <span className="text-[8px] tracking-[3px] uppercase text-slate-400 font-bold">AI Score</span>
@@ -588,7 +810,6 @@ const StudentLiveClass = () => {
               </div>
             </div>
 
-            {/* Feedback bar */}
             <div className="absolute bottom-0 inset-x-0 p-5"
               style={{ background: 'linear-gradient(to top, rgba(255,255,255,0.95), transparent)' }}>
               <div className="flex items-center gap-3">
@@ -605,7 +826,24 @@ const StudentLiveClass = () => {
               </div>
             </div>
 
-            {/* Camera loading */}
+            {/* Media Controls */}
+            <div className="absolute bottom-5 right-5 flex items-center gap-2 z-20">
+              <button
+                onClick={toggleMic}
+                className={`p-3 rounded-2xl backdrop-blur-md border transition-all ${isMicOn ? 'bg-white/90 border-slate-200 text-slate-600' : 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30'
+                  }`}
+              >
+                {isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
+              </button>
+              <button
+                onClick={toggleCamera}
+                className={`p-3 rounded-2xl backdrop-blur-md border transition-all ${isCameraOn ? 'bg-white/90 border-slate-200 text-slate-600' : 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30'
+                  }`}
+              >
+                {isCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
+              </button>
+            </div>
+
             {!webcamActive && (
               <div className="absolute inset-0 flex items-center justify-center"
                 style={{ background: '#F1F5F9' }}>
@@ -618,12 +856,46 @@ const StudentLiveClass = () => {
           </div>
         </div>
 
-        {/* ── RIGHT: Compact Sidebar ── */}
+        {/* ── RIGHT: Sidebar ── */}
         <div className="w-64 border-l border-slate-100 bg-white flex flex-col gap-3 p-4 flex-shrink-0 overflow-y-auto shadow-xl">
 
+          {/* Teacher video — no muted so audio plays */}
           <div className="space-y-2 flex-grow min-h-[150px]">
-            <p className="text-[9px] uppercase tracking-[3px] text-slate-400 font-bold">🎙 Teacher</p>
-            <div ref={jitsiContainerRef} style={{ width: '100%', height: '200px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#0f172a' }} />
+            <div className="flex items-center justify-between">
+              <p className="text-[9px] uppercase tracking-[3px] text-slate-400 font-bold">🎙 Teacher</p>
+              {teacherConnected && (
+                <span className="text-[8px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                  Live
+                </span>
+              )}
+            </div>
+            <div style={{ width: '100%', height: '180px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#0f172a', position: 'relative' }}>
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+              {!teacherConnected && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <div className="w-5 h-5 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin" />
+                  <p style={{ color: '#94A3B8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                    Waiting for teacher...
+                  </p>
+                  <button
+                    onClick={() => {
+                      console.log('[WebRTC Student] Manual refresh');
+                      socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+                    }}
+                    className="mt-1 px-3 py-1 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#64748B', border: '1px solid rgba(255,255,255,0.1)' }}
+                  >
+                    ↻ Refresh
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ height: '1px', background: '#F1F5F9' }} />

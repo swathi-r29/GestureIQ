@@ -130,6 +130,25 @@ io.on('connection', (socket) => {
             userId: userId,
             name: name
         });
+
+        // Send existing participants to the new user
+        const room = io.sockets.adapter.rooms.get(classId);
+        if (room) {
+            const participants = [];
+            room.forEach(socketId => {
+                if (socketId !== socket.id) {
+                    const registry = socketRegistry.get(socketId);
+                    if (registry) {
+                        participants.push({
+                            id: socketId,
+                            userId: registry.userId,
+                            name: registry.name
+                        });
+                    }
+                }
+            });
+            socket.emit('current_participants', participants);
+        }
     });
 
     socket.on('start_live_session', (classId) => {
@@ -187,6 +206,13 @@ io.on('connection', (socket) => {
     });
 
     // WebRTC Signaling
+    socket.on('request_webrtc_offer', (data) => {
+        // Broadcast to the room so the teacher hears it
+        socket.to(data.classId).emit('request_webrtc_offer', {
+            from: socket.id
+        });
+    });
+
     socket.on('webrtc_offer', (data) => {
         if (data.to) {
             io.to(data.to).emit('teacher_broadcast_offer', {

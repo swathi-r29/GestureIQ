@@ -8,17 +8,17 @@ import pickle
 # ── Load CSV ───────────────────────────────────────────────────────────────
 
 
-CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
-df   = pd.read_csv(CSV)
-print("Shape:", df.shape)
-print("\nSamples per rasa:")
-print(df['label'].value_counts())
-
-#CSV  = "../dataset/navarasa/navarasa_landmarks.csv"
+#CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 #df   = pd.read_csv(CSV)
 #print("Shape:", df.shape)
 #print("\nSamples per rasa:")
 #print(df['label'].value_counts())
+
+CSV  = "../dataset/navarasa/navarasa_landmarks.csv"
+df   = pd.read_csv(CSV)
+print("Shape:", df.shape)
+print("\nSamples per rasa:")
+print(df['label'].value_counts())
 
 # ── Prepare ────────────────────────────────────────────────────────────────
 X = df.drop('label', axis=1).values
@@ -48,19 +48,19 @@ print("\nPer-class results:")
 print(classification_report(y_test, y_pred))
 
 # ── Save ───────────────────────────────────────────────────────────────────
-import os
-os.makedirs("D:/GestureIQ/models", exist_ok=True)
-
-with open("D:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
-    pickle.dump(model, f)
-
-print("✅ Saved: D:/GestureIQ/models/navarasa_model.pkl")
 #import os
-#os.makedirs("../models", exist_ok=True)
+#os.makedirs("D:/GestureIQ/models", exist_ok=True)
 
-#with open("../models/navarasa_model.pkl", "wb") as f:
+#with open("D:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
  #   pickle.dump(model, f)
 
-#print("✅ Saved: ../models/navarasa_model.pkl")
+#print("✅ Saved: D:/GestureIQ/models/navarasa_model.pkl")
+import os
+os.makedirs("../models", exist_ok=True)
 
-#print("Training complete!")
+with open("../models/navarasa_model.pkl", "wb") as f:
+    pickle.dump(model, f)
+
+print("✅ Saved: ../models/navarasa_model.pkl")
+
+print("Training complete!")
