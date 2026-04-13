@@ -27,7 +27,7 @@ const StaffMyClasses = () => {
     try {
       const token = localStorage.getItem('token');
       const res = await axios.get(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/classes?status=${activeTab}`,
+        `/api/staff/classes?status=${activeTab}`,
         { headers: { 'x-auth-token': token } }
       );
       setClasses(res.data);
@@ -49,7 +49,7 @@ const StaffMyClasses = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.delete(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/${classId}`,
+        `/api/staff/class/${classId}`,
         { headers: { 'x-auth-token': token } }
       );
       fetchClasses();

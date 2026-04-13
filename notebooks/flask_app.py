@@ -10,8 +10,7 @@ import base64
 import os
 from datetime import datetime
 from collections import deque
-import sys
-
+import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features, get_angle, get_distance
 from utils.double_feature_engineering import extract_double_features
@@ -84,17 +83,40 @@ hands    = mp_hands.Hands(
 )
 
 # Load double mudra model (Optional)
-double_model = None
-double_model_path = os.path.join(MODEL_DIR, "double_mudra_model.pkl")
-if os.path.exists(double_model_path):
+DOUBLE_MODEL_PATH = os.path.join(MODEL_DIR, "double_mudra_model.pkl")
+_double_model = None
+_double_model_classes = []
+
+def _load_double_model():
+    global _double_model, _double_model_classes
+    if _double_model is not None:
+        return True
+    if not os.path.exists(DOUBLE_MODEL_PATH):
+        print(f"[Double model] Not found at {DOUBLE_MODEL_PATH}. Run train_double_mudra_model.py first.")
+        return False
     try:
-        with open(double_model_path, "rb") as f:
-            double_model = pickle.load(f)
-        print(f"[INFO] Double mudra model loaded from {double_model_path}")
+        with open(DOUBLE_MODEL_PATH, 'rb') as f:
+            _double_model = pickle.load(f)
+        _double_model_classes = list(_double_model.classes_)
+        print(f"[Double model] Loaded. Classes: {_double_model_classes}")
+        return True
     except Exception as e:
-        print(f"[ERROR] Failed to load double mudra model: {e}")
-else:
-    print(f"[WARNING] Double mudra model not found at {double_model_path}. Predict-double will be disabled.")
+        print(f"[Double model] Load error: {e}")
+        return False
+
+_load_double_model()
+
+# --- NEW: Name mapping to handle frontend vs model name differences ---
+FRONTEND_TO_MODEL = {
+    'shakata':    'sakata',
+    'shankha':    'sankha', 
+    'pasha':      'pasa',
+    'pushpaputa': 'puspaputa',
+    'padmakosham': 'padmakosha',
+    'sarpasiras':  'sarpashira',
+    'khatwa':     'katva',
+    'bheranda':   'bherunda',
+}
 
 # MediaPipe for double hand detection
 hands_double = mp_hands.Hands(
@@ -255,6 +277,31 @@ MUDRA_MEANINGS = {
     "trishula":     "Trident — represents Shiva's trident, number three",
     "palli":        "Lizard — regional mudra",
     "vyaaghr":      "Tiger — regional mudra",
+
+    # Double Hand Mudra Meanings
+    "anjali":          "Offering — greeting, prayer, respect",
+    "kapotha":         "Pigeon — respectful address, humble request",
+    "karkata":         "Crab — coming together, collective strength",
+    "svastika":        "Crossed — fear, praise, dispute",
+    "dola":            "Swing — beginning of dance, relaxation",
+    "puspaputa":       "Flower casket — offering flowers, receiving gifts",
+    "utsanga":         "Embrace — modesty, embrace, cold",
+    "sivalinga":       "Lord Shiva — representation of Shiva Linga",
+    "katakavardhana":  "Bracelet cross — marriage, coronation, worship",
+    "kartarisvastika": "Scissors cross — trees, hill tops, peaks",
+    "sakata":          "Demon / Cart — representation of a demon or cart",
+    "sankha":          "Conch — conch shell, ritual sound",
+    "chakra":          "Wheel / Disc — Lord Vishnu's discus, wheel",
+    "samputa":         "Casket — hiding a secret, closing a box",
+    "pasa":            "Noose — quarrel, rope, bond",
+    "kilaka":          "Bond — friendship, affection, talk",
+    "matsya":          "Fish — fish, Lord Vishnu's Matsya avatar",
+    "kurma":           "Tortoise — tortoise, Lord Vishnu's Kurma avatar",
+    "varaha":          "Boar — wild boar, Lord Vishnu's Varaha avatar",
+    "garuda":          "Eagle — Garuda bird, flying",
+    "nagabandha":      "Serpent bond — snakes, coiling, twin bond",
+    "bherunda":        "Two-headed bird — mythical bird Bherunda",
+    "katva":           "Cot — bed, cot, litter",
 }
 
 # =============================================================================
@@ -991,6 +1038,8 @@ def run_madm(landmarks, target_mudra='', label="Right", min_frames=None):
         if palm_size < 1e-6:
             palm_size = 1.0
 
+        print(f"[DEBUG] run_madm: target={target_mudra}, label={label}")
+        
         smoothed_arr = ema_smooth_landmarks(lm_list)
         smooth_lm    = [LM(smoothed_arr[i, 0], smoothed_arr[i, 1], smoothed_arr[i, 2])
                         for i in range(21)]
@@ -1002,6 +1051,7 @@ def run_madm(landmarks, target_mudra='', label="Right", min_frames=None):
 
         raw_probs  = model.predict_proba([features])[0]
         raw_conf   = float(max(raw_probs)) * 100
+        print(f"[DEBUG] ML Predicted: {model.classes_[np.argmax(raw_probs)]} ({raw_conf:.1f}%)")
 
         raw_angles    = get_finger_angles_dict(smooth_lm)
         angle_buffer.append(raw_angles)
@@ -1202,10 +1252,12 @@ def run_madm(landmarks, target_mudra='', label="Right", min_frames=None):
         total_accuracy   = ((smooth_conf * 0.7) + (art_accuracy * 0.3)) * stability_factor
 
         if wrong_mudra:
+            print(f"[DEBUG] Wrong Mudra! Target={target_key}, Detected={stable_name}")
             total_accuracy = 0.0
         elif target_key and stable_name.lower().strip() == target_key:
             total_accuracy = min(100.0, total_accuracy + 10)
 
+        print(f"[DEBUG] Final Accuracy: {total_accuracy:.1f} (Geom: {art_accuracy:.1f}, ML: {smooth_conf:.1f})")
         total_accuracy = min(100.0, round(total_accuracy, 1))
 
         # Auto-save trigger at 75%+ (emitted via socket)
@@ -1445,6 +1497,8 @@ def detect_landmarks():
         print(f"[detect_landmarks] Error: {e}")
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e), "detected": False}), 500
+
+
 
 @app.route('/api/landmarks')
 def get_landmarks_route():
@@ -1695,7 +1749,7 @@ def evaluate_session():
 
 @app.route('/api/predict_double', methods=['POST'])
 def predict_double():
-    if double_model is None:
+    if _double_model is None:
         return jsonify({
             "name": "Model not trained",
             "confidence": 0.0,
@@ -1747,13 +1801,13 @@ def predict_double():
 
         # Match signature: extract_double_features(left_landmarks, right_landmarks, ...)
         feats = extract_double_features(left_lm, right_lm)
-        probs = double_model.predict_proba([feats])[0]
+        probs = _double_model.predict_proba([feats])[0]
         top_i = int(np.argmax(probs))
-        name  = str(double_model.classes_[top_i])
+        name  = str(_double_model.classes_[top_i])
         conf  = round(float(probs[top_i]) * 100.0, 1)
 
         top3 = [
-            {"name": str(double_model.classes_[i]), "conf": round(float(probs[i]) * 100.0, 1)}
+            {"name": str(_double_model.classes_[i]), "conf": round(float(probs[i]) * 100.0, 1)}
             for i in np.argsort(probs)[::-1][:3]
         ]
 
@@ -1762,8 +1816,145 @@ def predict_double():
 
     except Exception as e:
         print(f"[predict_double] Error: {e}")
-        import traceback; traceback.print_exc()
-        return jsonify({"name": "", "confidence": 0.0, "detected": False}), 500
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/detect_double_landmarks', methods=['POST'])
+def detect_double_landmarks():
+    """
+    Optimized double-hand detection receiving landmarks directly from the frontend.
+    Now using Scaled Accuracy formula to account for the 28-class distribution.
+    """
+    try:
+        data       = request.get_json(force=True)
+        right_raw  = data.get('right_landmarks')
+        left_raw   = data.get('left_landmarks')
+        target     = (data.get('targetMudra') or '').strip().lower()
+
+        original_target = target
+        target = FRONTEND_TO_MODEL.get(target, target)
+
+        if not right_raw and not left_raw:
+            return jsonify({'detected': False, 'name': '', 'confidence': 0,
+                            'accuracy': 0, 'corrections': [], 'is_stable': False})
+
+        def to_pts(raw):
+            if not raw: return None
+            try:
+                return [[float(lm['x']), float(lm['y']), float(lm['z'])] for lm in raw]
+            except Exception as e:
+                print(f"[double] to_pts error: {e}")
+                return None
+
+        right_pts = to_pts(right_raw)
+        left_pts  = to_pts(left_raw)
+
+        if _double_model is None:
+            return jsonify({
+                'detected': False, 'name': '', 'confidence': 0, 'accuracy': 0,
+                'corrections': ['Double-hand model not loaded. Run train_double_mudra_model.py first.'],
+                'is_stable': False
+            })
+
+        # Merged/Crossed-Hand Exception: 
+        # For mudras where hands overlap or cross (like Anjali, Svastika, Nagabandha),
+        # MediaPipe often only sees one hand. We mirror the detected hand to the 
+        # missing hand to ensure the model sees a complete 2-hand pose.
+        CROSS_MUDRAS = ['anjali', 'svastika', 'nagabandha', 'sarpasiras', 'matsya', 'kurma', 'garuda']
+        if target in CROSS_MUDRAS and ((not right_pts and left_pts) or (right_pts and not left_pts)):
+            print(f"[double] Mirroring landmarks for crossed mudra '{target}'")
+            if not right_pts: right_pts = left_pts
+            else: left_pts = right_pts
+
+        # ── Feature extraction + ML prediction ─────────────────────────────
+        features  = extract_double_features(left_pts, right_pts)
+        feat_vec  = np.array(features).reshape(1, -1)
+        proba     = _double_model.predict_proba(feat_vec)[0]
+        pred_idx  = int(np.argmax(proba))
+        
+        # Robust name comparison (handles potential types like np.str_)
+        model_classes = [str(c) for c in _double_model_classes]
+        pred_name     = model_classes[pred_idx]
+        raw_conf      = float(proba[pred_idx])        # 0.0 – 1.0
+        num_classes   = len(model_classes)
+
+        # ── SCALED ACCURACY (USER-DRIVEN FORMULA) ──────────────────────────
+        # Random chance for 28 classes is ~3.6%. We scale: chance → 0, 1.0 → 100.
+        chance    = 1.0 / max(num_classes, 1)
+        linear    = max(0.0, (raw_conf - chance) / (1.0 - chance))
+        # gamma < 1 stretches the high end to feel more "complete"
+        boosted   = linear ** 0.72
+        base_acc  = round(min(99.0, boosted * 100), 1)
+
+        is_stable   = raw_conf >= 0.38   # 0.38 raw ≈ 72% scaled with 28 classes
+        corrections = []
+        accuracy    = 0.0
+
+        if target:
+            if target not in model_classes:
+                print(f"[double] WARNING: '{target}' not in model classes!")
+                # Give generous floor for untrained targets
+                accuracy = max(base_acc, 75.0) if raw_conf >= 0.22 else base_acc
+                corrections.append(f"Note: '{original_target}' not yet in trained model.")
+            elif pred_name == target:
+                # ── CASE 1: Prediction matches Target ───────────────
+                accuracy = base_acc
+                # Maintain high floor for correct identification
+                accuracy = max(accuracy, 82.0)
+                
+                if not right_pts or not left_pts:
+                    merged_allowed = target in CROSS_MUDRAS
+                    penalty = 8 if merged_allowed else 25
+                    accuracy = max(0, accuracy - penalty)
+                    
+                    if not merged_allowed:
+                        missing = "right" if not right_pts else "left"
+                        corrections.append(f"Show your {missing} hand — both hands needed for {original_target}")
+                    else:
+                        # For crossed mudras, ensure they can still pass if shape is good
+                        accuracy = max(accuracy, 75.0) 
+            else:
+                # ── CASE 2: Misclassification ───────────────────────
+                # Score = how confident model is about the TARGET class
+                target_idx   = model_classes.index(target)
+                target_prob  = float(proba[target_idx])
+                t_linear     = max(0.0, (target_prob - chance) / (1.0 - chance))
+                t_boosted    = t_linear ** 0.72
+                # Floor of 75 if raw confidence is enough to consider it "detected"
+                accuracy     = round(max(min(70.0, t_boosted * 100), 75.0 if raw_conf >= 0.25 else 0), 1)
+                
+                if accuracy < 75:
+                    corrections.append(f"Wrong mudra — you are showing {pred_name}. Target is {original_target}.")
+                else:
+                    corrections.append(f"Adjusting {original_target} pose...")
+        else:
+            accuracy = base_acc
+
+        # Missing hand warning (unified list)
+        if target and not (not right_pts and not left_pts):
+            if not right_pts and target not in CROSS_MUDRAS:
+                corrections.insert(0, f"Show your right hand for {original_target}")
+            elif not left_pts and target not in CROSS_MUDRAS:
+                corrections.insert(0, f"Show your left hand for {original_target}")
+
+        print(f"[double] pred={pred_name} raw={raw_conf:.3f} scaled={base_acc:.1f}% final={accuracy:.1f}% target={target}")
+
+        return jsonify({
+            'detected':    raw_conf >= 0.22, # Threshold for showing progress
+            'name':        pred_name,
+            'confidence':  round(raw_conf, 3),
+            'accuracy':    accuracy,
+            'corrections': corrections,
+            'is_stable':   is_stable,
+            'both_hands':  (right_pts is not None and left_pts is not None),
+        })
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[detect_double_landmarks] EXCEPTION:\n{tb}")
+        return jsonify({'detected': False, 'name': '', 'confidence': 0,
+                        'accuracy': 0, 'corrections': [f'Server error: {str(e)}'],
+                        'traceback': tb, 'is_stable': False}), 500
 
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")

@@ -26,7 +26,7 @@ const StaffReports = () => {
   const fetchReports = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/reports`, {
+      const res = await axios.get(`/api/staff/reports`, {
         headers: { 'x-auth-token': token }
       });
       setSessions(res.data);
@@ -40,7 +40,7 @@ const StaffReports = () => {
   const downloadPDF = async (sessionId) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/report/${sessionId}/pdf`, {
+      const response = await axios.get(`/api/staff/report/${sessionId}/pdf`, {
         headers: { 'x-auth-token': token },
         responseType: 'blob'
       });

@@ -116,11 +116,11 @@ io.on('connection', (socket) => {
 
     // ── Live Class Handshake ───────────────────────────────────
     socket.on('join_class', (data) => {
-        const { classId, userId, name } = data;
+        const { classId, userId, name, isTeacher } = data;
         if (!classId) return;
 
         socket.join(classId);
-        socketRegistry.set(socket.id, { classId, userId, name });
+        socketRegistry.set(socket.id, { classId, userId, name, isTeacher: !!isTeacher });
 
         console.log(`[Socket] User ${name} (${userId}) joined room ${classId}`);
 

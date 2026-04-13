@@ -12,117 +12,147 @@ const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
 
 const MUDRAS = [
-    { name: "Pataka",       level: "Basic",        folder: "pataka"       },
-    { name: "Tripataka",    level: "Basic",        folder: "tripataka"    },
-    { name: "Ardhapataka",  level: "Basic",        folder: "ardhapataka"  },
-    { name: "Kartarimukha", level: "Basic",        folder: "kartarimukha" },
-    { name: "Mayura",       level: "Basic",        folder: "mayura"       },
-    { name: "Ardhachandra", level: "Basic",        folder: "ardhachandra" },
-    { name: "Arala",        level: "Intermediate", folder: "arala"        },
-    { name: "Shukatunda",   level: "Intermediate", folder: "shukatunda"   },
-    { name: "Mushti",       level: "Intermediate", folder: "mushti"       },
-    { name: "Shikhara",     level: "Intermediate", folder: "shikhara"     },
-    { name: "Kapittha",     level: "Intermediate", folder: "kapittha"     },
-    { name: "Katakamukha",  level: "Intermediate", folder: "katakamukha"  },
-    { name: "Suchi",        level: "Basic",        folder: "suchi"        },
-    { name: "Chandrakala",  level: "Intermediate", folder: "chandrakala"  },
-    { name: "Padmakosha",   level: "Intermediate", folder: "padmakosha"   },
-    { name: "Sarpashira",   level: "Advanced",     folder: "sarpashira"   },
-    { name: "Mrigashira",   level: "Advanced",     folder: "mrigashira"   },
-    { name: "Simhamukha",   level: "Advanced",     folder: "simhamukha"   },
-    { name: "Kangula",      level: "Advanced",     folder: "kangula"      },
-    { name: "Alapadma",     level: "Advanced",     folder: "alapadma"     },
-    { name: "Chatura",      level: "Advanced",     folder: "chatura"      },
-    { name: "Bhramara",     level: "Advanced",     folder: "bhramara"     },
-    { name: "Hamsasya",     level: "Advanced",     folder: "hamsasya"     },
-    { name: "Hamsapaksha",  level: "Advanced",     folder: "hamsapaksha"  },
-    { name: "Sandamsha",    level: "Advanced",     folder: "sandamsha"    },
-    { name: "Mukula",       level: "Advanced",     folder: "mukula"       },
-    { name: "Tamrachuda",   level: "Advanced",     folder: "tamrachuda"   },
-    { name: "Trishula",     level: "Advanced",     folder: "trishula"     },
+    // --- SINGLE HAND MUDRAS ---
+    { name: "Pataka", level: "Basic", folder: "pataka", type: "Single" },
+    { name: "Tripataka", level: "Basic", folder: "tripataka", type: "Single" },
+    { name: "Ardhapataka", level: "Basic", folder: "ardhapataka", type: "Single" },
+    { name: "Kartarimukha", level: "Basic", folder: "kartarimukha", type: "Single" },
+    { name: "Mayura", level: "Basic", folder: "mayura", type: "Single" },
+    { name: "Ardhachandra", level: "Basic", folder: "ardhachandra", type: "Single" },
+    { name: "Suchi", level: "Basic", folder: "suchi", type: "Single" },
+
+    { name: "Arala", level: "Intermediate", folder: "arala", type: "Single" },
+    { name: "Shukatunda", level: "Intermediate", folder: "shukatunda", type: "Single" },
+    { name: "Mushti", level: "Intermediate", folder: "mushti", type: "Single" },
+    { name: "Shikhara", level: "Intermediate", folder: "shikhara", type: "Single" },
+    { name: "Kapittha", level: "Intermediate", folder: "kapittha", type: "Single" },
+    { name: "Katakamukha", level: "Intermediate", folder: "katakamukha", type: "Single" },
+    { name: "Chandrakala", level: "Intermediate", folder: "chandrakala", type: "Single" },
+    { name: "Padmakosha", level: "Intermediate", folder: "padmakosha", type: "Single" },
+
+    { name: "Sarpashira", level: "Advanced", folder: "sarpashira", type: "Single" },
+    { name: "Mrigashira", level: "Advanced", folder: "mrigashira", type: "Single" },
+    { name: "Simhamukha", level: "Advanced", folder: "simhamukha", type: "Single" },
+    { name: "Kangula", level: "Advanced", folder: "kangula", type: "Single" },
+    { name: "Alapadma", level: "Advanced", folder: "alapadma", type: "Single" },
+    { name: "Chatura", level: "Advanced", folder: "chatura", type: "Single" },
+    { name: "Bhramara", level: "Advanced", folder: "bhramara", type: "Single" },
+    { name: "Hamsasya", level: "Advanced", folder: "hamsasya", type: "Single" },
+    { name: "Hamsapaksha", level: "Advanced", folder: "hamsapaksha", type: "Single" },
+    { name: "Sandamsha", level: "Advanced", folder: "sandamsha", type: "Single" },
+    { name: "Mukula", level: "Advanced", folder: "mukula", type: "Single" },
+    { name: "Tamrachuda", level: "Advanced", folder: "tamrachuda", type: "Single" },
+    { name: "Trishula", level: "Advanced", folder: "trishula", type: "Single" },
+
+    // --- DOUBLE HAND MUDRAS ---
+    { name: "Anjali", level: "Basic", folder: "anjali", type: "Double" },
+    { name: "Kapotha", level: "Basic", folder: "kapotha", type: "Double" },
+    { name: "Karkata", level: "Basic", folder: "karkata", type: "Double" },
+    { name: "Svastika", level: "Basic", folder: "svastika", type: "Double" },
+    { name: "Dola", level: "Basic", folder: "dola", type: "Double" },
+    { name: "Puspaputa", level: "Basic", folder: "puspaputa", type: "Double" },
+
+    { name: "Utsanga", level: "Intermediate", folder: "utsanga", type: "Double" },
+    { name: "Sivalinga", level: "Intermediate", folder: "sivalinga", type: "Double" },
+    { name: "Katakavardhana", level: "Intermediate", folder: "katakavardhana", type: "Double" },
+    { name: "Kartarisvastika", level: "Intermediate", folder: "kartarisvastika", type: "Double" },
+    { name: "Sakata", level: "Intermediate", folder: "sakata", type: "Double" },
+    { name: "Sankha", level: "Intermediate", folder: "sankha", type: "Double" },
+    { name: "Chakra", level: "Intermediate", folder: "chakra", type: "Double" },
+    { name: "Samputa", level: "Intermediate", folder: "samputa", type: "Double" },
+
+    { name: "Pasa", level: "Advanced", folder: "pasa", type: "Double" },
+    { name: "Kilaka", level: "Advanced", folder: "kilaka", type: "Double" },
+    { name: "Matsya", level: "Advanced", folder: "matsya", type: "Double" },
+    { name: "Kurma", level: "Advanced", folder: "kurma", type: "Double" },
+    { name: "Varaha", level: "Advanced", folder: "varaha", type: "Double" },
+    { name: "Garuda", level: "Advanced", folder: "garuda", type: "Double" },
+    { name: "Nagabandha", level: "Advanced", folder: "nagabandha", type: "Double" },
+    { name: "Bherunda", level: "Advanced", folder: "bherunda", type: "Double" },
+    { name: "Katva", level: "Advanced", folder: "katva", type: "Double" },
 ].map(m => ({
     ...m,
     meaning: MUDRA_CONFIG[m.folder]?.meaning || '',
-    usage:   MUDRA_CONFIG[m.folder]?.usage   || '',
+    usage: MUDRA_CONFIG[m.folder]?.usage || '',
     fingers: MUDRA_CONFIG[m.folder]?.fingers || '',
 }));
 
-const STABLE_GATE        = 2; // Reduced from 4 for better responsiveness with painted hands
-const WRONG_MUDRA_GATE   = 2;
+const STABLE_GATE = 2; // Reduced from 4 for better responsiveness with painted hands
+const WRONG_MUDRA_GATE = 2;
 const ACCURACY_THRESHOLD = 80;
-const HOLD_DURATION_MS   = 800;
+const HOLD_DURATION_MS = 800;
 
-const STAGES = { SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
+const STAGES = { SELECT_TYPE: 'SELECT_TYPE', SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
 const LEVEL_CONFIG = {
-    'Basic':        { title: 'The Foundations', icon: '✦' },
+    'Basic': { title: 'The Foundations', icon: '✦' },
     'Intermediate': { title: 'The Expressions', icon: '❦' },
-    'Advanced':     { title: 'The Mastery',     icon: '✧' },
+    'Advanced': { title: 'The Mastery', icon: '✧' },
 };
-const FLASK_URL = (import.meta.env.VITE_FLASK_URL || '').replace(/\/$/, '');
 
 export default function Learn() {
-    const { user }  = useAuth();
-    const navigate  = useNavigate();
+    const { user } = useAuth();
+    const navigate = useNavigate();
 
-    const [lang, setLang]                   = useState('en');
-    const { stop, test, unlock, announce }  = useVoiceGuide({ language: lang });
+    const [lang, setLang] = useState('en');
+    const { stop, test, unlock, announce } = useVoiceGuide({ language: lang });
 
-    const [stage,           setStage]           = useState(STAGES.SELECT_LEVEL);
-    const [selectedLevel,   setSelectedLevel]   = useState(null);
-    const [selectedMudra,   setSelectedMudra]   = useState(null);
-    const [progress,        setProgress]        = useState([]);
-    const [bestScores,      setBestScores]      = useState({});
-    const [cameraOn,        setCameraOn]        = useState(false);
-    const [detected,        setDetected]        = useState({ name: '', confidence: 0, detected: false });
-    const [loading,         setLoading]         = useState(true);
-    const [mudraContent,    setMudraContent]    = useState(null);
-    const [contentLoading,  setContentLoading]  = useState(false);
+    const [stage, setStage] = useState(STAGES.SELECT_TYPE);
+    const [selectedType, setSelectedType] = useState(null); // 'Single' or 'Double'
+    const [selectedLevel, setSelectedLevel] = useState(null);
+    const [selectedMudra, setSelectedMudra] = useState(null);
+    const [progress, setProgress] = useState([]);
+    const [bestScores, setBestScores] = useState({});
+    const [cameraOn, setCameraOn] = useState(false);
+    const [detected, setDetected] = useState({ name: '', confidence: 0, detected: false });
+    const [loading, setLoading] = useState(true);
+    const [mudraContent, setMudraContent] = useState(null);
+    const [contentLoading, setContentLoading] = useState(false);
     const [sessionComplete, setSessionComplete] = useState(false);
-    const [sessionScore,    setSessionScore]    = useState(0);
-    const [voiceEnabled,    setVoiceEnabled]    = useState(false);
-    const [holdProgress,    setHoldProgress]    = useState(0);
-    const [practiceStep,    setPracticeStep]    = useState(0);
-    const [show3D,          setShow3D]          = useState(true);
-    const [frozenFrame,     setFrozenFrame]     = useState(null);
-    const [isFrozen,        setIsFrozen]        = useState(false);
+    const [sessionScore, setSessionScore] = useState(0);
+    const [voiceEnabled, setVoiceEnabled] = useState(false);
+    const [holdProgress, setHoldProgress] = useState(0);
+    const [practiceStep, setPracticeStep] = useState(0);
+    const [show3D, setShow3D] = useState(true);
+    const [frozenFrame, setFrozenFrame] = useState(null);
+    const [isFrozen, setIsFrozen] = useState(false);
 
-    const attemptsRef          = useRef(0);
-    const holdStartRef         = useRef(null);
-    const masteredRef          = useRef(false);
-    const saveInProgressRef    = useRef(false);
+    const attemptsRef = useRef(0);
+    const holdStartRef = useRef(null);
+    const masteredRef = useRef(false);
+    const saveInProgressRef = useRef(false);
 
-    const stableFramesRef      = useRef(0);
-    const lastDetectedNameRef  = useRef('');
-    const wrongMudraFramesRef  = useRef(0);
+    const stableFramesRef = useRef(0);
+    const lastDetectedNameRef = useRef('');
+    const wrongMudraFramesRef = useRef(0);
 
-    const videoRef             = useRef(null);
-    const canvasRef            = useRef(null);
-    const streamRef            = useRef(null);
-    const handsRef             = useRef(null);
-    const landmarksRef         = useRef(null);
-    const isDetectingRef       = useRef(false);
-    const requestRef           = useRef(null);
-    const recoveryRef          = useRef(null);
-    const lastResultTimeRef    = useRef(Date.now());
-    const holdAccumulatorRef   = useRef(0);
-    const lastFrameTimeRef     = useRef(0);
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const streamRef = useRef(null);
+    const handsRef = useRef(null);
+    const landmarksRef = useRef(null);
+    const isDetectingRef = useRef(false);
+    const requestRef = useRef(null);
+    const recoveryRef = useRef(null);
+    const lastResultTimeRef = useRef(Date.now());
+    const holdAccumulatorRef = useRef(0);
+    const lastFrameTimeRef = useRef(0);
 
-    const voiceEnabledRef      = useRef(false);
-    const lastWrongVoiceRef    = useRef({ text: '', time: 0 });
-    const lastCorrVoiceRef     = useRef({ text: '', time: 0 });
-    const lastOkVoiceRef       = useRef(0);
-    const lastNoHandRef        = useRef(0);
-    const stableCorrFramesRef  = useRef(0);
+    const voiceEnabledRef = useRef(false);
+    const lastWrongVoiceRef = useRef({ text: '', time: 0 });
+    const lastCorrVoiceRef = useRef({ text: '', time: 0 });
+    const lastOkVoiceRef = useRef(0);
+    const lastNoHandRef = useRef(0);
+    const stableCorrFramesRef = useRef(0);
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
 
     const PRACTICE_STEPS = [
-        { title: 'Study the Position',  desc: 'Look at the reference image carefully. Read the finger instructions below.' },
-        { title: 'Prepare Your Hand',   desc: 'Get your hand ready in front of you. Good lighting helps accuracy.'        },
-        { title: 'Start Live Practice', desc: 'The AI will watch your hand and give corrections in real time.'             },
+        { title: 'Study the Position', desc: 'Look at the reference image carefully. Read the finger instructions below.' },
+        { title: 'Prepare Your Hand', desc: 'Get your hand ready in front of you. Good lighting helps accuracy.' },
+        { title: 'Start Live Practice', desc: 'The AI will watch your hand and give corrections in real time.' },
     ];
 
-    const getLevelMudras   = (lvl) => MUDRAS.filter(m => m.level === lvl);
+    const getLevelMudras = (lvl) => MUDRAS.filter(m => m.level === lvl && m.type === selectedType);
     const getLevelProgress = (lvl) => getLevelMudras(lvl).filter(m => progress.includes(m.folder));
 
     useEffect(() => {
@@ -148,31 +178,58 @@ export default function Learn() {
         if (!cameraOn) return;
 
         handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        handsRef.current.setOptions({ 
-            maxNumHands: 1, 
-            modelComplexity: 1, 
-            minDetectionConfidence: 0.3, // Lowered from 0.5 to detect hands with red paint
-            minTrackingConfidence: 0.3    // Lowered from 0.5
-        }); 
+        handsRef.current.setOptions({
+            maxNumHands: selectedType === 'Double' ? 2 : 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.3,
+            minTrackingConfidence: 0.3
+        });
         handsRef.current.onResults((results) => {
             lastResultTimeRef.current = Date.now();
             const canvas = canvasRef.current;
-            const video  = videoRef.current;
+            const video = videoRef.current;
             if (!canvas || !video) return;
             const ctx = canvas.getContext('2d');
-            canvas.width  = video.clientWidth;
+            canvas.width = video.clientWidth;
             canvas.height = video.clientHeight;
             ctx.save();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.scale(-1, 1);
             ctx.translate(-canvas.width, 0);
             if (results.multiHandLandmarks?.length > 0) {
-                const lms  = results.multiHandLandmarks[0];
-                const hand = results.multiHandedness?.[0]?.label || 'Right';
-                const sc   = results.multiHandedness?.[0]?.score  || 1.0;
-                landmarksRef.current = { landmarks: lms, handedness: hand, score: sc };
-                drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
-                drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+                const lmsList = results.multiHandLandmarks;
+                const handsList = results.multiHandedness || [];
+
+                // For visualization, draw all detected hands
+                lmsList.forEach((lms, idx) => {
+                    drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
+                    drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+                });
+
+                if (selectedType === 'Double') {
+                    // Collect both hands if available
+                    let left = null, right = null;
+                    handsList.forEach((h, i) => {
+                        if (h.label === 'Left') left = lmsList[i];
+                        else right = lmsList[i];
+                    });
+                    // Fallback to second hand if orientation is unclear
+                    if (!left && lmsList.length > 1) left = lmsList[1];
+                    if (!right && lmsList.length > 1) right = lmsList[0];
+
+                    landmarksRef.current = {
+                        type: 'Double',
+                        left: left,
+                        right: right,
+                        count: lmsList.length
+                    };
+                } else {
+                    // Single hand mode
+                    const lms = lmsList[0];
+                    const hand = handsList[0]?.label || 'Right';
+                    const sc = handsList[0]?.score || 1.0;
+                    landmarksRef.current = { type: 'Single', landmarks: lms, handedness: hand, score: sc };
+                }
             } else {
                 landmarksRef.current = null;
             }
@@ -194,7 +251,7 @@ export default function Learn() {
         let active = true;
         const processFrame = async () => {
             if (active && cameraOn && videoRef.current?.readyState >= 2 && handsRef.current)
-                await handsRef.current.send({ image: videoRef.current }).catch(() => {});
+                await handsRef.current.send({ image: videoRef.current }).catch(() => { });
             if (active && cameraOn) requestRef.current = requestAnimationFrame(processFrame);
         };
         if (cameraOn) requestRef.current = requestAnimationFrame(processFrame);
@@ -225,14 +282,14 @@ export default function Learn() {
     useEffect(() => {
         if (cameraOn && streamRef.current && videoRef.current) {
             videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(() => {});
+            videoRef.current.play().catch(() => { });
         }
     }, [cameraOn]);
 
     const captureFrame = useCallback(() => {
         const video = videoRef.current, canvas = canvasRef.current;
         if (!video || !canvas || video.readyState < video.HAVE_ENOUGH_DATA) return null;
-        canvas.width  = video.videoWidth  || 640;
+        canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
         const ctx = canvas.getContext('2d');
         ctx.save();
@@ -245,18 +302,18 @@ export default function Learn() {
     // ── DETECTION POLLING ─────────────────────────────────────────────────────
     useEffect(() => {
         if (stage !== STAGES.PRACTICE || !cameraOn || !selectedMudra) return;
-        masteredRef.current       = false;
+        masteredRef.current = false;
         saveInProgressRef.current = false;
 
-        stableFramesRef.current     = 0;
+        stableFramesRef.current = 0;
         lastDetectedNameRef.current = '';
         wrongMudraFramesRef.current = 0;
 
         announce.resetWrongGate?.();
         lastWrongVoiceRef.current = { text: '', time: 0 };
-        lastCorrVoiceRef.current  = { text: '', time: 0 };
-        lastOkVoiceRef.current    = 0;
-        lastNoHandRef.current     = 0;
+        lastCorrVoiceRef.current = { text: '', time: 0 };
+        lastOkVoiceRef.current = 0;
+        lastNoHandRef.current = 0;
 
         const interval = setInterval(async () => {
             if (isDetectingRef.current) return;
@@ -266,12 +323,17 @@ export default function Learn() {
                 const dataObj = landmarksRef.current;
 
                 // ── NO HAND ───────────────────────────────────────────────────
-                if (!dataObj || !dataObj.landmarks) {
+                const hasHand = dataObj && (
+                  selectedType === 'Double'
+                    ? (dataObj.left || dataObj.right)
+                    : dataObj.landmarks
+                );
+                if (!hasHand) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
                     setHoldProgress(0);
                     holdStartRef.current = null;
 
-                    stableFramesRef.current     = 0;
+                    stableFramesRef.current = 0;
                     lastDetectedNameRef.current = '';
                     wrongMudraFramesRef.current = 0;
 
@@ -288,19 +350,41 @@ export default function Learn() {
 
                 attemptsRef.current += 1;
 
-                const lmArray = Array.from(dataObj.landmarks).map(lm => ({
-                    x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
-                }));
+                let endpoint = `/api/detect_landmarks`;
+                let body = {};
 
-                const res = await fetch(`${FLASK_URL}/api/detect_landmarks`, {
-                    method:  'POST',
+                if (selectedType === 'Double') {
+                    if (dataObj.type !== 'Double' || !dataObj.left || !dataObj.right) {
+                        setDetected({ name: 'Show both hands', confidence: 0, detected: false });
+                        isDetectingRef.current = false;
+                        return;
+                    }
+                    endpoint = `/api/detect_double_landmarks`;
+                    body = {
+                        left_landmarks: Array.from(dataObj.left).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+                        right_landmarks: Array.from(dataObj.right).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
+                        targetMudra: selectedMudra.folder,
+                    };
+                } else {
+                    if (dataObj.type !== 'Single') {
+                        isDetectingRef.current = false;
+                        return;
+                    }
+                    const lmArray = Array.from(dataObj.landmarks).map(lm => ({
+                        x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
+                    }));
+                    body = {
+                        landmarks: lmArray,
+                        handedness: dataObj.handedness || 'Right',
+                        presenceScore: dataObj.score || 1.0,
+                        targetMudra: selectedMudra.folder,
+                    };
+                }
+
+                const res = await fetch(endpoint, {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        landmarks:     lmArray,
-                        handedness:    dataObj.handedness || 'Right',
-                        presenceScore: dataObj.score      || 1.0,
-                        targetMudra:   selectedMudra.folder,
-                    }),
+                    body: JSON.stringify(body),
                     signal: AbortSignal.timeout(1500),
                 });
 
@@ -308,21 +392,21 @@ export default function Learn() {
 
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
                 const detectedName = data.name || '';
-                const isStableAPI  = data.is_stable || false;
-                const confidence   = data.confidence || 0;
-                const accuracy     = data.accuracy   || 0;
-                const corrections  = data.corrections || [];
+                const isStableAPI = data.is_stable || false;
+                const confidence = data.confidence || 0;
+                const accuracy = data.accuracy || 0;
+                const corrections = data.corrections || [];
 
                 if (detectedName && detectedName === lastDetectedNameRef.current) {
                     stableFramesRef.current = Math.min(stableFramesRef.current + 1, 10);
                 } else {
-                    stableFramesRef.current     = 1;
+                    stableFramesRef.current = 1;
                     lastDetectedNameRef.current = detectedName;
                 }
 
                 const locallyStable = stableFramesRef.current >= STABLE_GATE;
 
-                const wrongMsg   = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+                const wrongMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
                 const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
 
                 // ── FIX: Wrong mudra frame counter (for voice gating only) ────
@@ -353,7 +437,7 @@ export default function Learn() {
 
                 // ── VOICE — gating is now handled individually inside ──────────────────
                 if (voiceEnabledRef.current) {
-                    const now            = Date.now();
+                    const now = Date.now();
                     const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
 
                     // Small gate for finger corrections to avoid jitter
@@ -370,20 +454,20 @@ export default function Learn() {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
                             const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
                             const tgtMatch = stableWrongMsg.match(/(?:target is|instead of) ([a-zA-Z]+)/i);
-                            const detName  = detMatch ? detMatch[1] : detectedName;
-                            const tgtName  = tgtMatch ? tgtMatch[1] : selectedMudra.folder;
+                            const detName = detMatch ? detMatch[1] : detectedName;
+                            const tgtName = tgtMatch ? tgtMatch[1] : selectedMudra.folder;
                             const capitalize = (s) => (s && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
                             const detDisp = capitalize(detName);
                             const tgtDisp = capitalize(tgtName);
 
                             let voiceMsg = lang === 'ta'
-                                ? `தவறான முத்திரை. நீங்கள் ${detName} காட்டுகிறீர்கள். சரியான முத்திரை ${tgtName}.`
+                                ? `தவறான முத்திரை. நீங்கள் ${getMudraName(lang, detName)} காட்டுகிறீர்கள். சரியான முத்திரை ${getMudraName(lang, tgtName)}.`
                                 : lang === 'hi'
-                                ? `गलत मुद्रा। आप ${detName} दिखा रहे हैं। सही मुद्रा ${tgtName} है।`
-                                : `Wrong mudra. You are performing ${detDisp}. The correct one is ${tgtDisp}.`;
+                                    ? `गलत मुद्रा। आप ${getMudraName(lang, detName)} दिखा रहे हैं। सही मुद्रा ${getMudraName(lang, tgtName)} है।`
+                                    : `Wrong mudra. You are performing ${detDisp}. The correct one is ${tgtDisp}.`;
 
                             if (fingerCorr.length > 0) {
-                                voiceMsg += ` ${fingerCorr[0]}`;
+                                voiceMsg += ` ${translate(lang, fingerCorr[0])}`;
                                 // Synchronize to avoid immediate repeat
                                 lastCorrVoiceRef.current = { text: fingerCorr[0], time: now };
                             }
@@ -394,14 +478,14 @@ export default function Learn() {
                         const prev = lastCorrVoiceRef.current;
                         if (stableFingerCorr !== prev.text || (now - prev.time) > 5000) {
                             lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
-                            announce.raw(stableFingerCorr, 1);
+                            announce.raw(translate(lang, stableFingerCorr), 1);
                         }
                     } else if (locallyStable && data.detected && accuracy >= 72 && fingerCorr.length === 0 && !stableWrongMsg) {
                         if (now - lastOkVoiceRef.current > 8000) {
                             lastOkVoiceRef.current = now;
                             const msg = lang === 'ta' ? 'சரியானது! அருமையான கோலம்'
-                                      : lang === 'hi' ? 'सही है! बहुत अच्छा'
-                                      : 'Correct! Great form.';
+                                : lang === 'hi' ? 'सही है! बहुत अच्छा'
+                                    : 'Correct! Great form.';
                             announce.raw(msg, 3);
                         }
                     }
@@ -410,7 +494,7 @@ export default function Learn() {
                 // ── HOLD + SAVE ───────────────────────────────────────────────
                 const isCorrectMudra = data.detected && !wrongMsg;
                 const isGoodAccuracy = accuracy >= ACCURACY_THRESHOLD;
-                const isGoodFrame    = isCorrectMudra && isGoodAccuracy;
+                const isGoodFrame = isCorrectMudra && isGoodAccuracy;
 
                 const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
                 const now = Date.now();
@@ -436,7 +520,7 @@ export default function Learn() {
                 setHoldProgress(displayPct);
 
                 if (holdAccumulatorRef.current >= holdMs && !masteredRef.current && !saveInProgressRef.current) {
-                    masteredRef.current       = true;
+                    masteredRef.current = true;
                     saveInProgressRef.current = true;
                     handleMudraMastered(selectedMudra.folder, accuracy);
                 }
@@ -450,9 +534,9 @@ export default function Learn() {
 
         return () => {
             clearInterval(interval);
-            holdStartRef.current        = null;
+            holdStartRef.current = null;
             setHoldProgress(0);
-            stableFramesRef.current     = 0;
+            stableFramesRef.current = 0;
             lastDetectedNameRef.current = '';
             wrongMudraFramesRef.current = 0;
         };
@@ -464,8 +548,8 @@ export default function Learn() {
             const token = localStorage.getItem('token');
             const res = await axios.get('/api/user/progress', { headers: { 'x-auth-token': token } });
             setProgress(res.data.progress.detectedMudras || []);
-            setBestScores(res.data.progress.mudraScores  || {});
-        } catch {} finally { setLoading(false); }
+            setBestScores(res.data.progress.mudraScores || {});
+        } catch { } finally { setLoading(false); }
     };
 
     const fetchMudraContent = async (mudraName) => {
@@ -474,13 +558,13 @@ export default function Learn() {
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/user/mudra/content/${mudraName}`, { headers: { 'x-auth-token': token } });
             setMudraContent(res.data);
-        } catch {} finally { setContentLoading(false); }
+        } catch { } finally { setContentLoading(false); }
     };
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
         if (!folder) return;
 
-        const score    = Math.round(currentAccuracy);
+        const score = Math.round(currentAccuracy);
         const snapshot = captureFrame();
         setFrozenFrame(snapshot);
         setIsFrozen(true);
@@ -502,7 +586,7 @@ export default function Learn() {
                 { headers: { 'x-auth-token': token }, timeout: 5000 }
             );
             setProgress(res.data.detectedMudras || []);
-            setBestScores(res.data.mudraScores  || {});
+            setBestScores(res.data.mudraScores || {});
         } catch {
             console.warn('[handleMudraMastered] Progress save failed (backend may be offline). UI already updated.');
         } finally {
@@ -515,10 +599,10 @@ export default function Learn() {
         setSessionComplete(false);
         setDetected({ name: '', confidence: 0, detected: false });
         setHoldProgress(0);
-        holdStartRef.current        = null;
-        masteredRef.current         = false;
-        saveInProgressRef.current   = false;
-        stableFramesRef.current     = 0;
+        holdStartRef.current = null;
+        masteredRef.current = false;
+        saveInProgressRef.current = false;
+        stableFramesRef.current = 0;
         lastDetectedNameRef.current = '';
         wrongMudraFramesRef.current = 0;
         setPracticeStep(0);
@@ -529,7 +613,7 @@ export default function Learn() {
     };
 
     const nextMudra = () => {
-        const levelMudras  = getLevelMudras(selectedLevel);
+        const levelMudras = getLevelMudras(selectedLevel);
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         setIsFrozen(false);
         setFrozenFrame(null);
@@ -539,12 +623,12 @@ export default function Learn() {
     };
 
     // ── Derived display state ─────────────────────────────────────────────────
-    const accuracy      = detected.accuracy    || 0;
-    const corrections   = detected.corrections || [];
-    const fingerCorrs   = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+    const accuracy = detected.accuracy || 0;
+    const corrections = detected.corrections || [];
+    const fingerCorrs = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
     const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-    const isAdjusting   = detected._isAdjusting;
-    const isCorrect     = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0;
+    const isAdjusting = detected._isAdjusting;
+    const isCorrect = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0;
 
     const fingerGuideText = selectedMudra
         ? (MUDRA_CONFIG[selectedMudra.folder]?.fingers || selectedMudra.fingers || '')
@@ -559,24 +643,62 @@ export default function Learn() {
     return (
         <div className="max-w-7xl mx-auto px-6 py-12 min-h-screen">
 
-            {/* ── STAGE A: LEVEL SELECTION ─────────────────────────────── */}
-            {stage === STAGES.SELECT_LEVEL && (
+            {/* ── STAGE 0: TYPE SELECTION ─────────────────────────────── */}
+            {stage === STAGES.SELECT_TYPE && (
                 <div>
                     <div className="text-center mb-16">
                         <div className="text-[10px] tracking-[8px] uppercase mb-3" style={{ color: 'var(--text-muted)' }}>Learning Journey</div>
+                        <h1 className="text-4xl md:text-5xl font-bold mb-6" style={{ color: 'var(--text)' }}>Choose Category</h1>
+                        <div className="max-w-md mx-auto"><BorderPattern /></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-4xl mx-auto">
+                        {[
+                            { id: 'Single', title: 'Asamyuta Hastas', sub: 'Single Hand Mudras', icon: '🖐️', desc: 'Basic one-handed gestures that form the foundation of Bharatnatyam.' },
+                            { id: 'Double', title: 'Samyuta Hastas', sub: 'Double Hand Mudras', icon: '🙌', desc: 'Advanced gestures that combine both hands to express complex meanings.' }
+                        ].map((t) => (
+                            <div key={t.id}
+                                onClick={() => {
+                                    if (t.id === 'Double') navigate('/learn/samyuta');
+                                    else { setSelectedType(t.id); setStage(STAGES.SELECT_LEVEL); }
+                                }}
+                                className="group p-10 rounded-2xl border-2 transition-all duration-500 cursor-pointer relative overflow-hidden text-center flex flex-col items-center"
+                                style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+                                <div className="text-6xl mb-8 group-hover:scale-110 transition-transform filter drop-shadow-lg">{t.icon}</div>
+                                <h3 className="text-2xl font-bold mb-2 uppercase tracking-widest" style={{ color: 'var(--text)' }}>{t.title}</h3>
+                                <p className="text-xs mb-4 font-bold opacity-60" style={{ color: 'var(--accent)' }}>{t.sub}</p>
+                                <p className="text-sm opacity-70 mb-8 max-w-xs" style={{ color: 'var(--text-muted)' }}>{t.desc}</p>
+
+                                <div className="mt-auto h-12 w-12 flex items-center justify-center rounded-full bg-accent/10 border border-accent/20 group-hover:bg-accent group-hover:text-white transition-all shadow-inner">
+                                    <ChevronRight size={24} />
+                                </div>
+                                <div className="absolute inset-x-0 bottom-0 h-1.5 bg-accent opacity-0 group-hover:opacity-100 transition-all duration-500" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* ── STAGE A: LEVEL SELECTION ─────────────────────────────── */}
+            {stage === STAGES.SELECT_LEVEL && (
+                <div>
+                    <button onClick={() => setStage(STAGES.SELECT_TYPE)}
+                        className="flex items-center gap-2 mb-8 text-xs tracking-widest uppercase hover:text-accent transition-colors"
+                        style={{ color: 'var(--text-muted)' }}>
+                        <ChevronLeft size={16} /> Back to Categories
+                    </button>
+                    <div className="text-center mb-16">
+                        <div className="text-[10px] tracking-[8px] uppercase mb-3" style={{ color: 'var(--text-muted)' }}>{selectedType} Hand Journey</div>
                         <h1 className="text-4xl md:text-5xl font-bold mb-6" style={{ color: 'var(--text)' }}>Choose your Path</h1>
                         <div className="max-w-md mx-auto"><BorderPattern /></div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                         {['Basic', 'Intermediate', 'Advanced'].map((lvl) => {
-                            const config         = LEVEL_CONFIG[lvl];
-                            const levelMudras    = getLevelMudras(lvl);
+                            const config = LEVEL_CONFIG[lvl];
+                            const levelMudras = getLevelMudras(lvl);
                             const completedCount = getLevelProgress(lvl).length;
                             let isLocked = false, lockReason = '';
-                            if (lvl === 'Intermediate' && getLevelProgress('Basic').length < 5)
-                                { isLocked = true; lockReason = 'Master 5 Basic Mudras to unlock'; }
-                            else if (lvl === 'Advanced' && getLevelProgress('Intermediate').length < getLevelMudras('Intermediate').length)
-                                { isLocked = true; lockReason = 'Master all Intermediate Mudras to unlock'; }
+                            if (lvl === 'Intermediate' && getLevelProgress('Basic').length < 5) { isLocked = true; lockReason = 'Master 5 Basic Mudras to unlock'; }
+                            else if (lvl === 'Advanced' && getLevelProgress('Intermediate').length < getLevelMudras('Intermediate').length) { isLocked = true; lockReason = 'Master all Intermediate Mudras to unlock'; }
                             return (
                                 <div key={lvl}
                                     onClick={() => { if (!isLocked) { setSelectedLevel(lvl); setStage(STAGES.MUDRA_LIST); } }}
@@ -617,11 +739,11 @@ export default function Learn() {
                         <ChevronLeft size={16} /> Back to Levels
                     </button>
                     <div className="mb-12">
-                        <h2 className="text-3xl font-bold mb-4" style={{ color: 'var(--text)' }}>{selectedLevel} Mudras</h2>
+                        <h2 className="text-3xl font-bold mb-4" style={{ color: 'var(--text)' }}>{selectedLevel} {selectedType} Mudras</h2>
                         <BorderPattern />
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {MUDRAS.filter(m => m.level === selectedLevel).map((mudra, idx) => {
+                        {MUDRAS.filter(m => m.level === selectedLevel && m.type === selectedType).map((mudra, idx) => {
                             const isMastered = progress.includes(mudra.folder);
                             return (
                                 <div key={mudra.folder} onClick={() => enterPractice(mudra)}
@@ -663,15 +785,15 @@ export default function Learn() {
                                 className="px-3 py-1.5 rounded border text-[9px] tracking-[3px] uppercase transition-all"
                                 style={{
                                     backgroundColor: show3D ? 'rgba(139,92,246,0.15)' : 'transparent',
-                                    borderColor:     show3D ? 'rgba(139,92,246,0.5)'  : 'var(--border)',
-                                    color:           show3D ? '#a78bfa'               : 'var(--text-muted)',
+                                    borderColor: show3D ? 'rgba(139,92,246,0.5)' : 'var(--border)',
+                                    color: show3D ? '#a78bfa' : 'var(--text-muted)',
                                 }}>
                                 {show3D ? '◈ 3D On' : '◈ 3D Off'}
                             </button>
                             <LanguageSelector lang={lang} onChange={(v) => {
                                 setLang(v);
                                 lastWrongVoiceRef.current = { text: '', time: 0 };
-                                lastCorrVoiceRef.current  = { text: '', time: 0 };
+                                lastCorrVoiceRef.current = { text: '', time: 0 };
                             }} compact />
                             <button onClick={test}
                                 className="px-3 py-1.5 rounded text-[9px] tracking-widest uppercase border transition-all"
@@ -685,14 +807,14 @@ export default function Learn() {
                                 if (next) { unlock(); setTimeout(() => announce.start(selectedMudra.folder), 500); }
                                 else stop();
                                 lastWrongVoiceRef.current = { text: '', time: 0 };
-                                lastCorrVoiceRef.current  = { text: '', time: 0 };
+                                lastCorrVoiceRef.current = { text: '', time: 0 };
                             }}
-                            className="px-4 py-2 rounded text-[10px] tracking-widest uppercase font-bold border transition-all"
-                            style={{
-                                backgroundColor: voiceEnabled ? 'var(--copper)' : 'transparent',
-                                borderColor:     voiceEnabled ? 'var(--copper)' : 'var(--border)',
-                                color:           voiceEnabled ? 'white'         : 'var(--text-muted)',
-                            }}>
+                                className="px-4 py-2 rounded text-[10px] tracking-widest uppercase font-bold border transition-all"
+                                style={{
+                                    backgroundColor: voiceEnabled ? 'var(--copper)' : 'transparent',
+                                    borderColor: voiceEnabled ? 'var(--copper)' : 'var(--border)',
+                                    color: voiceEnabled ? 'white' : 'var(--text-muted)',
+                                }}>
                                 {voiceEnabled ? '🔊 Voice On' : '🔇 Voice Off'}
                             </button>
                         </div>
@@ -706,8 +828,8 @@ export default function Learn() {
                                     <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border transition-all"
                                         style={{
                                             backgroundColor: practiceStep >= i ? 'var(--accent)' : 'transparent',
-                                            borderColor:     practiceStep >= i ? 'var(--accent)' : 'var(--border)',
-                                            color:           practiceStep >= i ? 'white'         : 'var(--text-muted)',
+                                            borderColor: practiceStep >= i ? 'var(--accent)' : 'var(--border)',
+                                            color: practiceStep >= i ? 'white' : 'var(--text-muted)',
                                         }}>{i + 1}</div>
                                     <span className="text-[9px] tracking-widest uppercase hidden md:block"
                                         style={{ color: practiceStep === i ? 'var(--text)' : 'var(--text-muted)' }}>{s.title}</span>
@@ -753,7 +875,7 @@ export default function Learn() {
                                     </div>
                                     <HandVisualiser
                                         targetMudra={selectedMudra.folder}
-                                        landmarks={landmarksRef.current?.landmarks || []}
+                                        landmarks={landmarksRef.current || []}
                                         deviations={detected?.deviations || {}}
                                         infoOverride={detected}
                                     />

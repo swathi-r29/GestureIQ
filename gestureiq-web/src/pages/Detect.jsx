@@ -107,7 +107,6 @@ export default function Detect() {
   const engineErrCount = useRef(0);
   const frameCapRef    = useRef(null); // for double mode frame capture
 
-  const FLASK_URL   = (import.meta.env.VITE_FLASK_URL || '').replace(/\/$/, '');
   const BUFFER_SIZE = 8;
   const MIN_VOTES   = 7;
   const MIN_CONF    = 20;
@@ -238,7 +237,7 @@ export default function Detect() {
     inFlightRef.current = true;
     try {
       const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
-      const res = await fetch(`${FLASK_URL}/api/predict`, {
+      const res = await fetch(`/api/predict`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(800),
       });
@@ -274,7 +273,7 @@ export default function Detect() {
     } finally {
       inFlightRef.current = false;
     }
-  }, [FLASK_URL]);
+  }, []);
 
   // ── Double-hand detection ──────────────────────────────────
   const runDoubleDetection = useCallback(async () => {
@@ -303,7 +302,7 @@ export default function Detect() {
       const frame = captureFrame();
       if (!frame) { inFlightRef.current = false; return; }
 
-      const res = await fetch(`${FLASK_URL}/api/predict_double`, {
+      const res = await fetch(`/api/predict_double`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ frame }), signal: AbortSignal.timeout(1200),
       });
@@ -343,7 +342,7 @@ export default function Detect() {
     } finally {
       inFlightRef.current = false;
     }
-  }, [FLASK_URL, captureFrame]);
+  }, [captureFrame]);
 
   // ── Camera start / stop ────────────────────────────────────
   const startCamera = async () => {

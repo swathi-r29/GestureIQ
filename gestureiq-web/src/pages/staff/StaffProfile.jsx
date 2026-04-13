@@ -25,7 +25,7 @@ const StaffProfile = () => {
   const fetchProfile = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/profile`, {
+      const res = await axios.get(`/api/staff/profile`, {
         headers: { 'x-auth-token': token }
       });
       setProfile(res.data);

@@ -19,7 +19,6 @@ const RTC_CONFIG = {
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
-const FLASK_URL = import.meta.env.VITE_FLASK_URL || '';
 
 const formatTime = (seconds) => {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -102,11 +101,16 @@ const StudentLiveClass = () => {
     console.log('[WebRTC Student] Received offer from:', fromSocketId);
 
     // FIX C: if camera not started yet, store the offer and return
-    // It will be processed in startWebcam() after getUserMedia succeeds
     if (!streamRef.current) {
       console.log('[WebRTC Student] Camera not ready — storing offer for later');
       pendingOfferRef.current = { offer, fromSocketId };
       teacherSocketIdRef.current = fromSocketId;
+      return;
+    }
+
+    // FIX C.5: Guard against processing offers while state is not stable
+    if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'stable') {
+      console.warn('[WebRTC Student] Signal state not stable (' + peerConnectionRef.current.signalingState + ') — ignoring concurrent offer');
       return;
     }
 
@@ -235,7 +239,7 @@ const StudentLiveClass = () => {
     const fetchClass = async () => {
       try {
         const res = await axios.get(
-          `${import.meta.env.VITE_BACKEND_URL}/api/student/class/join/${classId}`
+          `/api/student/class/join/${classId}`
         );
         setClassData(res.data);
         classDataRef.current = res.data;
@@ -467,7 +471,7 @@ const StudentLiveClass = () => {
 
     isDetectingRef.current = true;
     try {
-      const res = await fetch(`${FLASK_URL}/api/evaluate_session`, {
+      const res = await fetch(`/api/evaluate_session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -560,7 +564,7 @@ const StudentLiveClass = () => {
     const timeTaken = Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
     setReportLoading(true);
     try {
-      const res = await fetch(`${FLASK_URL}/api/session_report`, {
+      const res = await fetch(`/api/session_report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

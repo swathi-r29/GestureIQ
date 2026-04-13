@@ -60,17 +60,18 @@ function buildScene(canvas) {
 }
 
 function buildHandObjects(scene) {
-  // 21 joint spheres
-  const spheres = Array.from({ length: 21 }, (_, i) => {
-    const geo  = new THREE.SphereGeometry(i === 0 ? 0.022 : 0.016, 16, 16);
+  // 42 joint spheres (21 per hand)
+  const spheres = Array.from({ length: 42 }, (_, i) => {
+    const geo  = new THREE.SphereGeometry((i % 21) === 0 ? 0.022 : 0.016, 16, 16);
     const mat  = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.4, metalness: 0.2 });
     const mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
     return mesh;
   });
 
-  // bone cylinders for each connection
-  const bones = CONNECTIONS.map(([a, b]) => {
+  // bone cylinders for each connection (two sets)
+  const allConnections = [...CONNECTIONS, ...CONNECTIONS];
+  const bones = allConnections.map(([a, b]) => {
     const mat  = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6, metalness: 0.1, transparent: true, opacity: 0.85 });
     const geo  = new THREE.CylinderGeometry(0.007, 0.007, 1, 8);
     const mesh = new THREE.Mesh(geo, mat);
@@ -78,8 +79,8 @@ function buildHandObjects(scene) {
     return { mesh, a, b };
   });
 
-  // reference ghost hand — same structure but translucent gold
-  const refSpheres = Array.from({ length: 21 }, () => {
+  // reference ghost hand (still 21 for now, or 42 if we have double ref)
+  const refSpheres = Array.from({ length: 42 }, () => {
     const geo  = new THREE.SphereGeometry(0.014, 12, 12);
     const mat  = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.1, transparent: true, opacity: 0.35 });
     const mesh = new THREE.Mesh(geo, mat);
@@ -87,7 +88,7 @@ function buildHandObjects(scene) {
     return mesh;
   });
 
-  const refBones = CONNECTIONS.map(([a, b]) => {
+  const refBones = [...CONNECTIONS, ...CONNECTIONS].map(([a, b]) => {
     const mat  = new THREE.MeshStandardMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.2 });
     const geo  = new THREE.CylinderGeometry(0.005, 0.005, 1, 8);
     const mesh = new THREE.Mesh(geo, mat);
@@ -188,22 +189,35 @@ export default function HandVisualiser({
         camera.lookAt(0, 0, 0);
       }
 
-      // Update live hand
-      if (landmarks.length === 21) {
-        const vecs = landmarks.map(landmarksToVec3);
+      // Update live hand(s)
+      const renderHand = (lms, sphereStartIndex, boneStartIndex) => {
+        if (!lms || lms.length !== 21) return;
+        const vecs = lms.map(landmarksToVec3);
         vecs.forEach((v, i) => {
-          spheres[i].position.copy(v);
+          const s = spheres[sphereStartIndex + i];
+          if (!s) return;
+          s.position.copy(v);
           const hex = parseInt(getLandmarkColor(i, deviations).replace("#", ""), 16);
-          spheres[i].material.color.setHex(hex);
-          spheres[i].visible = true;
+          s.material.color.setHex(hex);
+          s.visible = true;
         });
-        bones.forEach(b => {
+        bones.slice(boneStartIndex, boneStartIndex + CONNECTIONS.length).forEach(b => {
           updateBone(b, vecs[b.a], vecs[b.b]);
           b.mesh.visible = true;
         });
-      } else {
-        spheres.forEach(s => s.visible = false);
-        bones.forEach(b => b.mesh.visible = false);
+      };
+
+      // Hide all first
+      spheres.forEach(s => s.visible = false);
+      bones.forEach(b => b.mesh.visible = false);
+
+      if (Array.isArray(landmarks) && landmarks.length === 21) {
+        // Single hand (Legacy or single mode)
+        renderHand(landmarks, 0, 0);
+      } else if (landmarks && (landmarks.left || landmarks.right)) {
+        // Double hands
+        renderHand(landmarks.right, 0, 0);
+        renderHand(landmarks.left, 21, CONNECTIONS.length);
       }
 
       renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);

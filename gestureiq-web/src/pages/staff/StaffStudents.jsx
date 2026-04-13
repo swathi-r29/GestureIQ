@@ -24,7 +24,7 @@ const StaffStudents = () => {
   const fetchStudents = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/students`, {
+      const res = await axios.get(`/api/staff/students`, {
         headers: { 'x-auth-token': token }
       });
       setStudents(res.data);
@@ -38,7 +38,7 @@ const StaffStudents = () => {
   const fetchStudentProgress = async (studentId) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/student/${studentId}/progress`, {
+      const res = await axios.get(`/api/staff/student/${studentId}/progress`, {
         headers: { 'x-auth-token': token }
       });
       setProgress(res.data);

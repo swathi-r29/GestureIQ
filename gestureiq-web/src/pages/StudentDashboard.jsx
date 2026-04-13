@@ -27,10 +27,10 @@ export default function StudentDashboard() {
             try {
                 const token = localStorage.getItem('token');
                 const [dashRes, notifRes] = await Promise.all([
-                    axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/user/dashboard`, {
+                    axios.get(`/api/user/dashboard`, {
                         headers: { 'x-auth-token': token }
                     }),
-                    axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/notifications`, {
+                    axios.get(`/api/student/notifications`, {
                         headers: { 'x-auth-token': token }
                     })
                 ]);
@@ -50,7 +50,7 @@ export default function StudentDashboard() {
     const markNotificationAsRead = async (id) => {
         try {
             const token = localStorage.getItem('token');
-            await axios.put(`${import.meta.env.VITE_BACKEND_URL}/api/student/notification/${id}/read`, {}, {
+            await axios.put(`/api/student/notification/${id}/read`, {}, {
                 headers: { 'x-auth-token': token }
             });
             setNotifications(prev => prev.filter(n => n._id !== id));

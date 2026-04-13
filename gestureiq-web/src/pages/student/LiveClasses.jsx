@@ -42,8 +42,8 @@ export default function StudentLiveClasses() {
         try {
             const token = localStorage.getItem('token');
             const [upcomingRes, activeRes] = await Promise.all([
-                axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/classes/upcoming`, { headers: { 'x-auth-token': token } }),
-                axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/classes/active`, { headers: { 'x-auth-token': token } })
+                axios.get(`/api/student/classes/upcoming`, { headers: { 'x-auth-token': token } }),
+                axios.get(`/api/student/classes/active`, { headers: { 'x-auth-token': token } })
             ]);
             setUpcoming(upcomingRes.data);
             setActive(activeRes.data);

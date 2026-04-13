@@ -229,16 +229,30 @@ const StaffConductClass = () => {
     }
 
     offerInProgressRef.current.add(studentSocketId);
-    console.log('[WebRTC Teacher] Creating offer for student:', studentSocketId);
+    const pc = peerConnectionsRef.current.get(studentSocketId);
+    
+    // FIX 8.5: Skip recreation if already stable and connected
+    if (pc && pc.signalingState === 'stable' && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
+      // console.log('[WebRTC Teacher] Connection already stable for:', studentSocketId, '— skipping reset');
+      offerInProgressRef.current.delete(studentSocketId);
+      return;
+    }
 
-    const pc = createPeerConnection(studentSocketId);
+    // FIX 8.6: Additional guard — don't reset if we are currently mid-handshake
+    if (pc && pc.signalingState !== 'stable') {
+      console.warn('[WebRTC Teacher] Signaling in progress for:', studentSocketId, '— skipping reset');
+      offerInProgressRef.current.delete(studentSocketId);
+      return;
+    }
+
+    const newPC = createPeerConnection(studentSocketId);
 
     try {
-      const offer = await pc.createOffer({
+      const offer = await newPC.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
       });
-      await pc.setLocalDescription(offer);
+      await newPC.setLocalDescription(offer);
       socketRef.current?.emit('webrtc_offer', {
         classId: classId?.toLowerCase(),
         to: studentSocketId,
@@ -257,7 +271,7 @@ const StaffConductClass = () => {
     try {
       const token = localStorage.getItem('token');
       const res = await axios.get(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/${classId}`,
+        `/api/staff/class/${classId}`,
         { headers: { 'x-auth-token': token } }
       );
       setClassData(res.data);
@@ -282,7 +296,7 @@ const StaffConductClass = () => {
       s.on('reconnect', joinRoom);
 
       await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/${classId}/start`, {},
+        `/api/staff/class/${classId}/start`, {},
         { headers: { 'x-auth-token': token } }
       );
 
@@ -486,7 +500,7 @@ const StaffConductClass = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/live/modules/${classId}`,
+        `/api/live/modules/${classId}`,
         updated,
         { headers: { 'x-auth-token': token } }
       );
@@ -520,7 +534,7 @@ const StaffConductClass = () => {
         ...s, mudraScores: Object.values(s.mudraScores)
       }));
       await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/${classId}/end`,
+        `/api/staff/class/${classId}/end`,
         { studentReports },
         { headers: { 'x-auth-token': token } }
       );

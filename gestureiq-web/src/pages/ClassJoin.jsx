@@ -73,7 +73,7 @@ const ClassJoin = () => {
 
   const fetchClassDetails = async () => {
     try {
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/student/class/join/${classId}`);
+      const res = await axios.get(`/api/student/class/join/${classId}`);
       setClassDetails(res.data);
       if (res.data.status === 'live') {
         // If already live, maybe skip waiting room if they click join later
@@ -98,7 +98,7 @@ const ClassJoin = () => {
     setJoining(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/student/class/${classId}/join`, {}, {
+      await axios.post(`/api/student/class/${classId}/join`, {}, {
         headers: { 'x-auth-token': token }
       });
       setInWaitingRoom(true);

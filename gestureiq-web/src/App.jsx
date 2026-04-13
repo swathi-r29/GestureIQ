@@ -9,6 +9,7 @@ import Register from './pages/Register';
 import Profile from './pages/Profile';
 import Detect from './pages/Detect';
 import Learn from './pages/Learn';
+import LearnDouble from './pages/LearnDouble';
 import About from './pages/About';
 import StudentDashboard from './pages/StudentDashboard';
 import AdminLogin from './pages/admin/AdminLogin';
@@ -55,6 +56,7 @@ export default function App() {
                     <Route path="/profile" element={<ProtectedRoute role="student"><Profile /></ProtectedRoute>} />
                     <Route path="/detect" element={<ProtectedRoute role="student"><Detect /></ProtectedRoute>} />
                     <Route path="/learn" element={<ProtectedRoute role="student"><Learn /></ProtectedRoute>} />
+                    <Route path="/learn/samyuta" element={<ProtectedRoute role="student"><LearnDouble /></ProtectedRoute>} />
                     <Route path="/live-classes" element={<ProtectedRoute role="student"><StudentLiveClasses /></ProtectedRoute>} />
                     <Route path="/class/join/:classId" element={<ClassJoin />} />
                     <Route path="/class/live/:classId" element={<ProtectedRoute role="student"><StudentLiveClass /></ProtectedRoute>} />

@@ -12,8 +12,11 @@ import mediapipe as mp
 import numpy as np
 from multiprocessing import Pool, cpu_count
 
-SORTED_FRAMES_DIR = "../dataset/double_handed_mudras/sorted_frames"
-OUTPUT_CSV        = "../dataset/double_handed_mudras/landmarks_double.csv"
+#SORTED_FRAMES_DIR = "../dataset/double_handed_mudras/sorted_frames"
+#OUTPUT_CSV        = "../dataset/double_handed_mudras/landmarks_double.csv"
+
+SORTED_FRAMES_DIR = r"D:\GestureIQ\dataset\double_handed_mudras\sorted_frames"
+OUTPUT_CSV        = r"D:\GestureIQ\dataset\double_handed_mudras\landmarks_double.csv"
 
 mp_hands_mod = mp.solutions.hands
 

@@ -46,7 +46,7 @@ const StaffCreateClass = () => {
       const payload = { ...formData, scheduledAt: scheduledDateTime };
       delete payload.time;
       const res = await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/staff/class/create`,
+        `/api/staff/class/create`,
         payload,
         { headers: { 'x-auth-token': token } }
       );

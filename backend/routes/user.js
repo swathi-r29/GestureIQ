@@ -12,9 +12,17 @@ router.get('/mudra/content/:mudraName', auth, async (req, res) => {
 
     // Auto-initialize if not found
     if (!content) {
+      const doubleMudras = [
+        'anjali', 'kapotha', 'karkata', 'svastika', 'dola', 'puspaputa', 
+        'utsanga', 'sivalinga', 'katakavardhana', 'kartarisvastika', 
+        'sakata', 'sankha', 'chakra', 'samputa', 'pasa', 'kilaka', 
+        'matsya', 'kurma', 'varaha', 'garuda', 'nagabandha', 'bherunda', 'katva'
+      ];
+      const isDouble = doubleMudras.includes(req.params.mudraName.toLowerCase());
+      
       content = new MudraContent({
         mudraName: req.params.mudraName.toLowerCase(),
-        handType: 'single'
+        handType: isDouble ? 'double' : 'single'
       });
       await content.save();
     }

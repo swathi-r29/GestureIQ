@@ -24,7 +24,7 @@ const StaffDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/api/staff/dashboard`, {
+      const res = await axios.get(`/api/staff/dashboard`, {
         headers: { 'x-auth-token': token }
       });
       setData(res.data);

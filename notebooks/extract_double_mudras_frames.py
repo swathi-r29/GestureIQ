@@ -2,8 +2,11 @@ import cv2
 import os
 import shutil
 
-VIDEO_ROOT  = "../dataset/double_handed_mudras/raw_videos"
-FRAME_ROOT  = "../dataset/double_handed_mudras/sorted_frames"
+#VIDEO_ROOT  = "../dataset/double_handed_mudras/raw_videos"
+#FRAME_ROOT  = "../dataset/double_handed_mudras/sorted_frames"
+
+VIDEO_ROOT  = r"D:\GestureIQ\dataset\double_handed_mudras\raw_videos"
+FRAME_ROOT  = r"D:\GestureIQ\dataset\double_handed_mudras\sorted_frames"
 FRAME_EVERY = 3
 
 os.makedirs(FRAME_ROOT, exist_ok=True)
