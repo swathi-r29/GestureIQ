@@ -1,7 +1,7 @@
-// src/pages/Learn.jsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import io from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import HandVisualiser from '../components/HandVisualiser';
@@ -113,8 +113,12 @@ export default function Learn() {
     const [holdProgress, setHoldProgress] = useState(0);
     const [practiceStep, setPracticeStep] = useState(0);
     const [show3D, setShow3D] = useState(true);
-    const [frozenFrame, setFrozenFrame] = useState(null);
     const [isFrozen, setIsFrozen] = useState(false);
+    const [frozenFrame, setFrozenFrame] = useState(null);
+
+    const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
+    const activeModulesRef = useRef(activeModules);
+    useEffect(() => { activeModulesRef.current = activeModules; }, [activeModules]);
 
     const attemptsRef = useRef(0);
     const holdStartRef = useRef(null);
@@ -157,7 +161,15 @@ export default function Learn() {
 
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
+        
+        const sock = io(window.location.origin.replace('5173', '5000'));
+        sock.on('modules_changed', (data) => {
+            setActiveModules(data.modules || data);
+        });
+
         fetchProgress();
+
+        return () => { sock.disconnect(); };
     }, [user, navigate]);
 
     useEffect(() => {
@@ -196,7 +208,9 @@ export default function Learn() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.scale(-1, 1);
             ctx.translate(-canvas.width, 0);
-            if (results.multiHandLandmarks?.length > 0) {
+            
+            // GATEKEEPER: Only draw and process landmarks if AI module is ON
+            if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
                 const lmsList = results.multiHandLandmarks;
                 const handsList = results.multiHandedness || [];
 
@@ -317,6 +331,14 @@ export default function Learn() {
 
         const interval = setInterval(async () => {
             if (isDetectingRef.current) return;
+
+            // GATEKEEPER: If teacher disabled the module, skip all AI logic
+            if (!activeModulesRef.current.mudra) {
+                setDetected({ name: 'AI Paused', confidence: 0, detected: false });
+                setHoldProgress(0);
+                return;
+            }
+
             isDetectingRef.current = true;
 
             try {

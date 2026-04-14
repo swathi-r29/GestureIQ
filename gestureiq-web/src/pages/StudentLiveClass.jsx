@@ -53,6 +53,8 @@ const StudentLiveClass = () => {
   const [feedback, setFeedback] = useState('Show your hand to the camera');
   const [corrections, setCorrections] = useState([]);
   const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
+  const activeModulesRef = useRef(activeModules);
+  useEffect(() => { activeModulesRef.current = activeModules; }, [activeModules]);
   const [rasaData, setRasaData] = useState({ rasa: '', rasa_confidence: 0, rasa_meaning: '', expression_match: false });
   const [bestScore, setBestScore] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -89,6 +91,8 @@ const StudentLiveClass = () => {
   const pendingOfferRef = useRef(null);
   // FIX B: ICE restart timer
   const iceRestartTimerRef = useRef(null);
+  // NEW: track last offer handshake to prevent duplicates
+  const lastHandshakeTimeRef = useRef(0);
 
   const detectedMudraRef = useRef('');
   const aiScoreRef = useRef(0);
@@ -108,9 +112,16 @@ const StudentLiveClass = () => {
       return;
     }
 
+    // NEW GUARD: Rate limit handshakes (max 1 per 2 seconds)
+    const now = Date.now();
+    if (now - lastHandshakeTimeRef.current < 2000) {
+      console.warn('[WebRTC Student] Handshake rate limit — ignoring offer');
+      return;
+    }
+
     // FIX C.5: Guard against processing offers while state is not stable
     if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'stable') {
-      console.warn('[WebRTC Student] Signal state not stable (' + peerConnectionRef.current.signalingState + ') — ignoring concurrent offer');
+      console.warn('[WebRTC Student] Signal state is ' + peerConnectionRef.current.signalingState + ' — skipping concurrent offer');
       return;
     }
 
@@ -185,7 +196,7 @@ const StudentLiveClass = () => {
           if (peerConnectionRef.current !== pc) return;
           if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
             console.log('[WebRTC Student] ICE stuck — requesting new offer');
-            socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+            socketRef.current?.emit('request_webrtc_offer', { classId: classId });
           }
         }, 4000);
       }
@@ -193,7 +204,7 @@ const StudentLiveClass = () => {
       if (pc.iceConnectionState === 'failed') {
         setTeacherConnected(false);
         console.log('[WebRTC Student] ICE failed — requesting new offer immediately');
-        socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+        socketRef.current?.emit('request_webrtc_offer', { classId: classId });
       }
 
       if (pc.iceConnectionState === 'closed') {
@@ -220,6 +231,7 @@ const StudentLiveClass = () => {
           catch (e) { console.warn('[WebRTC Student] Queued ICE error:', e); }
         }
 
+        lastHandshakeTimeRef.current = Date.now();
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -248,7 +260,7 @@ const StudentLiveClass = () => {
         socketRef.current = sock;
 
         const join = () => sock.emit('join_class', {
-          classId: classId?.toLowerCase(),
+          classId: classId,
           userId: user?.id || user?._id || 'unknown',
           name: user?.name || 'Student'
         });
@@ -260,6 +272,17 @@ const StudentLiveClass = () => {
         sock.on('target_changed', (data) => {
           setClassData(prev => prev ? { ...prev, targetMudra: data.target || data.mudra } : prev);
         });
+
+        // NEW: Real-Time Teacher-Controlled Spotlight
+        sock.on('update_class_state', (data) => {
+          if (data.targetMudra) {
+            setClassData(prev => prev ? { ...prev, targetMudra: data.targetMudra } : prev);
+          }
+          if (data.activeModules) {
+            setActiveModules(data.activeModules);
+          }
+        });
+
         sock.on('class_ended_broadcast', handleEndSessionFromTeacher);
         sock.on('class_announcement', (data) => {
           setAnnouncement(data.message || '');
@@ -270,7 +293,7 @@ const StudentLiveClass = () => {
         sock.on('class_started', () => {
           console.log('[WebRTC Student] class_started — requesting offer');
           setTimeout(() => {
-            sock.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+            sock.emit('request_webrtc_offer', { classId: classId });
           }, 500);
         });
 
@@ -297,7 +320,7 @@ const StudentLiveClass = () => {
         // This handles the case where teacher is already broadcasting when student opens the page
         setTimeout(() => {
           console.log('[WebRTC Student] Requesting initial offer (camera may not be ready — will pend)');
-          sock.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+          sock.emit('request_webrtc_offer', { classId: classId });
         }, 2000);
 
       } catch (err) {
@@ -342,7 +365,9 @@ const StudentLiveClass = () => {
       ctx.save();
       ctx.scale(-1, 1);
       ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
-      if (results.multiHandLandmarks?.length > 0) {
+      
+      // FIX: Use activeModulesRef to avoid stale closure in onResults
+      if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
         const rawLm = results.multiHandLandmarks[0];
         const handedness = results.multiHandedness[0]?.label || 'Right';
         const score = results.multiHandedness[0]?.score || 0;
@@ -409,7 +434,7 @@ const StudentLiveClass = () => {
       } else {
         // FIX J: no pending offer and no active PC — request a fresh one
         console.log('[WebRTC Student] No pending offer — requesting fresh offer from teacher');
-        socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+        socketRef.current?.emit('request_webrtc_offer', { classId: classId });
       }
 
       requestRef.current = requestAnimationFrame(processFrame);
@@ -420,6 +445,28 @@ const StudentLiveClass = () => {
   }, [classId, handleReceiveOffer]);
 
   // ── 4. Main Processing Loop ────────────────────────────────
+  // NEW: Ensure local video element stays attached to the stream
+  useEffect(() => {
+    const fixVideo = async () => {
+      if (webcamActive && streamRef.current && videoRef.current) {
+        if (!videoRef.current.srcObject) {
+          console.log('[Video Fix] Re-attaching camera stream');
+          videoRef.current.srcObject = streamRef.current;
+        }
+        try {
+          if (videoRef.current.paused) {
+            await videoRef.current.play();
+          }
+        } catch (err) {
+          console.warn('[Video Fix] Play failed:', err);
+        }
+      }
+    };
+    fixVideo();
+    const interval = setInterval(fixVideo, 3000);
+    return () => clearInterval(interval);
+  }, [webcamActive, sessionStarted]);
+
   const processFrame = useCallback(async () => {
     if (!videoRef.current || videoRef.current.readyState < 2) {
       requestRef.current = requestAnimationFrame(processFrame);
@@ -450,10 +497,30 @@ const StudentLiveClass = () => {
     const lmData = isFresh ? landmarksRef.current : null;
     const socket = socketRef.current;
     const currentClassData = classDataRef.current;
+    
+    // FIX: Use activeModulesRef to ensure we check the LATEST toggle values
+    if (!activeModulesRef.current.mudra) {
+      if (socket && socket.connected) {
+        socket.emit('student_performance_update', {
+          classId: classId,
+          studentId: user?.id || user?._id || 'unknown',
+          studentName: user?.name || 'Student',
+          mudra: 'Paused',
+          score: 0,
+          status: 'Inactive',
+          landmarks: null,
+          frame: null
+        });
+      }
+      setFeedback('Mudra Detection Paused by Teacher');
+      setAiScore(0);
+      setDetectedMudra('');
+      return;
+    }
 
     if (socket && socket.connected) {
       socket.emit('student_performance_update', {
-        classId: classId?.toLowerCase(),
+        classId: classId,
         studentId: user?.id || user?._id || 'unknown',
         studentName: user?.name || 'Student',
         mudra: lmData ? detectedMudraRef.current : 'No Hand',
@@ -465,7 +532,7 @@ const StudentLiveClass = () => {
     }
 
     if (!lmData) {
-      setFeedback('Show your hand to the camera');
+      setFeedback(activeModulesRef.current.mudra ? 'Show your hand to the camera' : 'AI Detection Paused');
       return;
     }
 
@@ -476,6 +543,7 @@ const StudentLiveClass = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           landmarks: lmData.landmarks,
+          activeModules: activeModules, // Pass to backend if needed
           activeMudras: (currentClassData?.mudrasList?.length > 0)
             ? currentClassData.mudrasList
             : (currentClassData?.targetMudra ? [currentClassData.targetMudra] : [])
@@ -490,7 +558,20 @@ const StudentLiveClass = () => {
       aiScoreRef.current = data.score || 0;
       setSessionStatus(data.status || 'Incorrect');
       sessionStatusRef.current = data.status || 'Incorrect';
-      setFeedback(data.score >= 90 ? '✓ Perfect — hold it!' : data.score >= 75 ? 'Almost there...' : 'Keep adjusting');
+      
+      // NEW: Advanced Spotlight Feedback Logic
+      const targetMudra = classDataRef.current?.targetMudra;
+      if (data.score >= 90 && (!targetMudra || data.matchedMudra === targetMudra)) {
+        setFeedback('✓ Correct! Keep holding...');
+      } else if (data.matchedMudra && targetMudra && data.matchedMudra !== targetMudra) {
+        setFeedback(`Incorrect. You are showing ${data.matchedMudra} instead of ${targetMudra}.`);
+      } else if (data.score >= 75) {
+        setFeedback('Almost there...');
+      } else if (data.matchedMudra) {
+        setFeedback('Keep adjusting...');
+      } else {
+        setFeedback('Show your hand to the camera');
+      }
 
       if ((data.score || 0) > bestScoreRef.current) {
         bestScoreRef.current = data.score;
@@ -500,7 +581,7 @@ const StudentLiveClass = () => {
 
       if (socket && socket.connected) {
         socket.emit('student_performance_update', {
-          classId: classId?.toLowerCase(),
+          classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
           mudra: data.matchedMudra,
@@ -512,7 +593,9 @@ const StudentLiveClass = () => {
       }
 
       const now = Date.now();
-      if (now - lastVoiceRef.current > 5000) {
+      // FIX: Frequency increased to 2s to allow more responsive 
+      // transition detection (the hook handles its own internal throttling)
+      if (now - lastVoiceRef.current > 2000) {
         lastVoiceRef.current = now;
         announce?.fromResult(data);
       }
@@ -830,8 +913,21 @@ const StudentLiveClass = () => {
               </div>
             </div>
 
-            {/* Media Controls */}
+            {/* Media Controls & Recovery */}
             <div className="absolute bottom-5 right-5 flex items-center gap-2 z-20">
+              {/* Refresh Camera Button */}
+              <button
+                onClick={() => {
+                  console.log('[Recovery] Manual camera restart');
+                  stopWebcam();
+                  setTimeout(() => startWebcam(), 300);
+                }}
+                className="p-3 rounded-2xl backdrop-blur-md border bg-amber-500/10 border-amber-500/30 text-amber-600 hover:bg-amber-500 hover:text-white transition-all shadow-lg shadow-amber-500/20"
+                title="Restart Camera"
+              >
+                <RefreshCw size={18} />
+              </button>
+
               <button
                 onClick={toggleMic}
                 className={`p-3 rounded-2xl backdrop-blur-md border transition-all ${isMicOn ? 'bg-white/90 border-slate-200 text-slate-600' : 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30'
@@ -889,13 +985,17 @@ const StudentLiveClass = () => {
                   </p>
                   <button
                     onClick={() => {
-                      console.log('[WebRTC Student] Manual refresh');
-                      socketRef.current?.emit('request_webrtc_offer', { classId: classId?.toLowerCase() });
+                      console.log('[Recovery] Manual connection reset');
+                      // Reset local PC state to allow fresh offer processing
+                      if (peerConnectionRef.current) {
+                        peerConnectionRef.current.close();
+                        peerConnectionRef.current = null;
+                      }
+                      socketRef.current?.emit('request_webrtc_offer', { classId: classId });
                     }}
-                    className="mt-1 px-3 py-1 rounded-lg text-[8px] font-bold uppercase tracking-widest transition-all"
-                    style={{ background: 'rgba(255,255,255,0.06)', color: '#64748B', border: '1px solid rgba(255,255,255,0.1)' }}
+                    className="mt-1 px-3 py-1 bg-violet-500 hover:bg-violet-600 border border-violet-400 rounded-lg text-[8px] font-bold text-white uppercase tracking-widest shadow-lg shadow-violet-500/20 transition-all"
                   >
-                    ↻ Refresh
+                    🚀 Fix Connection
                   </button>
                 </div>
               )}

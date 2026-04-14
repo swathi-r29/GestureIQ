@@ -226,14 +226,25 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     const wrongMudraCountRef = useRef(0);
     const WRONG_MUDRA_GATE = 3;
 
+    // NEW: State Awareness Refs for Sync Fix
+    const lastStatusRef = useRef('');
+    const lastScoreRef = useRef(0);
+    const lastMudraRef = useRef('');
+
     useEffect(() => { langRef.current = language; }, [language]);
 
     const _doSpeak = useCallback((message, priority = PRIO.LOW) => {
         if (!unlockedRef.current || !message) return;
         const now = Date.now();
-        if (priority < PRIO.HIGH && now - globalVoiceCooldownRef.current < 2200) return;
+        
+        // Use a stricter cooldown for low-priority messages
+        const cooldown = priority >= PRIO.HIGH ? 1000 : 2500;
+        if (now - globalVoiceCooldownRef.current < cooldown && message === lastFeedbackRef.current) return;
+        
         globalVoiceCooldownRef.current = now;
+        lastFeedbackRef.current = message;
 
+        // Immediate cancel flushes the instruction queue to prevent lag
         window.speechSynthesis.cancel();
         const lang = langRef.current;
         const utt = new SpeechSynthesisUtterance(message);
@@ -337,16 +348,34 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             const lang = langRef.current;
             const now = Date.now();
             
-            // Priority 1: Mastery (95+)
-            if (data.score >= 95) {
-                const msgs = { en: "Perfect! Hold it right there.", ta: "மிகச்சிறப்பு! அப்படியே பிடியுங்கள்.", hi: "बेहतरीन! इसे ऐसे ही बनाए रखें।" };
-                _doSpeak(msgs[lang] || msgs.en, PRIO.HIGH);
+            const currentStatus = data.status || 'Incorrect';
+            const currentScore = data.score || 0;
+            const currentMudra = data.matchedMudra || 'No Hand';
+
+            // Detect Transitions
+            const isStatusTransition = currentStatus !== lastStatusRef.current;
+            const isMudraTransition = currentMudra !== lastMudraRef.current;
+            const scoreJump = Math.abs(currentScore - lastScoreRef.current) > 20;
+
+            // Update refs for next frame
+            lastStatusRef.current = currentStatus;
+            lastScoreRef.current = currentScore;
+            lastMudraRef.current = currentMudra;
+
+            // Priority 1: Mastery (95+) - Transition Sensitive
+            if (currentScore >= 95) {
+                if (isStatusTransition || scoreJump || now - lastOkVoiceRef.current > 10000) {
+                    lastOkVoiceRef.current = now;
+                    const msgs = { en: "Perfect! Hold it right there.", ta: "மிகச்சிறப்பு! அப்படியே பிடியுங்கள்.", hi: "बेहतरीन! इसे ऐसे ही बनाए रखें।" };
+                    _doSpeak(msgs[lang] || msgs.en, PRIO.HIGH);
+                }
                 return;
             }
 
-            // Priority 2: Correct (75+) - only speak if it's been a while
-            if (data.score >= 75) {
-                if (now - lastOkVoiceRef.current > 8000) {
+            // Priority 2: Correct (75+)
+            if (currentScore >= 75) {
+                // Only speak if we just reached this state or if it's been a long time
+                if (isStatusTransition || now - lastOkVoiceRef.current > 8000) {
                     lastOkVoiceRef.current = now;
                     const msgs = { en: "Good! Now hold this position.", ta: "நல்லது! இந்த நிலையை பிடித்திருங்கள்.", hi: "अच्छा! अब इस स्थिति को बनाए रखें।" };
                     _doSpeak(msgs[lang] || msgs.en, PRIO.MEDIUM);
@@ -359,7 +388,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 const correction = data.corrections[0];
                 const translated = translate(lang, correction);
                 
-                // Only speak if it's a new correction or it's been a while
+                // Only speak if it's a new correction or it's been a while (5s)
                 if (translated !== lastCorrectionRef.current || now - lastCorrectionTimeRef.current > 5000) {
                     lastCorrectionRef.current = translated;
                     lastCorrectionTimeRef.current = now;
@@ -369,10 +398,10 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             }
 
             // Priority 4: Wrong Mudra (if is_stable is true but it's not the target)
-            if (data.is_stable && data.matchedMudra && data.matchedMudra !== 'No Hand') {
-                if (now - lastCorrectionTimeRef.current > 6000) {
+            if (data.is_stable && currentMudra !== 'No Hand' && currentMudra !== 'Joining...') {
+                if (isMudraTransition || now - lastCorrectionTimeRef.current > 7000) {
                     lastCorrectionTimeRef.current = now;
-                    const mat = data.matchedMudra;
+                    const mat = currentMudra;
                     const msgs = { 
                         en: `Showing ${mat}. Try adjusting your fingers.`, 
                         ta: `நீங்கள் ${getMudraName(lang, mat)} காட்டுகிறீர்கள். விரல்களை சரிசெய்யவும்.`, 

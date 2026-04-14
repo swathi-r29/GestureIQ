@@ -52,6 +52,34 @@ const SkeletonOverlay = ({ landmarks, color = '#10B981' }) => {
   );
 };
 
+const StudentVideo = ({ stream, name }) => {
+  const videoRef = useRef(null);
+  
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      if (videoRef.current.srcObject !== stream) {
+        console.log('[WebRTC Teacher] Attaching stream to monitor for:', name);
+        videoRef.current.srcObject = stream;
+      }
+      // Force play
+      videoRef.current.play().catch(err => {
+        console.warn('[WebRTC Teacher] Monitor play failed:', err);
+      });
+    }
+  }, [stream, name]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      className="w-full h-full object-cover"
+      style={{ transform: 'scaleX(-1)' }}
+    />
+  );
+};
+
 const StaffConductClass = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
@@ -79,6 +107,10 @@ const StaffConductClass = () => {
   const offerInProgressRef = useRef(new Set());
   // FIX 2: track ICE restart timers so we can cancel them on cleanup
   const iceRestartTimersRef = useRef(new Map());
+  // NEW: track last offer time to prevent rapid-fire signaling
+  const lastOfferTimeRef = useRef(new Map());
+  // NEW: lock to prevent concurrent answer processing for same student
+  const processingAnswerRef = useRef(new Map());
 
   useEffect(() => {
     const init = async () => {
@@ -97,6 +129,30 @@ const StaffConductClass = () => {
       peerConnectionsRef.current.forEach(pc => pc.close());
       peerConnectionsRef.current.clear();
     };
+  }, []);
+
+  // NEW: Ensure local video element stays attached to the stream
+  useEffect(() => {
+    const fixVideo = async () => {
+      if (localVideoRef.current && localStreamRef.current) {
+        if (!localVideoRef.current.srcObject) {
+          console.log('[Video Fix] Re-attaching camera stream');
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+        try {
+          // Force play in case it was paused
+          if (localVideoRef.current.paused) {
+            await localVideoRef.current.play();
+          }
+        } catch (err) {
+          console.warn('[Video Fix] Play failed:', err);
+        }
+      }
+    };
+    fixVideo();
+    // Also re-check on a periodic interval to catch any weird state changes
+    const interval = setInterval(fixVideo, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const startLocalStream = async () => {
@@ -151,7 +207,7 @@ const StaffConductClass = () => {
       if (peerConnectionsRef.current.get(studentSocketId) !== pc) return;
       if (event.candidate) {
         socketRef.current?.emit('webrtc_ice_candidate', {
-          classId: classId?.toLowerCase(),
+          classId: classId,
           to: studentSocketId,
           candidate: event.candidate
         });
@@ -200,15 +256,15 @@ const StaffConductClass = () => {
         const studentId = Object.keys(prev).find(id => prev[id].socketId === studentSocketId);
         if (!studentId) return prev;
 
-        let stream = prev[studentId].remoteStream;
-        if (!stream) {
-          stream = new MediaStream();
-        }
-        stream.addTrack(event.track);
+        // FIX: Create a NEW MediaStream instance so React detects the reference change
+        // This ensures the StudentVideo component re-attaches the stream when new tracks arrive
+        const oldStream = prev[studentId].remoteStream;
+        const newStream = new MediaStream(oldStream ? oldStream.getTracks() : []);
+        newStream.addTrack(event.track);
 
         return {
           ...prev,
-          [studentId]: { ...prev[studentId], remoteStream: stream }
+          [studentId]: { ...prev[studentId], remoteStream: newStream }
         };
       });
     };
@@ -222,39 +278,48 @@ const StaffConductClass = () => {
       return;
     }
 
+    // NEW GUARD: Rate limit offers (max 1 per 2 seconds per student)
+    const now = Date.now();
+    const lastTime = lastOfferTimeRef.current.get(studentSocketId) || 0;
+    if (now - lastTime < 2000) {
+      console.warn('[WebRTC Teacher] Signaling rate limit — skipping offer for:', studentSocketId);
+      return;
+    }
+
     // FIX 7: prevent duplicate simultaneous offers for same student
     if (offerInProgressRef.current.has(studentSocketId)) {
       console.warn('[WebRTC Teacher] Offer already in progress for:', studentSocketId);
       return;
     }
 
-    offerInProgressRef.current.add(studentSocketId);
     const pc = peerConnectionsRef.current.get(studentSocketId);
     
-    // FIX 8.5: Skip recreation if already stable and connected
-    if (pc && pc.signalingState === 'stable' && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
-      // console.log('[WebRTC Teacher] Connection already stable for:', studentSocketId, '— skipping reset');
-      offerInProgressRef.current.delete(studentSocketId);
-      return;
-    }
-
-    // FIX 8.6: Additional guard — don't reset if we are currently mid-handshake
+    // GUARD: If already processing a handshake, don't interrupt it
     if (pc && pc.signalingState !== 'stable') {
-      console.warn('[WebRTC Teacher] Signaling in progress for:', studentSocketId, '— skipping reset');
-      offerInProgressRef.current.delete(studentSocketId);
+      console.warn('[WebRTC Teacher] signalingState is', pc.signalingState, '— skipping reset for:', studentSocketId);
       return;
     }
 
-    const newPC = createPeerConnection(studentSocketId);
+    // GUARD: If already connected and stable, skip unless specifically requested
+    if (pc && pc.signalingState === 'stable' && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
+      console.log('[WebRTC Teacher] Connection already stable for:', studentSocketId);
+      return;
+    }
+
+    offerInProgressRef.current.add(studentSocketId);
+    lastOfferTimeRef.current.set(studentSocketId, now);
 
     try {
+      console.log('[WebRTC Teacher] Starting new handshake for:', studentSocketId);
+      const newPC = createPeerConnection(studentSocketId);
       const offer = await newPC.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
       });
       await newPC.setLocalDescription(offer);
+      
       socketRef.current?.emit('webrtc_offer', {
-        classId: classId?.toLowerCase(),
+        classId: classId,
         to: studentSocketId,
         offer
       });
@@ -262,7 +327,6 @@ const StaffConductClass = () => {
     } catch (err) {
       console.error('[WebRTC Teacher] Error creating offer:', err);
     } finally {
-      // FIX 8: always clear in-progress flag
       offerInProgressRef.current.delete(studentSocketId);
     }
   };
@@ -283,7 +347,7 @@ const StaffConductClass = () => {
       const joinRoom = () => {
         if (s.connected) {
           s.emit('join_class', {
-            classId: classId?.toLowerCase(),
+            classId: classId,
             name: 'Teacher',
             userId: user?.id || user?._id || 'teacher',
             isTeacher: true
@@ -301,9 +365,9 @@ const StaffConductClass = () => {
       );
 
       if (s.connected) {
-        s.emit('start_live_session', classId?.toLowerCase());
+        s.emit('start_live_session', classId);
         s.emit('set_target_mudra', {
-          classId: classId?.toLowerCase(),
+          classId: classId,
           target: res.data.mudrasList?.[0] || ''
         });
       }
@@ -345,29 +409,54 @@ const StaffConductClass = () => {
 
       // Student's answer to our offer
       s.on('webrtc_answer_response', async (data) => {
-        const pc = peerConnectionsRef.current.get(data.from);
+        const studentSocketId = data.from;
+        const pc = peerConnectionsRef.current.get(studentSocketId);
         if (!pc) return;
 
-        // FIX 9: only accept answer if we're actually waiting for one
+        // NEW: Answer Processing Lock
+        if (processingAnswerRef.current.get(studentSocketId)) {
+          console.warn('[WebRTC Teacher] Answer already being processed for:', studentSocketId);
+          return;
+        }
+
+        // FIX 9: if we get an answer and we're stable, check if it's a "zombie" connection
+        if (pc.signalingState === 'stable') {
+          // If we are stable but don't have tracks or connection is failed, allow a reset
+          const hasTracks = pc.getReceivers().some(r => r.track && r.track.readyState === 'live');
+          if (!hasTracks || pc.iceConnectionState === 'failed') {
+            console.log('[WebRTC Teacher] Connection looks stale/zombie — force-restarting for:', studentSocketId);
+            processingAnswerRef.current.delete(studentSocketId);
+            handleCreateOffer(studentSocketId);
+          } else {
+            console.warn('[WebRTC Teacher] Got answer but state is already stable and active — ignoring');
+          }
+          return;
+        }
+
         if (pc.signalingState !== 'have-local-offer') {
           console.warn('[WebRTC Teacher] Got answer but state is', pc.signalingState, '— ignoring');
           return;
         }
 
+        processingAnswerRef.current.set(studentSocketId, true);
+
         try {
+          console.log('[WebRTC Teacher] Setting remote answer for:', studentSocketId);
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          console.log('[WebRTC Teacher] Answer accepted from:', data.from);
+          console.log('[WebRTC Teacher] Answer successfully accepted from:', studentSocketId);
 
           // Drain queued ICE candidates
-          const queue = iceCandidatesQueuesRef.current.get(data.from) || [];
+          const queue = iceCandidatesQueuesRef.current.get(studentSocketId) || [];
           while (queue.length > 0) {
             const candidate = queue.shift();
             try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
             catch (err) { console.warn('[WebRTC Teacher] ICE queue error:', err); }
           }
-          iceCandidatesQueuesRef.current.delete(data.from);
+          iceCandidatesQueuesRef.current.delete(studentSocketId);
         } catch (err) {
           console.error('[WebRTC Teacher] Error setting answer:', err);
+        } finally {
+          processingAnswerRef.current.delete(studentSocketId);
         }
       });
 
@@ -466,7 +555,14 @@ const StaffConductClass = () => {
     setCurrentMudra(newMudra);
     const sock = socketRef.current;
     if (sock && sock.connected) {
-      sock.emit('set_target_mudra', { classId: classId?.toLowerCase(), target: newMudra });
+      // NEW: Use update_class_state for better sync
+      sock.emit('update_class_state', {
+        classId: classId,
+        targetMudra: newMudra,
+        activeModules: activeModules
+      });
+      // Backward compatibility
+      sock.emit('set_target_mudra', { classId: classId, target: newMudra });
     }
   };
 
@@ -495,7 +591,14 @@ const StaffConductClass = () => {
     setActiveModules(updated);
     const sock = socketRef.current;
     if (sock && sock.connected) {
-      sock.emit('modules_changed', { classId: classId?.toLowerCase(), modules: updated });
+      // NEW: Use update_class_state
+      sock.emit('update_class_state', {
+        classId: classId,
+        targetMudra: currentMudra,
+        activeModules: updated
+      });
+      // Backward compatibility
+      sock.emit('modules_changed', { classId: classId, modules: updated });
     }
     try {
       const token = localStorage.getItem('token');
@@ -510,7 +613,7 @@ const StaffConductClass = () => {
   const handleBroadcastAnnouncement = () => {
     const sock = socketRef.current;
     if (!announcement.trim() || !sock || !sock.connected) return;
-    sock.emit('class_announcement', { classId: classId?.toLowerCase(), message: announcement });
+    sock.emit('class_announcement', { classId: classId, message: announcement });
     setAnnouncement('');
   };
 
@@ -518,7 +621,7 @@ const StaffConductClass = () => {
     if (!window.confirm('End this class? Reports will be generated for all students.')) return;
     try {
       const token = localStorage.getItem('token');
-      socketRef.current?.emit('class_ended', classId?.toLowerCase());
+      socketRef.current?.emit('class_ended', classId);
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
@@ -558,17 +661,45 @@ const StaffConductClass = () => {
           <div className="px-2 py-1 rounded bg-red-500 text-white text-[10px] font-bold animate-pulse">LIVE</div>
           <h1 className="font-bold truncate max-w-[200px]" style={{ color: 'var(--text)' }}>{classData?.title}</h1>
         </div>
-        <div className="flex items-center space-x-8">
+        <div className="flex items-center space-x-6">
+          {/* Spotlight Controls in Header */}
+          <div className="flex items-center bg-zinc-900/50 rounded-xl p-1 border border-white/5">
+            <div className="flex items-center px-3 space-x-3 border-r border-white/10">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Target</span>
+              <select 
+                value={currentMudra} 
+                onChange={e => handleMudraChange(e.target.value)}
+                className="bg-transparent text-xs font-black text-orange-500 outline-none cursor-pointer"
+              >
+                {(classData?.mudrasList || []).map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center px-3 space-x-4">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">AI Practice</span>
+              <div
+                onClick={() => handleModuleToggle('mudra')}
+                className="w-10 h-5 rounded-full cursor-pointer transition-all duration-300 relative border border-white/10"
+                style={{
+                  backgroundColor: activeModules.mudra ? '#10B981' : '#374151',
+                  boxShadow: activeModules.mudra ? '0 0 10px rgba(16,185,129,0.3)' : 'none'
+                }}
+              >
+                <div className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all duration-300 ${activeModules.mudra ? 'left-5.5' : 'left-0.5'}`}
+                  style={{ left: activeModules.mudra ? '22px' : '2px' }} />
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center space-x-2">
             <Clock className="w-4 h-4 text-orange-500" />
             <span className="font-mono text-sm font-bold">{formatTime(timer)}</span>
           </div>
           <div className="flex items-center space-x-2">
             <Users className="w-4 h-4 text-blue-500" />
-            <span className="text-sm font-bold">{Object.keys(students).length} Joined</span>
+            <span className="text-sm font-bold">{Object.keys(students).length}</span>
           </div>
           <button onClick={handleEndClass}
-            className="px-4 py-2 rounded-lg bg-red-500 text-white text-xs font-bold hover:brightness-110 flex items-center space-x-2">
+            className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-bold hover:brightness-110 flex items-center space-x-2 transition-all active:scale-95 shadow-lg shadow-red-600/20">
             <LogOut className="w-3 h-3" /><span>End Class</span>
           </button>
         </div>
@@ -588,33 +719,7 @@ const StaffConductClass = () => {
             <p className="text-[9px]" style={{ color: 'var(--text-muted)' }}>Mudra Sync Active</p>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Target Mudra</label>
-            <select value={currentMudra} onChange={e => handleMudraChange(e.target.value)}
-              className="w-full p-3 rounded-xl border font-bold text-sm outline-none bg-zinc-900 border-white/5">
-              {(classData?.mudrasList || []).map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <div className="p-4 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-center">
-              <p className="text-2xl font-black text-orange-500">{currentMudra}</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">AI Modules</label>
-            {[['mudra','Mudra'], ['face','Expression'], ['pose','Posture']].map(([key, label]) => (
-              <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-                <span className="text-xs font-bold">{label}</span>
-                <div
-                  onClick={() => handleModuleToggle(key)}
-                  className="w-8 h-4 rounded-full cursor-pointer transition-all duration-300"
-                  style={{
-                    backgroundColor: activeModules[key] ? '#10B981' : '#374151',
-                    boxShadow: activeModules[key] ? '0 0 8px rgba(16,185,129,0.4)' : 'none'
-                  }}
-                />
-              </div>
-            ))}
-          </div>
+          {/* Removed redundant Target Mudra and AI Modules from sidebar — now in header */}
 
           <div className="mt-auto p-4 rounded-2xl bg-zinc-900 space-y-2">
             <p className="text-[10px] font-bold uppercase text-zinc-500">Broadcast</p>
@@ -686,13 +791,7 @@ const StaffConductClass = () => {
 
                   <div className="relative aspect-video rounded-xl bg-black mb-4 overflow-hidden border border-white/5">
                     {data.remoteStream ? (
-                      <video
-                        autoPlay
-                        playsInline
-                        ref={el => { if (el) el.srcObject = data.remoteStream; }}
-                        className="w-full h-full object-cover"
-                        style={{ transform: 'scaleX(-1)' }}
-                      />
+                      <StudentVideo stream={data.remoteStream} name={data.name} />
                     ) : data.frame ? (
                       <img src={data.frame} className="w-full h-full object-cover grayscale-[0.3]"
                         style={{ transform: 'scaleX(-1)' }} alt={data.name} />
@@ -704,9 +803,12 @@ const StaffConductClass = () => {
                     )}
                     <div className="absolute top-2 right-2 flex items-center space-x-1 px-2 py-0.5 rounded bg-black/80 border border-white/10">
                       <div className={`w-1.5 h-1.5 rounded-full ${
+                        !activeModules.mudra ? 'bg-zinc-600' :
                         data.score >= 90 ? 'bg-emerald-500' : data.score >= 75 ? 'bg-yellow-500' : 'bg-red-500'
-                      } animate-pulse`} />
-                      <span className="text-[10px] font-black text-white">{data.score}%</span>
+                      } ${activeModules.mudra ? 'animate-pulse' : ''}`} />
+                      <span className="text-[10px] font-black text-white">
+                        {activeModules.mudra ? `${data.score}%` : 'Off'}
+                      </span>
                     </div>
                   </div>
 
@@ -716,7 +818,9 @@ const StaffConductClass = () => {
                         <h3 className="text-xs font-bold text-white mb-0.5">{data.name}</h3>
                         <div className="flex items-center space-x-2">
                           <span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Current:</span>
-                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter">{data.mudra || 'None'}</span>
+                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter">
+                            {activeModules.mudra ? (data.mudra || 'None') : 'Paused'}
+                          </span>
                         </div>
                       </div>
                       <span className={`text-[9px] font-black uppercase px-2 py-1 rounded bg-white/5 ${

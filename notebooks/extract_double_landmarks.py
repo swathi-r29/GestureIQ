@@ -15,18 +15,32 @@ from multiprocessing import Pool, cpu_count
 #SORTED_FRAMES_DIR = "../dataset/double_handed_mudras/sorted_frames"
 #OUTPUT_CSV        = "../dataset/double_handed_mudras/landmarks_double.csv"
 
-SORTED_FRAMES_DIR = r"D:\GestureIQ\dataset\double_handed_mudras\sorted_frames"
-OUTPUT_CSV        = r"D:\GestureIQ\dataset\double_handed_mudras\landmarks_double.csv"
+SORTED_FRAMES_DIR = r"E:\GestureIQ\dataset\double_handed_mudras\sorted_frames"
+OUTPUT_CSV        = r"E:\GestureIQ\dataset\double_handed_mudras\landmarks_double.csv"
 
 mp_hands_mod = mp.solutions.hands
 
 def brightness_variants(img):
     variants = [img]
-    variants.append(cv2.convertScaleAbs(img, alpha=1.4, beta=20))
-    gamma = 1.2
-    table = np.array([((i/255.0)**gamma)*255 for i in range(256)]).astype("uint8")
-    variants.append(cv2.LUT(img, table))
+    try:
+        variants.append(cv2.convertScaleAbs(img, alpha=1.4, beta=20))
+        gamma = 1.2
+        table = np.array([((i/255.0)**gamma)*255 for i in range(256)]).astype("uint8")
+        variants.append(cv2.LUT(img, table))
+    except:
+        pass
     return variants
+
+# Global hands object for worker processes
+hands_worker = None
+
+def init_worker():
+    global hands_worker
+    hands_worker = mp_hands_mod.Hands(
+        static_image_mode=True,
+        max_num_hands=2,
+        min_detection_confidence=0.1
+    )
 
 def process_image(args):
     img_path, mudra_name = args
@@ -35,50 +49,46 @@ def process_image(args):
         return None
 
     # Try to detect hands from multiple brightness variants
-    with mp_hands_mod.Hands(
-        static_image_mode=True,
-        max_num_hands=2,
-        min_detection_confidence=0.1
-    ) as hands:
-        for variant in brightness_variants(img):
-            rgb    = cv2.cvtColor(variant, cv2.COLOR_BGR2RGB)
-            result = hands.process(rgb)
+    global hands_worker
+    for variant in brightness_variants(img):
+        rgb    = cv2.cvtColor(variant, cv2.COLOR_BGR2RGB)
+        result = hands_worker.process(rgb)
 
-            if result.multi_hand_landmarks and len(result.multi_hand_landmarks) >= 1:
-                # Build hand dict: label → landmarks
-                hand_dict = {}
-                for idx, hand_lm in enumerate(result.multi_hand_landmarks):
-                    if result.multi_handedness and idx < len(result.multi_handedness):
-                        label = result.multi_handedness[idx].classification[0].label
-                    else:
-                        label = "Right" if idx == 0 else "Left"
-                    hand_dict[label] = hand_lm
-
-                right_lm = hand_dict.get("Right")
-                left_lm  = hand_dict.get("Left")
-
-                # Build CSV row: mudra_name, R_x0..R_z20, R_label, L_x0..L_z20, L_label
-                row = [mudra_name]
-
-                # Right hand (or zeros)
-                if right_lm:
-                    for lm in right_lm.landmark:
-                        row += [lm.x, lm.y, lm.z]
-                    row.append("Right")
+        if result.multi_hand_landmarks and len(result.multi_hand_landmarks) >= 1:
+            # Build hand dict: label → landmarks
+            hand_dict = {}
+            for idx, hand_lm in enumerate(result.multi_hand_landmarks):
+                if result.multi_handedness and idx < len(result.multi_handedness):
+                    label = result.multi_handedness[idx].classification[0].label
                 else:
-                    row += [0.0] * 63 + ["NONE"]
+                    label = "Right" if idx == 0 else "Left"
+                hand_dict[label] = hand_lm
 
-                # Left hand (or zeros)
-                if left_lm:
-                    for lm in left_lm.landmark:
-                        row += [lm.x, lm.y, lm.z]
-                    row.append("Left")
-                else:
-                    row += [0.0] * 63 + ["NONE"]
+            right_lm = hand_dict.get("Right")
+            left_lm  = hand_dict.get("Left")
 
-                # Only save if at least one real hand detected
-                if right_lm or left_lm:
-                    return row
+            # Build CSV row: mudra_name, R_x0..R_z20, R_label, L_x0..L_z20, L_label
+            row = [mudra_name]
+
+            # Right hand (or zeros)
+            if right_lm:
+                for lm in right_lm.landmark:
+                    row += [lm.x, lm.y, lm.z]
+                row.append("Right")
+            else:
+                row += [0.0] * 63 + ["NONE"]
+
+            # Left hand (or zeros)
+            if left_lm:
+                for lm in left_lm.landmark:
+                    row += [lm.x, lm.y, lm.z]
+                row.append("Left")
+            else:
+                row += [0.0] * 63 + ["NONE"]
+
+            # Only save if at least one real hand detected
+            if right_lm or left_lm:
+                return row
 
     return None   # no hand detected in any variant
 
@@ -108,11 +118,12 @@ def main():
     print(f"\nStarting extraction on {cpu_count()} cores...")
 
     results = []
-    with Pool(processes=min(cpu_count(), 8)) as pool:
+    # Use initializer to create the hands object once per worker
+    with Pool(processes=min(cpu_count(), 8), initializer=init_worker) as pool:
         for i, res in enumerate(pool.imap_unordered(process_image, tasks)):
             if res:
                 results.append(res)
-            if (i+1) % 200 == 0:
+            if (i+1) % 500 == 0:
                 print(f"  Processed {i+1}/{len(tasks)} — {len(results)} successful")
 
     print(f"\nSaving {len(results)} rows to {OUTPUT_CSV}...")

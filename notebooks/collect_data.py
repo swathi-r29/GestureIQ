@@ -7,8 +7,8 @@ hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.5)
 mp_draw = mp.solutions.drawing_utils
 
 mudra_name = input("Enter mudra name: ")
-save_path = f"D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands/{mudra_name}"
-#save_path = f"E:/GestureIQ/dataset/bharatanatyam_mudras/real_hands/{mudra_name}"
+#save_path = f"D:/GestureIQ/dataset/bharatanatyam_mudras/real_hands/{mudra_name}"
+save_path = f"E:/GestureIQ/dataset/bharatanatyam_mudras/real_hands/{mudra_name}"
 os.makedirs(save_path, exist_ok=True)
 
 # Start count from existing images

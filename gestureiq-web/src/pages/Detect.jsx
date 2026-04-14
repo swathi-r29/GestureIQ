@@ -1,7 +1,7 @@
-// src/pages/Detect.jsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth }     from '../context/AuthContext';
+import io from 'socket.io-client';
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
@@ -92,11 +92,16 @@ export default function Detect() {
   const [modalMudra,  setModalMudra]  = useState(null);
   const [doubleMsg,   setDoubleMsg]   = useState('Show both hands to the camera');
 
+  const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
+  const activeModulesRef = useRef(activeModules);
+  useEffect(() => { activeModulesRef.current = activeModules; }, [activeModules]);
+
   const videoRef       = useRef(null);
   const canvasRef      = useRef(null);
   const streamRef      = useRef(null);
   const handsRef       = useRef(null);
   const rafRef         = useRef(null);
+  const socketRef      = useRef(null);
   const intervalRef    = useRef(null);
   const landmarksRef   = useRef(null);
   const bufferRef      = useRef([]);
@@ -113,7 +118,17 @@ export default function Detect() {
 
   useEffect(() => {
     if (!user || user.role !== 'student') { navigate('/'); return; }
-    return () => doCleanup();
+    
+    const sock = io(window.location.origin.replace('5173', '5000'));
+    socketRef.current = sock;
+    sock.on('modules_changed', (data) => {
+      setActiveModules(data.modules || data);
+    });
+
+    return () => {
+      sock.disconnect();
+      doCleanup();
+    };
   }, [user, navigate]);
 
   // ── Modal + voice on detection ─────────────────────────────
@@ -165,7 +180,9 @@ export default function Detect() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.scale(-1, 1);
       ctx.translate(-canvas.width, 0);
-      if (results.multiHandLandmarks?.length > 0) {
+      
+      // GATEKEEPER: Check live ref for mudra toggle
+      if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
         const lms = results.multiHandLandmarks[0];
         landmarksRef.current = lms;
         drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#7C3AED', lineWidth: 3 });
@@ -195,12 +212,16 @@ export default function Detect() {
       ctx.scale(-1, 1);
       ctx.translate(-canvas.width, 0);
       const count = results.multiHandLandmarks?.length || 0;
-      landmarksRef.current = count > 0 ? results : null;
-      if (count > 0) {
+      
+      // GATEKEEPER: Check live ref for mudra toggle (double mode)
+      if (activeModulesRef.current.mudra && count > 0) {
+        landmarksRef.current = results;
         results.multiHandLandmarks.forEach(lms => {
           drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#10B981', lineWidth: 3 });
           drawLandmarks(ctx, lms, { color: '#34D399', lineWidth: 1, radius: 3 });
         });
+      } else {
+        landmarksRef.current = null;
       }
       ctx.restore();
     });
@@ -222,6 +243,14 @@ export default function Detect() {
   // ── Single-hand detection ──────────────────────────────────
   const runSingleDetection = useCallback(async () => {
     if (inFlightRef.current) return;
+    
+    // GATEKEEPER: If module is off, skip detection API call
+    if (!activeModulesRef.current.mudra) {
+      setHandPresent(false);
+      setDetectedKey(null);
+      return;
+    }
+
     const lms = landmarksRef.current;
     if (!lms || lms.length !== 21) {
       setHandPresent(false);
@@ -278,6 +307,14 @@ export default function Detect() {
   // ── Double-hand detection ──────────────────────────────────
   const runDoubleDetection = useCallback(async () => {
     if (inFlightRef.current) return;
+
+    // GATEKEEPER: If module is off, skip detection API call
+    if (!activeModulesRef.current.mudra) {
+      setHandPresent(false);
+      setDetectedKey(null);
+      return;
+    }
+
     const results = landmarksRef.current;
     const count   = results?.multiHandLandmarks?.length || 0;
 

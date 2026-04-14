@@ -188,6 +188,21 @@ io.on('connection', (socket) => {
         io.to(classId).emit('target_changed', { target });
     });
 
+    // NEW: Real-Time Teacher-Controlled Spotlight
+    socket.on('update_class_state', (data) => {
+        const { classId, targetMudra, activeModules } = data;
+        if (!classId) return;
+
+        console.log(`[Socket] Room ${classId} state update:`, { targetMudra, activeModules });
+        
+        // Broadcast to everyone in the room
+        io.to(classId).emit('update_class_state', { targetMudra, activeModules });
+        
+        // Reliability: also emit individual events for older client versions
+        if (targetMudra) io.to(classId).emit('target_changed', { target: targetMudra });
+        if (activeModules) io.to(classId).emit('modules_changed', { modules: activeModules });
+    });
+
     socket.on('modules_changed', (data) => {
         const { classId, modules } = data;
         socket.to(classId).emit('modules_changed', { modules });

@@ -20,8 +20,12 @@ from sklearn.preprocessing import LabelEncoder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.double_feature_engineering import extract_double_features
 
-CSV_PATH   = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
-MODEL_PATH = "D:/GestureIQ/models/double_mudra_model.pkl"
+#CSV_PATH   = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
+#MODEL_PATH = "D:/GestureIQ/models/double_mudra_model.pkl"
+
+CSV_PATH   = "../dataset/double_handed_mudras/landmarks_double.csv"
+MODEL_PATH = "../models/double_mudra_model.pkl"
+
 MIN_SAMPLES = 80    # drop classes below this (too few to learn)
 MAX_SAMPLES = 600   # cap per class to reduce imbalance
 
