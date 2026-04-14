@@ -438,18 +438,18 @@ export default function Detect() {
   const status     = !cameraOn ? 'idle' : !handPresent ? 'no_hand' : isDetected ? 'detected' : bufFull ? 'no_mudra' : 'analyzing';
   const si         = STATUS[status];
   const confColor  = confidence >= 70 ? '#34d399' : confidence >= 45 ? '#fbbf24' : '#ef4444';
-  const accentColor = mode === 'single' ? '#7C3AED' : '#10B981';
-  const skeletonColor = mode === 'single' ? '#7C3AED' : '#10B981';
+  const accentColor = mode === 'single' ? 'var(--accent)' : '#10B981';
+  const skeletonColor = mode === 'single' ? 'var(--accent)' : '#10B981';
 
   return (
-    <div className="min-h-screen p-6" style={{ background: 'linear-gradient(135deg, #F8F7FF 0%, #EDE9FE 100%)' }}>
+    <div className="min-h-screen p-6" style={{ background: 'var(--bg)' }}>
       <div className="max-w-7xl mx-auto">
 
         {/* ── Header ── */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-100 mb-4 shadow-sm border border-violet-200">
-            <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-[3px] text-violet-600">Premium AI Detection</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--bg-card2)] mb-4 shadow-sm border border-[var(--border)]">
+            <div className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-[3px] text-[var(--accent)]">Premium AI Detection</span>
           </div>
           <h1 className="text-5xl font-black tracking-tight text-slate-900 mb-2">Mudra Detect</h1>
           <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
@@ -464,8 +464,8 @@ export default function Detect() {
               onClick={() => switchMode('single')}
               className="px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all"
               style={{
-                background: mode === 'single' ? 'linear-gradient(135deg, #7C3AED, #6D28D9)' : 'transparent',
-                color: mode === 'single' ? '#fff' : '#94A3B8',
+                background: mode === 'single' ? 'linear-gradient(135deg, #8B1A1A, #5D1111)' : 'transparent',
+                color: mode === 'single' ? '#fff' : 'var(--text-muted)',
               }}>
               ✋ Single Hand
             </button>
@@ -514,7 +514,7 @@ export default function Detect() {
             <div className="relative rounded-[40px] overflow-hidden shadow-2xl bg-slate-900"
               style={{
                 height: '65vh', minHeight: '480px',
-                border: isDetected ? `4px solid ${accentColor}` : '4px solid #DDD6FE',
+                border: isDetected ? `4px solid ${accentColor}` : '4px solid var(--border)',
                 transition: 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
                 boxShadow: isDetected ? `0 0 40px ${accentColor}40` : undefined,
               }}>
@@ -597,7 +597,7 @@ export default function Detect() {
                 </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center p-12 text-center">
-                  <div className="w-32 h-32 rounded-[40px] bg-violet-100/50 flex items-center justify-center mb-8 border border-violet-100 shadow-inner">
+                  <div className="w-32 h-32 rounded-[40px] bg-[var(--bg-card2)] flex items-center justify-center mb-8 border border-[var(--border)] shadow-inner">
                     <span className="text-5xl">{mode === 'double' ? '🤲' : '👋'}</span>
                   </div>
                   <h3 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">
@@ -641,7 +641,7 @@ export default function Detect() {
                 <div className="space-y-6">
                   <div className="flex items-start gap-4">
                     <div className="w-16 h-16 rounded-3xl flex items-center justify-center text-4xl shrink-0 shadow-sm border"
-                      style={{ background: mode === 'double' ? '#ECFDF5' : '#F5F3FF', borderColor: mode === 'double' ? '#A7F3D0' : '#DDD6FE' }}>
+                      style={{ background: mode === 'double' ? '#ECFDF5' : 'var(--bg)', borderColor: mode === 'double' ? '#A7F3D0' : 'var(--border)' }}>
                       {mudra.symbol}
                     </div>
                     <div>
@@ -664,7 +664,7 @@ export default function Detect() {
                   <div className="pt-4 border-t border-slate-100">
                     <h4 className="text-[10px] font-black uppercase tracking-[3px] text-slate-400 mb-2">Usage in Dance</h4>
                     <p className="text-[11px] font-bold text-slate-800 p-3 rounded-2xl border"
-                      style={{ background: mode === 'double' ? '#ECFDF5' : '#F5F3FF', borderColor: mode === 'double' ? '#A7F3D0' : '#DDD6FE' }}>
+                      style={{ background: mode === 'double' ? '#ECFDF5' : 'var(--bg)', borderColor: mode === 'double' ? '#A7F3D0' : 'var(--border)' }}>
                       {mudra.usage}
                     </p>
                   </div>
@@ -783,9 +783,9 @@ export default function Detect() {
                 </div>
               )}
               <div className="p-6 rounded-[32px] border"
-                style={{ background: modalMudra.isDouble ? '#ECFDF5' : '#F5F3FF', borderColor: modalMudra.isDouble ? '#A7F3D0' : '#DDD6FE' }}>
-                <h4 className="text-[10px] font-black uppercase tracking-[4px] mb-3" style={{ color: modalMudra.isDouble ? '#059669' : '#7C3AED' }}>Ritual Usage</h4>
-                <p className="text-sm font-black italic leading-relaxed" style={{ color: modalMudra.isDouble ? '#065F46' : '#4C1D95' }}>{modalMudra.usage}</p>
+                style={{ background: modalMudra.isDouble ? '#ECFDF5' : 'var(--bg)', borderColor: modalMudra.isDouble ? '#A7F3D0' : 'var(--border)' }}>
+                <h4 className="text-[10px] font-black uppercase tracking-[4px] mb-3" style={{ color: modalMudra.isDouble ? '#059669' : 'var(--accent)' }}>Ritual Usage</h4>
+                <p className="text-sm font-black italic leading-relaxed" style={{ color: modalMudra.isDouble ? '#065F46' : 'var(--accent)' }}>{modalMudra.usage}</p>
               </div>
               <button onClick={() => setShowModal(false)}
                 className="w-full py-5 rounded-[24px] text-white font-black text-[10px] uppercase tracking-[4px] transition-all hover:scale-[1.02] shadow-2xl"

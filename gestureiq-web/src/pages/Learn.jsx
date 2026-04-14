@@ -140,6 +140,9 @@ export default function Learn() {
     const lastResultTimeRef = useRef(Date.now());
     const holdAccumulatorRef = useRef(0);
     const lastFrameTimeRef = useRef(0);
+    const lowAccuracyFramesRef = useRef(0); // [PHASE 10] Blink Protection
+    const successLockRef = useRef(false);   // [PHASE 10] Mastered UI lock
+    const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
 
     const voiceEnabledRef = useRef(false);
     const lastWrongVoiceRef = useRef({ text: '', time: 0 });
@@ -358,6 +361,7 @@ export default function Learn() {
                     stableFramesRef.current = 0;
                     lastDetectedNameRef.current = '';
                     wrongMudraFramesRef.current = 0;
+                    lowAccuracyFramesRef.current = 0; // Reset on total hand loss
 
                     if (voiceEnabledRef.current) {
                         const now = Date.now();
@@ -455,7 +459,17 @@ export default function Learn() {
                     _isAdjusting: !locallyStable && !isStableAPI && accuracy === 0 && !wrongMsg,
                 };
 
-                setDetected(displayData);
+                // ── SUCCESS LOCK ─────────────────────────────────────────────
+                if (successLockRef.current) {
+                    isDetectingRef.current = false;
+                    return;
+                }
+
+                setDetected(prev => {
+                    // Prevent jitter if we just achieved success
+                    if (successLockRef.current) return prev;
+                    return displayData;
+                });
 
                 // ── VOICE — gating is now handled individually inside ──────────────────
                 if (voiceEnabledRef.current) {
@@ -525,13 +539,18 @@ export default function Learn() {
 
                 if (isGoodFrame) {
                     holdAccumulatorRef.current = Math.min(holdMs, holdAccumulatorRef.current + dt);
+                    lowAccuracyFramesRef.current = 0;
                 } else {
+                    lowAccuracyFramesRef.current++;
+                    
                     if (wrongMsg) {
                         // Wrong mudra — drain instantly
                         holdAccumulatorRef.current = 0;
-                    } else {
+                        lowAccuracyFramesRef.current = 0;
+                    } else if (lowAccuracyFramesRef.current > 10) {
+                        // Only drain if we've been inconsistent for > 10 frames (~2 seconds at 200ms)
                         const isPartialGood = isCorrectMudra && accuracy >= 62;
-                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.5 : 2.0));
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.3 : 1.5));
                     }
                 }
 
@@ -539,11 +558,19 @@ export default function Learn() {
                 if (!isGoodFrame && (isCorrectMudra && accuracy >= 62)) {
                     displayPct = Math.min(75, displayPct);
                 }
-                setHoldProgress(displayPct);
+                
+                // Functional update to avoid stale state flicker
+                setHoldProgress(() => {
+                    if (successLockRef.current) return 100;
+                    return displayPct;
+                });
 
-                if (holdAccumulatorRef.current >= holdMs && !masteredRef.current && !saveInProgressRef.current) {
+                // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
+                if (holdAccumulatorRef.current >= holdMs && !saveMutexRef.current) {
+                    saveMutexRef.current = true; // Set synchronously to block next interval ticks
                     masteredRef.current = true;
                     saveInProgressRef.current = true;
+                    successLockRef.current = true; // Lock UI at 100%
                     handleMudraMastered(selectedMudra.folder, accuracy);
                 }
 
@@ -631,6 +658,9 @@ export default function Learn() {
         setIsFrozen(false);
         setFrozenFrame(null);
         attemptsRef.current = 0;
+        successLockRef.current = false;
+        saveMutexRef.current = false; // Reset mutex for new mudra
+        lowAccuracyFramesRef.current = 0;
         setStage(STAGES.PRACTICE);
     };
 

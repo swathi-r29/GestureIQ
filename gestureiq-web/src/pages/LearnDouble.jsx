@@ -50,6 +50,13 @@ const DOUBLE_MUDRA_CONFIG = {
     sarpasiras: { level: 'Advanced', fingers: "Both hands flat and pressed together, wrists touching, fingers pointing forward like a double snake hood.", meaning: "Two snake heads", usage: "Twin serpents, guardians" },
 };
 
+// ── Mudras that naturally overlap (merged by MediaPipe) ─────────────────────
+const CROSS_MUDRAS = [
+    'anjali', 'karkata', 'kapotha', 'svastika', 'pushpaputa', 'utsanga', 
+    'shakata', 'shankha', 'pasha', 'kilaka', 'samputa', 'matsya', 'kurma', 
+    'varaha', 'garuda', 'nagabandha', 'khatwa', 'bherunda', 'sarpasiras'
+];
+
 const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
     folder,
     name: folder.charAt(0).toUpperCase() + folder.slice(1),
@@ -73,8 +80,8 @@ const PRACTICE_STEPS = [
 ];
 
 // ── Hand indicator badge ─────────────────────────────────────────────────────
-function HandsBadge({ handsDetected, isAnjali }) {
-    const isMerged = isAnjali && handsDetected === 1;
+function HandsBadge({ handsDetected, isCrossed }) {
+    const isMerged = isCrossed && handsDetected === 1;
     const color = (handsDetected === 2 || isMerged) ? '#4ade80' : handsDetected === 1 ? '#fbbf24' : '#f87171';
     const label = (handsDetected === 2 || isMerged) ? (isMerged ? '✓ Hands Merged' : '✓ Both hands') : handsDetected === 1 ? '⚠ One hand' : '✗ No hands';
     return (
@@ -113,6 +120,7 @@ export default function LearnDouble() {
     const [frozenFrame, setFrozenFrame] = useState(null);
     const [isFrozen, setIsFrozen] = useState(false);
     const [handsDetected, setHandsDetected] = useState(0);   // 0, 1, or 2
+    const [isSuccessLocked, setIsSuccessLocked] = useState(false);
 
     // ── Detection refs ────────────────────────────────────────────────────────
     const attemptsRef = useRef(0);
@@ -124,6 +132,9 @@ export default function LearnDouble() {
     const lastDetectedNameRef = useRef('');
     const wrongMudraFramesRef = useRef(0);
     const lostHandFramesRef = useRef(0);
+    const lowAccuracyFramesRef = useRef(0);
+    const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
+
 
     // ── Camera refs ───────────────────────────────────────────────────────────
     const videoRef = useRef(null);
@@ -211,10 +222,10 @@ export default function LearnDouble() {
                 });
 
                 landmarksRef.current = handMap;  // { Right: {...}, Left: {...} }
-                setHandsDetected(numFound);
+                setHandsDetected(prev => (prev !== numFound ? numFound : prev));
             } else {
                 landmarksRef.current = null;
-                setHandsDetected(0);
+                setHandsDetected(prev => (prev !== 0 ? 0 : prev));
             }
             ctx.restore();
         });
@@ -384,8 +395,9 @@ export default function LearnDouble() {
                     wrongMudraFramesRef.current = 0;
                 }
 
-                // Add "one hand missing" warning if applicable
-                if (Object.keys(handMap).length < 2) {
+                // Add "one hand missing" warning if applicable (not for crossed mudras)
+                const isCrossed = selectedMudra && CROSS_MUDRAS.includes(selectedMudra.folder);
+                if (Object.keys(handMap).length < 2 && !isCrossed) {
                     const missing = handMap['Right'] ? 'left' : 'right';
                     displayCorrections = [`Show your ${missing} hand — both hands needed for this mudra`, ...displayCorrections];
                 }
@@ -443,7 +455,18 @@ export default function LearnDouble() {
                 }
 
                 const isHighAccuracy = accuracy >= ACCURACY_THRESHOLD;
-                const isGoodFrame = !wrongMsg && data.detected && visible && isHighAccuracy;
+                let isGoodFrame = !wrongMsg && data.detected && visible && isHighAccuracy;
+                let isFrozen = false;
+
+                // Blink Protection: If we were previously good, allow 10 frames (~500ms) of noise or hand-loss
+                if (!isGoodFrame && holdAccumulatorRef.current > 0 && !wrongMsg) {
+                    if (lowAccuracyFramesRef.current < 10) {
+                        lowAccuracyFramesRef.current++;
+                        isFrozen = true; // Freeze progress, don't drain
+                    }
+                } else if (isGoodFrame) {
+                    lowAccuracyFramesRef.current = 0;
+                }
 
                 const nowTime = Date.now();
                 const dt = (lastFrameTimeRef.current > 0) ? (nowTime - lastFrameTimeRef.current) : 200;
@@ -451,15 +474,16 @@ export default function LearnDouble() {
 
                 if (isGoodFrame) {
                     holdAccumulatorRef.current = Math.min(HOLD_DURATION_MS, holdAccumulatorRef.current + dt);
-                } else {
-                    // DRAIN LOGIC (Much more forgiving now)
+                } else if (!isFrozen) {
+                    // ── DRAIN LOGIC ( truly failing after the 6-frame buffer ) ─────
+                    lowAccuracyFramesRef.current = 0; 
                     if (wrongMsg) {
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0); // Wrong mudra drains fast
                     } else if (isHighAccuracy && !visible) {
-                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.2); // Just lost hands? Drain very slowly
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.1); // Missing hands drains very slowly
                     } else {
                         const isPartialGood = data.detected && accuracy >= 60;
-                        const drainRate = isPartialGood ? 0.3 : 1.0;
+                        const drainRate = isPartialGood ? 0.2 : 1.0;
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * drainRate);
                     }
                 }
@@ -467,9 +491,13 @@ export default function LearnDouble() {
                 const displayPct = (holdAccumulatorRef.current / HOLD_DURATION_MS) * 100;
                 setHoldProgress(displayPct);
 
-                if (holdAccumulatorRef.current >= HOLD_DURATION_MS && !masteredRef.current && !saveInProgressRef.current) {
+                // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
+                if (holdAccumulatorRef.current >= HOLD_DURATION_MS && !saveMutexRef.current) {
+                    saveMutexRef.current = true; // Set synchronously to block next interval ticks
                     masteredRef.current = true;
                     saveInProgressRef.current = true;
+                    setIsSuccessLocked(true);
+                    setTimeout(() => setIsSuccessLocked(false), 2000); // 2s lock
                     handleMudraMastered(selectedMudra.folder, accuracy);
                 }
 
@@ -546,6 +574,7 @@ export default function LearnDouble() {
         setIsFrozen(false);
         setFrozenFrame(null);
         attemptsRef.current = 0;
+        saveMutexRef.current = false; // Reset mutex for new mudra
         setStage(STAGES.PRACTICE);
     };
 
@@ -566,9 +595,9 @@ export default function LearnDouble() {
     const fingerCorrs = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
     const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
     const isAdjusting = detected._isAdjusting;
-    const isAnjali = selectedMudra?.folder === 'anjali';
+    const isCrossed = selectedMudra && CROSS_MUDRAS.includes(selectedMudra.folder);
     // Consistent with hold logic: if accuracy is high, it's correct.
-    const isCorrect = detected.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMudraMsg && (isAnjali || fingerCorrs.length === 0);
+    const isCorrect = detected.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMudraMsg && (isCrossed || fingerCorrs.length === 0);
     const fingerGuideText = selectedMudra ? (DOUBLE_MUDRA_CONFIG[selectedMudra.folder]?.fingers || '') : '';
 
     if (loading) return (
@@ -892,7 +921,7 @@ export default function LearnDouble() {
                                         </div>
 
                                         {/* Both-hands status badge */}
-                                        <HandsBadge handsDetected={handsDetected} isAnjali={isAnjali} />
+                                        <HandsBadge handsDetected={handsDetected} isCrossed={isCrossed} />
 
                                         {/* Hold progress */}
                                         {holdProgress > 0 && (
@@ -1038,7 +1067,7 @@ export default function LearnDouble() {
                                     <div className="text-[9px] tracking-[4px] uppercase text-center w-full py-3 border rounded-xl"
                                         style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
                                         {cameraOn
-                                            ? (handsDetected < 2 && !isAnjali)
+                                            ? (handsDetected < 2 && !isCrossed)
                                                 ? `⚠ Show both hands — ${handsDetected}/2 detected`
                                                 : isAdjusting
                                                     ? '⟳ Stabilizing — hold both hands steady'

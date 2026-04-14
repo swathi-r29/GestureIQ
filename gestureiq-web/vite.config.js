@@ -36,10 +36,13 @@ export default defineConfig({
     proxy: {
       // ── Flask / AI Services (Port 5001) ──
       '/api/predict':          { target: 'http://127.0.0.1:5001', changeOrigin: true },
+      '/api/predict_double':   { target: 'http://127.0.0.1:5001', changeOrigin: true },
       '/api/detect_frame':     { target: 'http://127.0.0.1:5001', changeOrigin: true },
       '/api/detect_landmarks': { target: 'http://127.0.0.1:5001', changeOrigin: true },
+      '/api/detect_double_landmarks': { target: 'http://127.0.0.1:5001', changeOrigin: true },
       '/api/evaluate_session': { target: 'http://127.0.0.1:5001', changeOrigin: true },
       '/api/session_report':   { target: 'http://127.0.0.1:5001', changeOrigin: true },
+      '/api/landmarks':        { target: 'http://127.0.0.1:5001', changeOrigin: true },
       '/mudra_data':           { target: 'http://127.0.0.1:5001', changeOrigin: true },
 
       // ── Node.js Backend Services (Port 5000) ──
