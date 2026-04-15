@@ -1188,8 +1188,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                         for i in range(21)]
 
         features = extract_features(smooth_lm, label=label)
-        if len(features) != 82:
-            print(f"[ERROR] Feature size mismatch: Expected 82, got {len(features)}")
+        if len(features) != 83:
+            print(f"[ERROR] Feature size mismatch: Expected 83, got {len(features)}")
             return {"detected": False, "feedback": "Feature error"}
 
         raw_probs  = model.predict_proba([features])[0]
@@ -1413,9 +1413,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         else:
             # Smooth Fall (Stability)
             alpha_smooth = 0.15
-            st["smooth_acc"] = (st["smooth_acc"] * (1.15 - 0.15)) + (total_accuracy * 0.15) # Simplified EMA logic check
-            # Correction: EMA formula is (old * (1-alpha)) + (new * alpha)
-            st["smooth_acc"] = (st["smooth_acc"] * (1.0 - 0.15)) + (total_accuracy * 0.15)
+            st["smooth_acc"] = (st["smooth_acc"] * (1.0 - alpha_smooth)) + (total_accuracy * alpha_smooth)
         
         # Guard against rapid drops
         if st["smooth_acc"] < st["prev_display"]:
@@ -2192,7 +2190,7 @@ def detect_double_landmarks():
 
             else:
                 # ML disagrees — let geometry provide a rescue path
-                if geo_score >= 65:
+                if geo_score >= 50:
                     # Geometry strongly suggests the right mudra; rescue the detection.
                     # Blend: 75% Geometry + 25% AI (to respect the ML's uncertainty)
                     raw_accuracy = round(geo_score * 0.75 + conf * 0.25, 1)

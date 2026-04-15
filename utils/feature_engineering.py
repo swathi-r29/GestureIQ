@@ -77,6 +77,9 @@ def extract_features(landmarks, label="Right"):
     for i, t in enumerate(tips):
         features.append(pts[t][1] - pts[mcp[i]][1])
 
-    # - 1 Thumb-Spread ratio removed to maintain compatibility with 82-dim model.
-    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 4 (gaps) + 5 (curls) = 82
+    # - 1 Thumb-Spread ratio (Distance between thumb tip and pinky tip)
+    spread = get_distance(pts[4], pts[20])
+    features.append(spread)
+
+    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 4 (gaps) + 5 (curls) + 1 (spread) = 83
     return features

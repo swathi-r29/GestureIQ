@@ -10,7 +10,7 @@
 //            Telugu (te-IN), Kannada (kn-IN), Malayalam (ml-IN)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 
 // ── Voice priority levels ─────────────────────────────────────────────────────
 const PRIO = {
@@ -92,45 +92,25 @@ export const TRANSLATIONS = {
         "Correct! Great form.": "சரியானது! அருமையான கோலம்",
         "Try Again — almost there!": "மீண்டும் முயற்சிக்கவும், கிட்டத்தட்ட சரியாக உள்ளது",
         "Try Again — adjust your hand position.": "மீண்டும் முயற்சிக்கவும், கையின் நிலையை சரிசெய்யவும்",
+        "Bend your ring finger fully": "மோதிர விரலை முழுமையாக மடக்கவும்",
+        "Bend your ring finger more": "மோதிர விரலை மேலும் மடக்கவும்",
         "Straighten your index finger": "ஆட்காட்டி விரலை நேராக்குங்கள்",
         "Straighten your middle finger": "நடு விரலை நேராக்குங்கள்",
         "Straighten your ring finger": "மோதிர விரலை நேராக்குங்கள்",
         "Straighten your little finger": "சிறு விரலை நேராக்குங்கள்",
-        "Extend your thumb outward": "கட்டை விரலை வெளியே நீட்டுங்கள்",
-        "Curl your index finger more": "ஆட்காட்டி விரலை மேலும் மடக்குங்கள்",
-        "Curl your middle finger more": "நடு விரலை மேலும் மடக்குங்கள்",
-        "Curl your ring finger more": "மோதிர விரலை மேலும் மடக்குங்கள்",
-        "Curl your little finger more": "சிறு விரலை மேலும் மடக்குங்கள்",
         "Bend your thumb inward": "கட்டை விரலை உள்ளே மடக்குங்கள்",
-        "Relax your index finger slightly": "ஆட்காட்டி விரலை சற்று தளர்த்துங்கள்",
-        "Relax your middle finger slightly": "நடு விரலை சற்று தளர்த்துங்கள்",
-        "Relax your ring finger slightly": "மோதிர விரலை சற்று தளர்த்துங்கள்",
-        "Relax your little finger slightly": "சிறு விரலை சற்று தளர்த்துங்கள்",
-        "Relax your thumb slightly": "கட்டை விரலை சற்று தளர்த்துங்கள்",
-        "Press your thumb against your ring finger": "கட்டை விரலை மோதிர விரலில் அழுத்துங்கள்",
-        "Bring all fingertips together to a point": "அனைத்து விரல் நுனிகளையும் ஒரே இடத்தில் சேர்க்கவும்",
-        "Press all fingers tightly together — no gaps": "அனைத்து விரல்களையும் இறுக்கமாக சேர்த்து பிடிக்கவும்",
-        "Spread index and middle finger apart like scissors": "ஆட்காட்டி மற்றும் நடு விரலை கத்தரிக்கோல் போல் பரப்புங்கள்",
-        "Spread all five fingers wide apart like a blooming lotus": "அனைத்து விரல்களையும் அகல விரிக்கவும்",
-        "Curve ALL fingers inward — imagine holding a large mango": "அனைத்து விரல்களையும் உள்நோக்கி வளையுங்கள்",
-        "Raise your little finger straight up": "சிறு விரலை நேரே மேலே தூக்குங்கள்",
-        "Raise your thumb straight up": "கட்டை விரலை நேரே மேலே தூக்குங்கள்",
+        "Bend your ring finger all the way to your palm": "மோதிர விரலை உள்ளங்கை வரை மடக்கவும்",
     },
     'hi': {
         "Show your hand to the camera": "अपना हाथ कैमरे के सामने रखें",
         "Good! Now hold this position.": "अच्छा! अब इस स्थिति को बनाए रखें",
         "Correct! Great form.": "सही है! बहुत अच्छा",
+        "Bend your ring finger more": "अपनी अनामिका उंगली को और मोड़ें",
         "Straighten your index finger": "अपनी तर्जनी उंगली सीधी करें",
         "Straighten your middle finger": "अपनी मध्यमा उंगली सीधी करें",
         "Straighten your ring finger": "अपनी अनामिका उंगली सीधी करें",
         "Straighten your little finger": "अपनी कनिष्ठा उंगली सीधी करें",
-        "Curl your index finger more": "तर्जनी उंगली को अधिक मोड़ें",
-        "Curl your middle finger more": "मध्यमा उंगली को अधिक मोड़ें",
-        "Curl your ring finger more": "अनामिका उंगली को अधिक मोड़ें",
-        "Curl your little finger more": "कनिष्ठा उंगली को अधिक मोड़ें",
         "Bend your thumb inward": "अंगूठे को अंदर की ओर मोड़ें",
-        "Press your thumb against your ring finger": "अंगूठे को अनामिका उंगली से दबाएं",
-        "Bring all fingertips together to a point": "सभी उंगलियों की नोक को एक बिंदु पर लाएं",
     }
 };
 
@@ -234,7 +214,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     const lastScoreRef = useRef(0);
     const lastMudraRef = useRef('');
 
-    useEffect(() => { langRef.current = language; }, [language]);
+    useEffect(() => {
+        langRef.current = language;
+        // Warm up voices
+        window.speechSynthesis.getVoices();
+        const handleVoices = () => window.speechSynthesis.getVoices();
+        window.speechSynthesis.addEventListener('voiceschanged', handleVoices);
+        return () => window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
+    }, [language]);
 
     const _doSpeak = useCallback((message, priority = PRIO.LOW, opts = {}) => {
         if (!unlockedRef.current || !message) return;
@@ -292,11 +279,10 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     }, [_doSpeak]);
 
     const unlock = useCallback(() => {
+        unlockedRef.current = true; // Immediate unlock on user interaction
         const dummy = new SpeechSynthesisUtterance(' ');
         dummy.volume = 0;
-        dummy.onend = () => { unlockedRef.current = true; };
         window.speechSynthesis.speak(dummy);
-        setTimeout(() => { unlockedRef.current = true; }, 300);
     }, []);
 
     const test = useCallback(() => {
@@ -325,7 +311,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         return `${name} mudra. ${config.fingers}`;
     }, []);
 
-    const announce = {
+    const announce = useMemo(() => ({
         cameraActive: (mudraName) => {
             const inst = getInstruction(mudraName);
             _doSpeak(inst, PRIO.HIGH);
@@ -342,7 +328,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             _doSpeak(inst, PRIO.HIGH);
         },
         
-        mastered: ({ mudra, score, attempts }) => {
+        mastered: ({ mudra, score }) => {
             const lang = langRef.current;
             const name = getMudraName(lang, mudra);
             if (lang === 'ta') {
@@ -361,17 +347,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             const currentScore = data.score || 0;
             const currentMudra = data.matchedMudra || 'No Hand';
 
-            // Detect Transitions
             const isStatusTransition = currentStatus !== lastStatusRef.current;
             const isMudraTransition = currentMudra !== lastMudraRef.current;
             const scoreJump = Math.abs(currentScore - lastScoreRef.current) > 20;
 
-            // Update refs for next frame
             lastStatusRef.current = currentStatus;
             lastScoreRef.current = currentScore;
             lastMudraRef.current = currentMudra;
 
-            // Priority 1: Mastery (95+) - Transition Sensitive
             if (currentScore >= 95) {
                 if (isStatusTransition || scoreJump || now - lastOkVoiceRef.current > 10000) {
                     lastOkVoiceRef.current = now;
@@ -381,9 +364,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 return;
             }
 
-            // Priority 2: Correct (75+)
             if (currentScore >= 75) {
-                // Only speak if we just reached this state or if it's been a long time
                 if (isStatusTransition || now - lastOkVoiceRef.current > 8000) {
                     lastOkVoiceRef.current = now;
                     const msgs = { en: "Good! Now hold this position.", ta: "நல்லது! இந்த நிலையை பிடித்திருங்கள்.", hi: "अच्छा! अब इस स्थिति को बनाए रखें।" };
@@ -392,12 +373,9 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 return;
             }
 
-            // Priority 3: Specific Corrections
             if (data.corrections && data.corrections.length > 0) {
                 const correction = data.corrections[0];
                 const translated = translate(lang, correction);
-                
-                // Only speak if it's a new correction or it's been a while (5s)
                 if (translated !== lastCorrectionRef.current || now - lastCorrectionTimeRef.current > 5000) {
                     lastCorrectionRef.current = translated;
                     lastCorrectionTimeRef.current = now;
@@ -406,7 +384,6 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 return;
             }
 
-            // Priority 4: Wrong Mudra (if is_stable is true but it's not the target)
             if (data.is_stable && currentMudra !== 'No Hand' && currentMudra !== 'Joining...') {
                 if (isMudraTransition || now - lastCorrectionTimeRef.current > 7000) {
                     lastCorrectionTimeRef.current = now;
@@ -421,7 +398,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             }
         },
         resetWrongGate: () => { wrongMudraCountRef.current = 0; }
-    };
+    }), [getInstruction, _doSpeak, speak]);
 
     return { speak, stop: () => window.speechSynthesis.cancel(), test, unlock, announce, getInstruction };
 }

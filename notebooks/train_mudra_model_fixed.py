@@ -23,13 +23,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
 # ── Paths ─────────────────────────────────────────────────────────────────
-DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
-OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-MODEL_PATH  = "../models/mudra_model.pkl"
+#DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
+#OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+#MODEL_PATH  = "../models/mudra_model.pkl"
 
-#DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
-#OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-#MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
+DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
+OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
 # ── Balance settings ──────────────────────────────────────────────────────
 MIN_SAMPLES = 50 # drop mudras with fewer samples (vyaghra=30, palli=25 → removed)
 MAX_SAMPLES = 700   # cap overrepresented mudras (katakamukha 1572 → 700)

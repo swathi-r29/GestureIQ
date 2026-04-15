@@ -77,8 +77,8 @@ const MUDRAS = [
     fingers: MUDRA_CONFIG[m.folder]?.fingers || '',
 }));
 
-const STABILITY_THRESHOLD = 3;
-const WRONG_MUDRA_GATE = 5;
+const STABILITY_THRESHOLD = 10;
+const WRONG_MUDRA_GATE = 3;
 const ACCURACY_THRESHOLD = 75;
 const HOLD_DURATION_MS = 1200;
 
@@ -141,6 +141,7 @@ export default function Learn() {
     const lastResultTimeRef = useRef(Date.now());
     const holdAccumulatorRef = useRef(0);
     const lastFrameTimeRef = useRef(0);
+    const graceRef = useRef(0);
     const lowAccuracyFramesRef = useRef(0); // [PHASE 10] Blink Protection
     const successLockRef = useRef(false);   // [PHASE 10] Mastered UI lock
     const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
@@ -423,17 +424,21 @@ export default function Learn() {
                 const accuracy = data.accuracy || 0;
                 const corrections = data.corrections || [];
 
-                if (detectedName && detectedName === consecutiveRef.current.name) {
+                // RELAXED 10-FRAME GATE (with Grace Window)
+                const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+                if (detectedName) graceRef.current = 0; else graceRef.current++;
+
+                if (effectiveName && effectiveName === consecutiveRef.current.name) {
                     consecutiveRef.current.count++;
                 } else {
-                    consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
+                    consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
                 }
 
                 const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
 
-                const wrongMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-
-                const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+                const isWrongMudraMsg = (c) => typeof c === 'string' && (c.toLowerCase().startsWith('wrong mudra') || c.toLowerCase().includes('instead of'));
+                const wrongMsg = corrections.find(c => isWrongMudraMsg(c));
+                const fingerCorr = corrections.filter(c => typeof c === 'string' && !isWrongMudraMsg(c));
 
                 // ── FIX: Wrong mudra frame counter (for voice gating only) ────
                 // The UI always shows wrongMsg immediately when backend sends it.
@@ -482,11 +487,11 @@ export default function Learn() {
                     } else {
                         stableCorrFramesRef.current = 0;
                     }
-                    const stableFingerCorr = stableCorrFramesRef.current >= 3 ? fingerCorr[0] : null;
+                    const stableFingerCorr = stableCorrFramesRef.current >= 2 ? fingerCorr[0] : null;
 
                     if (stableWrongMsg) {
                         const prev = lastWrongVoiceRef.current;
-                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4500) {
+                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4000) {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
                             const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
                             const tgtMatch = stableWrongMsg.match(/(?:target is|instead of) ([a-zA-Z]+)/i);
@@ -510,9 +515,9 @@ export default function Learn() {
                             announce.raw(voiceMsg, 3);
                         }
                     } else if (stableFingerCorr) {
-                        // Relaxed stability for corrections — speaks as long as error is consistent for 3 frames
+                        // Relaxed stability for corrections — speaks as long as error is consistent for 2 frames
                         const prev = lastCorrVoiceRef.current;
-                        if (stableFingerCorr !== prev.text || (now - prev.time) > 5000) {
+                        if (stableFingerCorr !== prev.text || (now - prev.time) > 4000) {
                             lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
                             announce.raw(translate(lang, stableFingerCorr), 1);
                         }

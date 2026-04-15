@@ -202,7 +202,7 @@ const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
 }));
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const STABILITY_THRESHOLD    = 1;
+const STABILITY_THRESHOLD    = 10;
 const WRONG_MUDRA_GATE       = 5;
 const ACCURACY_THRESHOLD     = 68;   // ← lowered from 75 (double-hand harder) [Ref IEEE ICICV 2021]
 const MAINTENANCE_THRESHOLD  = 60;   // ← lowered from 68
@@ -315,6 +315,7 @@ export default function LearnDouble() {
     const lowAccuracyFramesRef = useRef(0);
     const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
     const peakAccuracyRef = useRef(0);      // Tracks maximum accuracy achieved during the "Hold" period
+    const graceRef = useRef(0);
 
 
     // ── Camera refs ───────────────────────────────────────────────────────────
@@ -335,6 +336,7 @@ export default function LearnDouble() {
     const lastCorrVoiceRef = useRef({ text: '', time: 0 });
     const lastOkVoiceRef = useRef(0);
     const lastNoHandRef = useRef(0);
+    const stableCorrFramesRef = useRef(0);
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
 
@@ -595,18 +597,21 @@ export default function LearnDouble() {
                 }
 
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
-                if (detectedName && detectedName === consecutiveRef.current.name) {
+                // RELAXED 10-FRAME GATE (with Grace Window)
+                const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+                if (detectedName) graceRef.current = 0; else graceRef.current++;
+
+                if (effectiveName && effectiveName === consecutiveRef.current.name) {
                     consecutiveRef.current.count++;
                     // Track peak accuracy during stability
                     if (accuracy > peakAccuracyRef.current) {
                         peakAccuracyRef.current = accuracy;
                     }
                 } else {
-                    consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
+                    consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
                     wrongMudraFramesRef.current = 0;
                     peakAccuracyRef.current = 0; // Reset peak for new/wrong mudra
                 }
-
                 const isWrongMudraMsg = (c) => typeof c === 'string' && (c.toLowerCase().startsWith('wrong mudra') || c.toLowerCase().includes('instead of'));
                 const wrongMsg = corrections.find(c => isWrongMudraMsg(c));
                 const fingerCorr = corrections.filter(c => !isWrongMudraMsg(c));
@@ -636,6 +641,56 @@ export default function LearnDouble() {
                     handleMudraMastered(selectedMudra.folder, accuracy);
                     isDetectingRef.current = false;
                     return;
+                }
+
+                // ── VOICE — gating is now handled individually inside ──────────────────
+                if (voiceEnabledRef.current) {
+                    const now = Date.now();
+                    const WRONG_MUDRA_GATE = 3;
+                    const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
+
+                    // Small gate for finger corrections to avoid jitter
+                    if (fingerCorr.length > 0) {
+                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
+                    } else {
+                        stableCorrFramesRef.current = 0;
+                    }
+                    const stableFingerCorr = stableCorrFramesRef.current >= 2 ? fingerCorr[0] : null;
+
+                    if (stableWrongMsg) {
+                        const prev = lastWrongVoiceRef.current;
+                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4000) {
+                            lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
+                            const capitalize = (s) => (s && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+                            
+                            // For double hand, we simplify the wrong mudra voice as it's complex to name both
+                            let voiceMsg = lang === 'ta'
+                                ? `தவறான வடிவம். ஒருமுறை சரிபார்க்கவும்.`
+                                : lang === 'hi'
+                                    ? `गलत मुद्रा। अपनी उंगलियों को ठीक करें।`
+                                    : `Wrong formation. Please check your hand positions.`;
+
+                            if (fingerCorr.length > 0) {
+                                voiceMsg += ` ${translate(lang, fingerCorr[0])}`;
+                                lastCorrVoiceRef.current = { text: fingerCorr[0], time: now };
+                            }
+                            announce.raw(voiceMsg, 3);
+                        }
+                    } else if (stableFingerCorr) {
+                        const prev = lastCorrVoiceRef.current;
+                        if (stableFingerCorr !== prev.text || (now - prev.time) > 4000) {
+                            lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
+                            announce.raw(translate(lang, stableFingerCorr), 1);
+                        }
+                    } else if (locallyStable && data.detected && accuracy >= 75 && fingerCorr.length === 0 && !stableWrongMsg) {
+                        if (now - lastOkVoiceRef.current > 8000) {
+                            lastOkVoiceRef.current = now;
+                            const msg = lang === 'ta' ? 'மிகச்சிறப்பு! அப்படியே பிடியுங்கள்'
+                                : lang === 'hi' ? 'सही है! बहुत अच्छा'
+                                    : 'Correct! Now hold this position.';
+                            announce.raw(msg, 3);
+                        }
+                    }
                 }
 
                 const displayData = {
