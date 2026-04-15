@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth }     from '../context/AuthContext';
+import { useVoiceGuide } from '../hooks/useVoiceGuide';
 import io from 'socket.io-client';
+import { checkGeometricAnchors } from '../utils/geometricRules';
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
@@ -74,8 +76,9 @@ const STATUS = {
 };
 
 export default function Detect() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
+  const { user }       = useAuth();
+  const navigate       = useNavigate();
+  const { announce, unlock } = useVoiceGuide();
 
   // ── Mode toggle ────────────────────────────────────────────
   const [mode, setMode] = useState('single'); // 'single' | 'double'
@@ -111,10 +114,11 @@ export default function Detect() {
   const modalTimerRef  = useRef(null);
   const engineErrCount = useRef(0);
   const frameCapRef    = useRef(null); // for double mode frame capture
+  const consecutiveRef = useRef({ name: null, count: 0 });
+  const graceRef       = useRef(0); // For stability grace window (hysteresis)
 
-  const BUFFER_SIZE = 8;
-  const MIN_VOTES   = 7;
-  const MIN_CONF    = 20;
+  const STABILITY_THRESHOLD = 10;
+  const MIN_CONF            = 20;
 
   useEffect(() => {
     if (!user || user.role !== 'student') { navigate('/'); return; }
@@ -133,7 +137,7 @@ export default function Detect() {
 
   // ── Modal + voice on detection ─────────────────────────────
   useEffect(() => {
-    window.speechSynthesis.cancel();
+    // [RECTIFICATION] Manual cancel removed to prevent interruption on hand loss
     if (detectedKey && detectedKey !== prevKeyRef.current) {
       prevKeyRef.current = detectedKey;
       const data = mode === 'single' ? MUDRA_DATA[detectedKey] : DOUBLE_MUDRA_DATA[detectedKey];
@@ -143,11 +147,10 @@ export default function Detect() {
       modalTimerRef.current = setTimeout(() => {
         setModalMudra({ ...data, isDouble: mode === 'double' });
         setShowModal(true);
+        
+        // [RECTIFICATION] Use Unified Hook and Ultra Priority (4)
         const text = `${data.name} mudra detected. ${data.meaning}. Used for ${data.usage}.`;
-        const utt  = new SpeechSynthesisUtterance(text);
-        utt.lang = 'en-IN'; utt.rate = 0.9;
-        window.speechSynthesis.speak(utt);
-        modalTimerRef.current = setTimeout(() => setShowModal(false), 4000);
+        announce.raw(text, 4, { onEnd: () => setShowModal(false) });
       }, 1500);
     }
     if (!detectedKey) {
@@ -242,6 +245,7 @@ export default function Detect() {
 
   // ── Single-hand detection ──────────────────────────────────
   const runSingleDetection = useCallback(async () => {
+    if (showModal) return; // [LOCK] Pause while explaining
     if (inFlightRef.current) return;
     
     // GATEKEEPER: If module is off, skip detection API call
@@ -254,10 +258,8 @@ export default function Detect() {
     const lms = landmarksRef.current;
     if (!lms || lms.length !== 21) {
       setHandPresent(false);
-      bufferRef.current = [];
-      lockRef.current   = { name: null, until: 0 };
+      consecutiveRef.current = { name: null, count: 0 };
       setDetectedKey(null);
-      prevKeyRef.current = null;
       setConfidence(0);
       setBufSize(0);
       return;
@@ -274,27 +276,28 @@ export default function Detect() {
       const json = await res.json();
       setEngineOk(true);
       engineErrCount.current = 0;
+      
       const isValid = (json.confidence || 0) >= MIN_CONF && !!json.name;
-      bufferRef.current.push(isValid ? json.name : '__none__');
-      if (bufferRef.current.length > BUFFER_SIZE) bufferRef.current.shift();
-      setBufSize(bufferRef.current.length);
-      const votes = {};
-      bufferRef.current.forEach(n => { votes[n] = (votes[n] || 0) + 1; });
-      const sorted  = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-      const topName = sorted[0]?.[0] ?? '__none__';
-      const topVot  = sorted[0]?.[1] ?? 0;
-      const now     = Date.now();
-      if (topVot >= MIN_VOTES && topName !== '__none__') {
-        if (lockRef.current.name && lockRef.current.name !== topName)
-          bufferRef.current = bufferRef.current.filter(n => n === topName);
-        lockRef.current = { name: topName, until: now + 800 };
-        setDetectedKey(topName);
-        const v2 = bufferRef.current.filter(n => n === topName).length;
-        setConfidence(Math.min(95, (v2 / BUFFER_SIZE) * 100 + (json.confidence || 0) * 0.3));
-      } else if (bufferRef.current.length >= BUFFER_SIZE && now > lockRef.current.until) {
-        setDetectedKey(null); setConfidence(0);
-        lockRef.current = { name: null, until: 0 };
+      const detectedName = isValid ? json.name : null;
+
+      // RELAXED 10-FRAME GATE (with Grace Window)
+      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+      if (detectedName) graceRef.current = 0; else graceRef.current++;
+
+      if (effectiveName && effectiveName === consecutiveRef.current.name) {
+        consecutiveRef.current.count++;
+      } else {
+        consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
       }
+
+      if (consecutiveRef.current.count >= STABILITY_THRESHOLD) {
+        setDetectedKey(consecutiveRef.current.name);
+        setConfidence(Math.min(98, 85 + (json.confidence || 0) * 0.15));
+      } else {
+        setDetectedKey(null);
+        setConfidence(0);
+      }
+      setBufSize(consecutiveRef.current.count);
       setTop3(json.top3 || []);
     } catch {
       engineErrCount.current++;
@@ -306,6 +309,7 @@ export default function Detect() {
 
   // ── Double-hand detection ──────────────────────────────────
   const runDoubleDetection = useCallback(async () => {
+    if (showModal) return; // [LOCK] Pause while explaining
     if (inFlightRef.current) return;
 
     // GATEKEEPER: If module is off, skip detection API call
@@ -318,18 +322,16 @@ export default function Detect() {
     const results = landmarksRef.current;
     const count   = results?.multiHandLandmarks?.length || 0;
 
-    if (count < 2) {
-      setHandPresent(count > 0);
-      setDoubleMsg(count === 0 ? 'Show both hands to the camera' : 'Show second hand too');
-      if (count === 0) {
-        bufferRef.current = [];
-        setDetectedKey(null);
-        prevKeyRef.current = null;
-        setConfidence(0);
-      }
+    if (count === 0) {
+      setHandPresent(false);
+      setDoubleMsg("Please bring both hands into view.");
+      consecutiveRef.current = { name: null, count: 0 };
+      setDetectedKey(null);
+      setConfidence(0);
       setBufSize(0);
       return;
     }
+
 
     setHandPresent(true);
     setDoubleMsg('Analyzing both hands…');
@@ -348,30 +350,37 @@ export default function Detect() {
       setEngineOk(true);
       engineErrCount.current = 0;
 
-      const isValid = json.detected && json.confidence >= 40 && !!json.name;
-      bufferRef.current.push(isValid ? json.name : '__none__');
-      if (bufferRef.current.length > BUFFER_SIZE) bufferRef.current.shift();
-      setBufSize(bufferRef.current.length);
+      let detectedName = json.detected && json.confidence >= 40 ? json.name : null;
 
-      const votes = {};
-      bufferRef.current.forEach(n => { votes[n] = (votes[n] || 0) + 1; });
-      const sorted  = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-      const topName = sorted[0]?.[0] ?? '__none__';
-      const topVot  = sorted[0]?.[1] ?? 0;
-      const now     = Date.now();
-
-      if (topVot >= MIN_VOTES && topName !== '__none__') {
-        if (lockRef.current.name && lockRef.current.name !== topName)
-          bufferRef.current = bufferRef.current.filter(n => n === topName);
-        lockRef.current = { name: topName, until: now + 800 };
-        setDetectedKey(topName);
-        setConfidence(Math.round(json.confidence || 0));
-        setDoubleMsg('✓ Double-hand mudra identified!');
-      } else if (bufferRef.current.length >= BUFFER_SIZE && now > lockRef.current.until) {
-        setDetectedKey(null); setConfidence(0);
-        lockRef.current = { name: null, until: 0 };
-        setDoubleMsg('Keep both hands visible and steady');
+      // GEOMETRIC OVERRIDE
+      if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
+        const geo = checkGeometricAnchors(detectedName, results.multiHandLandmarks);
+        if (!geo.isValid) {
+          detectedName = null;
+          setDoubleMsg(geo.corrections[0] || "Adjust your hand position");
+        }
       }
+
+      // RELAXED 10-FRAME GATE (with Grace Window)
+      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+      if (detectedName) graceRef.current = 0; else graceRef.current++;
+
+      if (effectiveName && effectiveName === consecutiveRef.current.name) {
+        consecutiveRef.current.count++;
+      } else {
+        consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
+      }
+
+      if (consecutiveRef.current.count >= 4) { // Insta-Gate (4 frames)
+        setDetectedKey(consecutiveRef.current.name);
+        setConfidence(Math.round(json.confidence || 0));
+        setDoubleMsg(`✓ ${consecutiveRef.current.name} identified!`);
+      } else {
+        setDetectedKey(null);
+        setConfidence(0);
+        if (!detectedName) setDoubleMsg('Analyzing both hands...');
+      }
+      setBufSize(consecutiveRef.current.count);
       setTop3(json.top3 || []);
     } catch {
       engineErrCount.current++;
@@ -381,8 +390,10 @@ export default function Detect() {
     }
   }, [captureFrame]);
 
+
   // ── Camera start / stop ────────────────────────────────────
   const startCamera = async () => {
+    unlock(); // Enable voice engine on user gesture
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
       streamRef.current = stream;
@@ -408,6 +419,7 @@ export default function Detect() {
   // ── Switch mode — stop camera first ───────────────────────
   const switchMode = (m) => {
     if (m === mode) return;
+    unlock(); // Enable voice engine on mode switch
     stopCamera();
     setMode(m);
     setDetectedKey(null);
@@ -434,8 +446,9 @@ export default function Detect() {
   // ── Derived ────────────────────────────────────────────────
   const mudra      = detectedKey ? (mode === 'single' ? MUDRA_DATA[detectedKey] : DOUBLE_MUDRA_DATA[detectedKey]) : null;
   const isDetected = !!(detectedKey && mudra);
-  const bufFull    = bufSize >= BUFFER_SIZE;
+  const bufFull    = bufSize >= STABILITY_THRESHOLD;
   const status     = !cameraOn ? 'idle' : !handPresent ? 'no_hand' : isDetected ? 'detected' : bufFull ? 'no_mudra' : 'analyzing';
+
   const si         = STATUS[status];
   const confColor  = confidence >= 70 ? '#34d399' : confidence >= 45 ? '#fbbf24' : '#ef4444';
   const accentColor = mode === 'single' ? 'var(--accent)' : '#10B981';
@@ -562,11 +575,12 @@ export default function Detect() {
                     <div className="absolute bottom-20 left-10 right-10 pointer-events-none">
                       <div className="flex justify-between items-center mb-2 px-2">
                         <span className="text-[10px] font-black uppercase tracking-[3px] text-white/80">Analyzing Signature...</span>
-                        <span className="text-[10px] font-mono text-white/50">{bufSize}/{BUFFER_SIZE}</span>
+                        <span className="text-[10px] font-mono text-white/50">{bufSize}/{STABILITY_THRESHOLD}</span>
                       </div>
                       <div className="h-2 rounded-full bg-white/5 border border-white/10 overflow-hidden">
                         <div className="h-full rounded-full transition-all duration-300"
-                          style={{ width: `${(bufSize / BUFFER_SIZE) * 100}%`, background: mode === 'double' ? 'linear-gradient(to right, #10B981, #34D399)' : 'linear-gradient(to right, #7C3AED, #A78BFA)' }} />
+                          style={{ width: `${(bufSize / STABILITY_THRESHOLD) * 100}%`, background: mode === 'double' ? 'linear-gradient(to right, #10B981, #34D399)' : 'linear-gradient(to right, #7C3AED, #A78BFA)' }} />
+
                       </div>
                     </div>
                   )}

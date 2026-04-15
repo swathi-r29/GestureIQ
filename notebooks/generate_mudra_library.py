@@ -9,10 +9,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
 def main():
-    #csv_path = "../dataset/bharatanatyam_mudras/landmarks.csv"
-    #output_path = "../models/mudra_library.pkl"
-    csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
-    output_path = "D:/GestureIQ/models/mudra_library.pkl"
+    csv_path = "../dataset/bharatanatyam_mudras/landmarks.csv"
+    output_path = "../models/mudra_library.pkl"
+    
+    #csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+    #output_path = "D:/GestureIQ/models/mudra_library.pkl"
     
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found.")

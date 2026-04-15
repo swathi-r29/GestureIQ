@@ -77,10 +77,10 @@ const MUDRAS = [
     fingers: MUDRA_CONFIG[m.folder]?.fingers || '',
 }));
 
-const STABLE_GATE = 2; // Reduced from 4 for better responsiveness with painted hands
-const WRONG_MUDRA_GATE = 2;
-const ACCURACY_THRESHOLD = 80;
-const HOLD_DURATION_MS = 800;
+const STABILITY_THRESHOLD = 3;
+const WRONG_MUDRA_GATE = 5;
+const ACCURACY_THRESHOLD = 75;
+const HOLD_DURATION_MS = 1200;
 
 const STAGES = { SELECT_TYPE: 'SELECT_TYPE', SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
 const LEVEL_CONFIG = {
@@ -122,10 +122,10 @@ export default function Learn() {
 
     const attemptsRef = useRef(0);
     const holdStartRef = useRef(null);
+    const consecutiveRef = useRef({ name: null, count: 0 });
     const masteredRef = useRef(false);
     const saveInProgressRef = useRef(false);
 
-    const stableFramesRef = useRef(0);
     const lastDetectedNameRef = useRef('');
     const wrongMudraFramesRef = useRef(0);
 
@@ -350,15 +350,15 @@ export default function Learn() {
                 // ── NO HAND ───────────────────────────────────────────────────
                 const hasHand = dataObj && (
                   selectedType === 'Double'
-                    ? (dataObj.left || dataObj.right)
+                    ? (dataObj.left && dataObj.right)   // BOTH hands required
                     : dataObj.landmarks
                 );
-                if (!hasHand) {
+                  if (!hasHand) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
                     setHoldProgress(0);
                     holdStartRef.current = null;
 
-                    stableFramesRef.current = 0;
+                    consecutiveRef.current = { name: null, count: 0 };
                     lastDetectedNameRef.current = '';
                     wrongMudraFramesRef.current = 0;
                     lowAccuracyFramesRef.current = 0; // Reset on total hand loss
@@ -419,20 +419,19 @@ export default function Learn() {
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
                 const detectedName = data.name || '';
                 const isStableAPI = data.is_stable || false;
-                const confidence = data.confidence || 0;
                 const accuracy = data.accuracy || 0;
                 const corrections = data.corrections || [];
 
-                if (detectedName && detectedName === lastDetectedNameRef.current) {
-                    stableFramesRef.current = Math.min(stableFramesRef.current + 1, 10);
+                if (detectedName && detectedName === consecutiveRef.current.name) {
+                    consecutiveRef.current.count++;
                 } else {
-                    stableFramesRef.current = 1;
-                    lastDetectedNameRef.current = detectedName;
+                    consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
                 }
 
-                const locallyStable = stableFramesRef.current >= STABLE_GATE;
+                const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
 
                 const wrongMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+
                 const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
 
                 // ── FIX: Wrong mudra frame counter (for voice gating only) ────
@@ -528,9 +527,8 @@ export default function Learn() {
                 }
 
                 // ── HOLD + SAVE ───────────────────────────────────────────────
-                const isCorrectMudra = data.detected && !wrongMsg;
-                const isGoodAccuracy = accuracy >= ACCURACY_THRESHOLD;
-                const isGoodFrame = isCorrectMudra && isGoodAccuracy;
+                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg;
+                const isGoodFrame = isCorrect;
 
                 const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
                 const now = Date.now();
@@ -549,7 +547,7 @@ export default function Learn() {
                         lowAccuracyFramesRef.current = 0;
                     } else if (lowAccuracyFramesRef.current > 10) {
                         // Only drain if we've been inconsistent for > 10 frames (~2 seconds at 200ms)
-                        const isPartialGood = isCorrectMudra && accuracy >= 62;
+                        const isPartialGood = data.detected && !wrongMsg && accuracy >= 62;
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.3 : 1.5));
                     }
                 }

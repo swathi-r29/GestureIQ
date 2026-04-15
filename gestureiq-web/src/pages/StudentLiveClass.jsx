@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
+import { checkGeometricAnchors } from '../utils/geometricRules';
 import { getSocket } from '../utils/socket';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
 
@@ -97,6 +98,10 @@ const StudentLiveClass = () => {
   const detectedMudraRef = useRef('');
   const aiScoreRef = useRef(0);
   const sessionStatusRef = useRef('Incorrect');
+  const consecutiveRef = useRef({ name: null, count: 0 });
+  const graceRef = useRef(0); // For stability grace window (hysteresis)
+  const STABILITY_THRESHOLD = 10;
+  const STABILITY_THRESHOLD_DOUBLE = 4; 
 
   useEffect(() => { classDataRef.current = classData; }, [classData]);
 
@@ -152,16 +157,27 @@ const StudentLiveClass = () => {
       // FIX D: stale-PC guard
       if (peerConnectionRef.current !== pc) return;
       console.log('[WebRTC Student] Got remote track:', event.track.kind);
+      
       if (remoteVideoRef.current) {
-        if (event.streams && event.streams[0]) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        } else {
-          if (!remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject = new MediaStream([event.track]);
-          } else {
-            remoteVideoRef.current.srcObject.addTrack(event.track);
-          }
+        // Use the first stream provided, or the one already assigned
+        let stream = event.streams[0] || remoteVideoRef.current.srcObject;
+        
+        if (!stream || !(stream instanceof MediaStream)) {
+          stream = new MediaStream();
         }
+        
+        // Ensure track is in stream
+        if (!stream.getTracks().includes(event.track)) {
+          stream.addTrack(event.track);
+        }
+        
+        // Re-assign to trigger layout/audio updates
+        if (remoteVideoRef.current.srcObject !== stream) {
+          remoteVideoRef.current.srcObject = stream;
+        }
+        
+        // Force play
+        remoteVideoRef.current.play().catch(e => console.warn('[WebRTC Student] Teacher stream play failed:', e));
         setTeacherConnected(true);
       }
     };
@@ -214,21 +230,23 @@ const StudentLiveClass = () => {
 
     try {
       if (pc.signalingState === 'stable') {
-        // FIX E: add local tracks BEFORE setRemoteDescription so they're in the offer/answer
+        // ✅ CORRECT — setRemoteDescription FIRST
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Drain queued ICE candidates AFTER remote description is set
+        while (iceCandidatesQueueRef.current.length > 0) {
+          const candidate = iceCandidatesQueueRef.current.shift();
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+          catch (e) { console.warn('[WebRTC Student] Queued ICE error:', e); }
+        }
+
+        // Add local tracks AFTER setRemoteDescription so browser can
+        // correctly reuse the offer's recvonly transceivers
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => {
             pc.addTrack(track, streamRef.current);
             console.log('[WebRTC Student] Adding local track to PC:', track.kind);
           });
-        }
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Drain queued ICE candidates
-        while (iceCandidatesQueueRef.current.length > 0) {
-          const candidate = iceCandidatesQueueRef.current.shift();
-          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-          catch (e) { console.warn('[WebRTC Student] Queued ICE error:', e); }
         }
 
         lastHandshakeTimeRef.current = Date.now();
@@ -354,7 +372,7 @@ const StudentLiveClass = () => {
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
     handsRef.current.setOptions({
-      maxNumHands: 1, modelComplexity: 1,
+      maxNumHands: 2, modelComplexity: 1,
       minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
     });
     handsRef.current.onResults((results) => {
@@ -368,25 +386,38 @@ const StudentLiveClass = () => {
       
       // FIX: Use activeModulesRef to avoid stale closure in onResults
       if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
-        const rawLm = results.multiHandLandmarks[0];
-        const handedness = results.multiHandedness[0]?.label || 'Right';
-        const score = results.multiHandedness[0]?.score || 0;
-        smoothingBuffer.current.push(rawLm);
-        if (smoothingBuffer.current.length > 5) smoothingBuffer.current.shift();
-        const averagedLm = rawLm.map((_, i) => ({
-          x: smoothingBuffer.current.reduce((sum, b) => sum + b[i].x, 0) / smoothingBuffer.current.length,
-          y: smoothingBuffer.current.reduce((sum, b) => sum + b[i].y, 0) / smoothingBuffer.current.length,
-          z: smoothingBuffer.current.reduce((sum, b) => sum + b[i].z, 0) / smoothingBuffer.current.length,
-        }));
-        landmarksRef.current = { landmarks: averagedLm, handedness, score };
+        const hList = results.multiHandLandmarks;
+        const hness = results.multiHandedness || [];
+        
+        // Landmark average smoothing (simplified for multi-hand)
+        const averagedLms = hList.map(h => h.map((lm, i) => lm)); // for now just pass through
+        
+        landmarksRef.current = { 
+          multiHandLandmarks: hList, 
+          multiHandedness: hness.map((h, i) => {
+              // [RECTIFICATION] Support spatial-relative identity tracking
+              if (hList.length === 2) {
+                  return { ...h, label: hList[i][0].x < 0.5 ? 'Right' : 'Left' };
+              }
+              return h;
+          }),
+          landmarks: hList[0], // backward compat for single hand logic
+          handedness: hness[0]?.label || 'Right'
+        };
+
         lastLandmarkTimeRef.current = Date.now();
-        drawConnectors(ctx, averagedLm, HAND_CONNECTIONS, { color: '#7C3AED', lineWidth: 3 });
-        drawLandmarks(ctx, averagedLm, { color: '#A78BFA', lineWidth: 1, radius: 3 });
+        
+        hList.forEach((lms, idx) => {
+          const color = idx === 0 ? '#7C3AED' : '#10B981';
+          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color, lineWidth: 3 });
+          drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
+        });
       } else {
         landmarksRef.current = null;
         lastLandmarkTimeRef.current = 0;
         smoothingBuffer.current = [];
       }
+
       ctx.restore();
     });
     return () => { handsRef.current?.close(); };
@@ -425,12 +456,15 @@ const StudentLiveClass = () => {
       } else if (peerConnectionRef.current &&
         (peerConnectionRef.current.iceConnectionState === 'connected' ||
           peerConnectionRef.current.iceConnectionState === 'completed')) {
-        // FIX I: PC already connected (offer was processed without tracks)
-        // Add our tracks now via renegotiation
-        console.log('[WebRTC Student] PC already connected — adding tracks');
+        // FIX I: PC already connected — ensure tracks are added and renegotiate
+        console.log('[WebRTC Student] PC already connected — adding tracks & requesting renegotiation');
         stream.getTracks().forEach(track => {
-          peerConnectionRef.current.addTrack(track, stream);
+          if (!peerConnectionRef.current.getSenders().find(s => s.track === track)) {
+            peerConnectionRef.current.addTrack(track, stream);
+          }
         });
+        // Request fresh offer to sync the new audio tracks
+        socketRef.current?.emit('request_webrtc_offer', { classId: classId });
       } else {
         // FIX J: no pending offer and no active PC — request a fresh one
         console.log('[WebRTC Student] No pending offer — requesting fresh offer from teacher');
@@ -536,47 +570,132 @@ const StudentLiveClass = () => {
       return;
     }
 
+    const targetMudra = classDataRef.current?.targetMudra?.toLowerCase();
+    
+    // Check if target is a double mudra (Samyuta)
+    const DOUBLE_MUDRAS = ['anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 'sivalinga', 'svastika', 'utsanga', 'varaha'];
+    const isTargetDouble = targetMudra && DOUBLE_MUDRAS.includes(targetMudra);
+
+    if (!lmData) {
+      if (isTargetDouble) {
+        setFeedback('Bring both hands closer to the center of the camera');
+      } else {
+        setFeedback(activeModulesRef.current.mudra ? 'Show your hand to the camera' : 'AI Detection Paused');
+      }
+      consecutiveRef.current = { name: null, count: 0 };
+      setDetectedMudra('');
+      setAiScore(0);
+      return;
+    }
+
+    // In double mode, check if hands are present
+    if (isTargetDouble && (!lmData.multiHandLandmarks || lmData.multiHandLandmarks.length === 0)) {
+        setFeedback('Bring both hands closer to the center of the camera');
+        consecutiveRef.current = { name: null, count: 0 };
+        setDetectedMudra('');
+        setAiScore(0);
+        return;
+    }
+
     isDetectingRef.current = true;
     try {
-      const res = await fetch(`/api/evaluate_session`, {
+      const endpoint = isTargetDouble ? '/api/detect_double_landmarks' : '/api/evaluate_session';
+      
+      let body = {};
+      if (isTargetDouble) {
+          // Correctly map hands to Right/Left based on MediaPipe labels
+          let rightLm = null, leftLm = null;
+          lmData.multiHandLandmarks.forEach((lms, idx) => {
+              let label = lmData.multiHandedness?.[idx]?.label || 'Right';
+              
+              // [RECTIFICATION] SPATIAL POSITIONING (Fix identity overwriting)
+              if (lmData.multiHandLandmarks.length === 2) {
+                  label = lms[0].x < 0.5 ? 'Right' : 'Left';
+              }
+
+              if (label === 'Right') rightLm = lms; else leftLm = lms;
+          });
+
+          body = {
+              right_landmarks: rightLm,
+              left_landmarks: leftLm,
+              targetMudra: targetMudra
+          };
+      } else {
+          body = {
+              landmarks: lmData.landmarks,
+              activeModules: activeModules,
+              activeMudras: (currentClassData?.mudrasList?.length > 0)
+                ? currentClassData.mudrasList
+                : (targetMudra ? [targetMudra] : [])
+          };
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          landmarks: lmData.landmarks,
-          activeModules: activeModules, // Pass to backend if needed
-          activeMudras: (currentClassData?.mudrasList?.length > 0)
-            ? currentClassData.mudrasList
-            : (currentClassData?.targetMudra ? [currentClassData.targetMudra] : [])
-        })
+        body: JSON.stringify(body)
       });
+
       if (!res.ok) throw new Error(`Server Error: ${res.status}`);
       const data = await res.json();
 
-      setDetectedMudra(data.matchedMudra || '');
-      detectedMudraRef.current = data.matchedMudra || '';
-      setAiScore(data.score || 0);
-      aiScoreRef.current = data.score || 0;
-      setSessionStatus(data.status || 'Incorrect');
-      sessionStatusRef.current = data.status || 'Incorrect';
-      
-      // NEW: Advanced Spotlight Feedback Logic
-      const targetMudra = classDataRef.current?.targetMudra;
-      if (data.score >= 90 && (!targetMudra || data.matchedMudra === targetMudra)) {
-        setFeedback('✓ Correct! Keep holding...');
-      } else if (data.matchedMudra && targetMudra && data.matchedMudra !== targetMudra) {
-        setFeedback(`Incorrect. You are showing ${data.matchedMudra} instead of ${targetMudra}.`);
-      } else if (data.score >= 75) {
-        setFeedback('Almost there...');
-      } else if (data.matchedMudra) {
-        setFeedback('Keep adjusting...');
-      } else {
-        setFeedback('Show your hand to the camera');
+      let detectedName = data.matchedMudra || data.name || '';
+      const score = data.score || data.accuracy || 0;
+
+      // GEOMETRIC OVERRIDE for Double Mudras
+      if (detectedName && isTargetDouble && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
+        const geo = checkGeometricAnchors(detectedName, lmData.multiHandLandmarks);
+        if (!geo.isValid) {
+          detectedName = null;
+          setFeedback(geo.corrections[0] || "Adjust your hand position");
+        }
       }
 
-      if ((data.score || 0) > bestScoreRef.current) {
-        bestScoreRef.current = data.score;
-        bestMudraRef.current = data.matchedMudra || '';
-        setBestScore(data.score);
+      // RELAXED 10-FRAME STABILITY GATE (with Grace Window)
+      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+      if (detectedName) graceRef.current = 0; else graceRef.current++;
+
+      if (effectiveName && effectiveName === consecutiveRef.current.name) {
+        consecutiveRef.current.count++;
+      } else {
+        consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
+      }
+
+      const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
+      if (consecutiveRef.current.count >= currentThreshold) {
+        setDetectedMudra(consecutiveRef.current.name);
+        detectedMudraRef.current = consecutiveRef.current.name;
+        setAiScore(score);
+        aiScoreRef.current = score;
+        setSessionStatus(data.status || (score >= 75 ? 'Correct' : 'Incorrect'));
+        sessionStatusRef.current = sessionStatus;
+
+        // Feedback logic
+        if (score >= 90 && (!targetMudra || consecutiveRef.current.name.toLowerCase() === targetMudra)) {
+          setFeedback('✓ Correct! Perfect form.');
+        } else if (consecutiveRef.current.name && targetMudra && consecutiveRef.current.name.toLowerCase() !== targetMudra) {
+          setFeedback(`Incorrect. You are showing ${consecutiveRef.current.name} instead of ${targetMudra}.`);
+        } else if (score >= 75) {
+          setFeedback('Good! Keep holding...');
+        } else {
+          setFeedback('Keep adjusting your fingers...');
+        }
+      } else {
+        // Not stable yet
+        if (!detectedName) {
+            setFeedback(isTargetDouble ? 'Show both hands' : 'Show your hand');
+        } else if (consecutiveRef.current.count === 1) {
+            setFeedback('Analyzing stability...');
+        }
+        setDetectedMudra('');
+        setAiScore(0);
+      }
+
+      if (score > bestScoreRef.current) {
+        bestScoreRef.current = score;
+        bestMudraRef.current = detectedName || '';
+        setBestScore(score);
       }
 
       if (socket && socket.connected) {
@@ -584,27 +703,25 @@ const StudentLiveClass = () => {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
-          mudra: data.matchedMudra,
-          score: data.score,
-          status: data.status,
+          mudra: detectedMudraRef.current,
+          score: aiScoreRef.current,
+          status: sessionStatusRef.current,
           landmarks: lmData.landmarks,
           frame: captureFrame()
         });
       }
 
       const now = Date.now();
-      // FIX: Frequency increased to 2s to allow more responsive 
-      // transition detection (the hook handles its own internal throttling)
-      if (now - lastVoiceRef.current > 2000) {
+      if (now - lastVoiceRef.current > 2000 && consecutiveRef.current.count >= STABILITY_THRESHOLD) {
         lastVoiceRef.current = now;
         announce?.fromResult(data);
       }
     } catch (err) {
       console.error('Detection error:', err);
-      await new Promise(resolve => setTimeout(resolve, 2000));
     } finally {
       isDetectingRef.current = false;
     }
+
   };
 
   const toggleMic = () => {

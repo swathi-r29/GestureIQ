@@ -15,6 +15,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
+import { checkGeometricAnchors } from '../utils/geometricRules';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
 const { Hands, HAND_CONNECTIONS } = window;
@@ -43,8 +44,7 @@ const DOUBLE_MUDRA_CONFIG = {
     garuda: { level: 'Advanced', fingers: "Interlock thumbs. Wave all fingers of both hands like wings. Keep wrists crossed.", meaning: "Eagle/Garuda", usage: "Garuda, Vishnu's eagle" },
     nagabandha: { level: 'Advanced', fingers: "Cross both wrists. Spread all fingers downward like two snake hoods.", meaning: "Serpent bond", usage: "Snakes intertwined, Nagabandha" },
     khatwa: { level: 'Advanced', fingers: "Hold right hand above left, both in mushti (fist). Offset the knuckles like a bedpost joint.", meaning: "Bedpost", usage: "Furniture, post, pillar" },
-    bherunda: { level: 'Advanced', fingers: "Both hands form a beak shape with all fingertips meeting at a point, facing each other.", meaning: "Fierce bird", usage: "Bherunda bird, power" },
-    bheranda: { level: 'Advanced', fingers: "Both hands touch at the wrists with fingers spread wide and slightly curved outward.", meaning: "Two shores", usage: "River banks, boundaries" },
+    bherunda: { level: 'Advanced', fingers: "Both hands form a beak shape with all fingertips meeting at a point, facing each other.", meaning: "Fierce bird (Bherunda)", usage: "Bherunda bird, power" },
     avahitta: { level: 'Advanced', fingers: "Both hands face downward with fingers pointing forward and slightly spread.", meaning: "Concealment", usage: "Hiding, concealing, restraint" },
     padmakosham: { level: 'Advanced', fingers: "Both hands form padmakosha shape with fingertips almost touching at the center.", meaning: "Full lotus", usage: "Full bloomed lotus, wholeness" },
     sarpasiras: { level: 'Advanced', fingers: "Both hands flat and pressed together, wrists touching, fingers pointing forward like a double snake hood.", meaning: "Two snake heads", usage: "Twin serpents, guardians" },
@@ -67,7 +67,7 @@ const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
 }));
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const STABLE_GATE = 2;
+const STABILITY_THRESHOLD = 5; // Speed Optimization (Was 10, then 4)
 const WRONG_MUDRA_GATE = 5;
 const ACCURACY_THRESHOLD = 75;
 const HOLD_DURATION_MS = 1000;
@@ -120,7 +120,7 @@ export default function LearnDouble() {
     const [frozenFrame, setFrozenFrame] = useState(null);
     const [isFrozen, setIsFrozen] = useState(false);
     const [handsDetected, setHandsDetected] = useState(0);   // 0, 1, or 2
-    const [isSuccessLocked, setIsSuccessLocked] = useState(false);
+
 
     // ── Detection refs ────────────────────────────────────────────────────────
     const attemptsRef = useRef(0);
@@ -129,6 +129,7 @@ export default function LearnDouble() {
     const masteredRef = useRef(false);
     const saveInProgressRef = useRef(false);
     const stableFramesRef = useRef(0);
+    const consecutiveRef = useRef({ name: null, count: 0 });
     const lastDetectedNameRef = useRef('');
     const wrongMudraFramesRef = useRef(0);
     const lostHandFramesRef = useRef(0);
@@ -154,7 +155,6 @@ export default function LearnDouble() {
     const lastCorrVoiceRef = useRef({ text: '', time: 0 });
     const lastOkVoiceRef = useRef(0);
     const lastNoHandRef = useRef(0);
-    const missingHandCyclesRef = useRef(0); // Grace period for losing hands
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
 
@@ -170,7 +170,7 @@ export default function LearnDouble() {
                 if (cfg) announce.raw(`${selectedMudra.name} mudra. ${cfg.fingers}`, 3);
             }, 600);
         }
-    }, [stage, selectedMudra]);
+    }, [stage, selectedMudra, announce]);
 
     // ── MediaPipe — TWO HANDS ─────────────────────────────────────────────────
     useEffect(() => {
@@ -202,16 +202,9 @@ export default function LearnDouble() {
                 const handMap = {};
                 const numFound = results.multiHandLandmarks.length;
                 results.multiHandLandmarks.forEach((lms, idx) => {
-                    let label = results.multiHandedness?.[idx]?.classification?.[0]?.label || (idx === 0 ? 'Right' : 'Left');
+                    const xCoord = lms[0].x;
+                    const label = xCoord < 0.5 ? 'Right' : 'Left';
                     const score = results.multiHandedness?.[idx]?.classification?.[0]?.score || 1.0;
-
-                    // Support two hands even if mislabeled as the same handedness
-                    if (numFound === 2 && idx === 1) {
-                        const firstLabel = results.multiHandedness?.[0]?.classification?.[0]?.label;
-                        if (firstLabel === label) {
-                            label = label === 'Right' ? 'Left' : 'Right';
-                        }
-                    }
 
                     handMap[label] = { landmarks: lms, score };
 
@@ -246,7 +239,7 @@ export default function LearnDouble() {
         let active = true;
         const processFrame = async () => {
             if (active && cameraOn && videoRef.current?.readyState >= 2 && handsRef.current)
-                await handsRef.current.send({ image: videoRef.current }).catch(() => { });
+                await handsRef.current.send({ image: videoRef.current }).catch(e => console.warn('MP Hands send error:', e));
             if (active && cameraOn) requestRef.current = requestAnimationFrame(processFrame);
         };
         if (cameraOn) requestRef.current = requestAnimationFrame(processFrame);
@@ -279,7 +272,7 @@ export default function LearnDouble() {
     useEffect(() => {
         if (cameraOn && streamRef.current && videoRef.current) {
             videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(() => { });
+            videoRef.current.play().catch(e => console.error('Video play error:', e));
         }
     }, [cameraOn]);
 
@@ -328,7 +321,7 @@ export default function LearnDouble() {
                     holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0);
                     setHoldProgress((holdAccumulatorRef.current / HOLD_DURATION_MS) * 100);
 
-                    stableFramesRef.current = 0;
+                    consecutiveRef.current = { name: null, count: 0 };
                     lastDetectedNameRef.current = '';
                     wrongMudraFramesRef.current = 0;
 
@@ -367,21 +360,43 @@ export default function LearnDouble() {
 
                 const data = await res.json();
 
+                if (data.accuracy === 0 || data.name === 'No Hand' || data.name === 'Adjusting...') {
+                    // Soft Reset: Let the decay logic handle the ring drainage
+                    setDetected({ name: 'Adjusting...', accuracy: 0, detected: false });
+                } else {
+                    setDetected(data);
+                }
+
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
-                const detectedName = data.name || '';
+                let detectedName = data.name || '';
                 const isStableAPI = data.is_stable || false;
                 const accuracy = data.accuracy || 0;
                 const corrections = data.corrections || [];
 
-                if (detectedName && detectedName === lastDetectedNameRef.current) {
-                    stableFramesRef.current = Math.min(stableFramesRef.current + 1, 10);
+                // GEOMETRIC OVERRIDE
+                if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
+                    const geo = checkGeometricAnchors(detectedName, Object.values(handMap).map(h => h.landmarks));
+                    if (!geo.isValid) {
+                        detectedName = null;
+                        // Use geometric correction as priority
+                        setDetected({
+                           ...data,
+                           name: 'Adjust Position',
+                           accuracy: 0,
+                           detected: false,
+                           corrections: [geo.corrections[0], ...corrections]
+                        });
+                    }
+                }
+
+                if (detectedName && detectedName === consecutiveRef.current.name) {
+                    consecutiveRef.current.count++;
                 } else {
-                    stableFramesRef.current = 1;
-                    lastDetectedNameRef.current = detectedName;
+                    consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
                     wrongMudraFramesRef.current = 0;
                 }
 
-                const locallyStable = stableFramesRef.current >= STABLE_GATE;
+                const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
 
                 const wrongMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
                 const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
@@ -398,16 +413,18 @@ export default function LearnDouble() {
                 // Add "one hand missing" warning if applicable (not for crossed mudras)
                 const isCrossed = selectedMudra && CROSS_MUDRAS.includes(selectedMudra.folder);
                 if (Object.keys(handMap).length < 2 && !isCrossed) {
-                    const missing = handMap['Right'] ? 'left' : 'right';
-                    displayCorrections = [`Show your ${missing} hand — both hands needed for this mudra`, ...displayCorrections];
+
+                    displayCorrections = [`Show both hands! Second hand missing.`, ...displayCorrections];
                 }
 
                 const displayData = {
                     ...data,
+                    name: locallyStable ? (detectedName || data.name) : 'Analyzing...',
                     corrections: displayCorrections,
                     _isAdjusting: !locallyStable && !isStableAPI,
                 };
                 setDetected(displayData);
+
 
                 // ── VOICE ─────────────────────────────────────────────────────
                 if (voiceEnabledRef.current && locallyStable) {
@@ -446,7 +463,7 @@ export default function LearnDouble() {
 
                 // Grace period for hand loss (prevents flickering)
                 if (!visible) {
-                    if (lostHandFramesRef.current < 5) {
+                    if (lostHandFramesRef.current < 15) {
                         lostHandFramesRef.current++;
                         visible = true; // Pretend hands are still there for a few frames
                     }
@@ -455,7 +472,7 @@ export default function LearnDouble() {
                 }
 
                 const isHighAccuracy = accuracy >= ACCURACY_THRESHOLD;
-                let isGoodFrame = !wrongMsg && data.detected && visible && isHighAccuracy;
+                let isGoodFrame = !wrongMsg && data.detected && visible && isHighAccuracy && locallyStable;
                 let isFrozen = false;
 
                 // Blink Protection: If we were previously good, allow 10 frames (~500ms) of noise or hand-loss
@@ -496,8 +513,7 @@ export default function LearnDouble() {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
                     masteredRef.current = true;
                     saveInProgressRef.current = true;
-                    setIsSuccessLocked(true);
-                    setTimeout(() => setIsSuccessLocked(false), 2000); // 2s lock
+                    // Success lock removed (unused)
                     handleMudraMastered(selectedMudra.folder, accuracy);
                 }
 
@@ -514,6 +530,7 @@ export default function LearnDouble() {
             lastFrameTimeRef.current = 0;
             setHoldProgress(0);
             stableFramesRef.current = 0;
+            consecutiveRef.current = { name: null, count: 0 };
             lastDetectedNameRef.current = '';
             wrongMudraFramesRef.current = 0;
             lostHandFramesRef.current = 0;
@@ -527,7 +544,11 @@ export default function LearnDouble() {
             const res = await axios.get('/api/user/progress', { headers: { 'x-auth-token': token } });
             setProgress(res.data.progress.detectedMudras || []);
             setBestScores(res.data.progress.mudraScores || {});
-        } catch { } finally { setLoading(false); }
+        } catch (err) {
+            console.warn('[LearnDouble] fetchProgress error:', err);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
@@ -540,8 +561,16 @@ export default function LearnDouble() {
         setSessionComplete(true);
         stopWebcam();
         setHoldProgress(0);
-        if (voiceEnabledRef.current)
-            announce.raw(`Excellent! You mastered ${selectedMudra?.name || folder} with ${score} percent accuracy!`, 3);
+        if (voiceEnabledRef.current) {
+            const cfg = DOUBLE_MUDRA_CONFIG[folder];
+            const name = selectedMudra?.name || folder;
+            const fullLesson = `Excellent! You mastered ${name} with ${score} percent accuracy! 
+                                It means ${cfg?.meaning || 'a sacred gesture'}. 
+                                It is traditionally used for ${cfg?.usage || 'artistic expression'}. 
+                                Great job!`;
+            announce.raw(fullLesson, 4); // Priority 4 = ULTRA (Non-interruptible)
+        }
+
         attemptsRef.current = 0;
         try {
             const token = localStorage.getItem('token');

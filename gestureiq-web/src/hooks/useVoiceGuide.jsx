@@ -17,6 +17,7 @@ const PRIO = {
     LOW: 1,
     MEDIUM: 2,
     HIGH: 3,
+    ULTRA: 4, // Non-interruptible Narrative
 };
 
 // =============================================================================
@@ -233,7 +234,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
 
     useEffect(() => { langRef.current = language; }, [language]);
 
-    const _doSpeak = useCallback((message, priority = PRIO.LOW) => {
+    const _doSpeak = useCallback((message, priority = PRIO.LOW, opts = {}) => {
         if (!unlockedRef.current || !message) return;
         const now = Date.now();
         
@@ -244,8 +245,10 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         globalVoiceCooldownRef.current = now;
         lastFeedbackRef.current = message;
 
-        // Immediate cancel flushes the instruction queue to prevent lag
-        window.speechSynthesis.cancel();
+        // Only cancel if it's NOT a high-priority narrative (Layer 12 Speed Fix)
+        if (priority < PRIO.ULTRA) {
+            window.speechSynthesis.cancel();
+        }
         const lang = langRef.current;
         const utt = new SpeechSynthesisUtterance(message);
         utt.lang = langCode(lang);
@@ -255,7 +258,11 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         if (voice) utt.voice = voice;
 
         utt.onstart = () => { isSpeakingRef.current = true; currentPrioRef.current = priority; };
-        utt.onend = () => { isSpeakingRef.current = false; currentPrioRef.current = 0; };
+        utt.onend = () => {
+            isSpeakingRef.current = false;
+            currentPrioRef.current = 0;
+            if (opts.onEnd) opts.onEnd();
+        };
         window.speechSynthesis.speak(utt);
     }, []);
 
@@ -342,7 +349,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 _doSpeak(`Excellent! You mastered ${mudra} with ${score} percent accuracy.`, PRIO.HIGH);
             }
         },
-        raw: (msg, priority = PRIO.MEDIUM) => _doSpeak(msg, priority),
+        raw: (msg, priority = PRIO.MEDIUM, opts = {}) => _doSpeak(msg, priority, opts),
         fromResult: (data) => {
             if (!data) return;
             const lang = langRef.current;

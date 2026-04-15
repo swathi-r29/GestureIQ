@@ -115,7 +115,11 @@ FRONTEND_TO_MODEL = {
     'padmakosham': 'padmakosha',
     'sarpasiras':  'sarpashira',
     'khatwa':     'katva',
-    'bheranda':   'bherunda',
+    'khatava':    'katva',
+    'angali':     'anjali',
+    'shivalinga': 'sivalinga',
+    'kopotha':    'kapotha',
+    'keelaka':    'kilaka',
 }
 
 # MediaPipe for double hand detection
@@ -171,8 +175,9 @@ MIRROR_STICKY_FRAMES  = 20  # Increased for ultra-stability (Phase 9)
 ACCURACY_EMA_ALPHA    = 0.2 # Smoothing factor for double-hand accuracy (0.2 = smoother)
 
 # [PHASE 16] Absolute Temporal Locking State
-double_prediction_buffer = deque(maxlen=5) # Fix 3: Voting buffer
+double_prediction_buffer = deque(maxlen=10) # Fix 3: Voting buffer (Increased for stability)
 double_lock_counter      = 0               # Fix 2: Hysteresis lock
+double_active_flag       = False           # For Schmidt Trigger/Hysteresis
 DOUBLE_LOCK_FRAMES       = 10
 double_locked_acc        = 0               # Fix 2: Locked accuracy value
 double_freeze            = False           # Fix 5: Output freeze
@@ -187,13 +192,14 @@ double_hand_history   = deque(maxlen=10) # Track last 10 detections
 last_valid_right      = None
 last_valid_left       = None
 
-# Mudras that allow mirroring if one hand is missing
-CROSS_MUDRAS = ['anjali', 'karkata', 'kapotha', 'svastika', 'pushpaputa', 'utsanga', 
-                'shakata', 'shankha', 'pasha', 'kilaka', 'samputa', 'matsya', 'kurma', 
-                'varaha', 'garuda', 'nagabandha', 'khatwa', 'bherunda', 'sarpasiras', 'sivalinga']
+# --- Samyuta Categories (Phase 16) ---
+CROSS_MUDRAS = ['svastika', 'utsanga', 'nagabandha', 'khatwa', 'bherunda', 'bheranda', 'kartarisvastika']
+JOINED_MUDRAS = ['anjali', 'kapotha', 'pushpaputa', 'samputa', 'shankha', 'chakra', 'matsya', 'kurma', 'varaha']
+STACKED_MUDRAS = ['sivalinga', 'matsya']
+INTERLOCKED_MUDRAS = ['pasha', 'kilaka', 'karkata']
+ALL_DOUBLE_MUDRAS = JOINED_MUDRAS + STACKED_MUDRAS + CROSS_MUDRAS + INTERLOCKED_MUDRAS
 
 # [PHASE 13] Landmark Anchoring & Result Fallback
-JOINED_MUDRAS = ['anjali', 'kapotha', 'karkata', 'samputa', 'sivalinga', 'matsya', 'kurma', 'shankha', 'pasha']
 last_good_data = {} # { 'mudra_name': { result_dict } }
 
 frame_counter = 0
@@ -1985,366 +1991,90 @@ def predict_double():
 @app.route('/api/detect_double_landmarks', methods=['POST'])
 def detect_double_landmarks():
     """
-    Optimized double-hand detection receiving landmarks directly from the frontend.
-    Now using Scaled Accuracy formula to account for the 28-class distribution.
+    Finalized, Target-Verified Double Hand Detection for Presentation.
+    Fixes Case: '100% on wrong mudra' and 'No hand bias'.
     """
-    global ema_double_accuracy, double_mirror_mode, double_mirror_frames, last_valid_right, last_valid_left, last_good_data
-    global is_double_mode, double_prediction_buffer, double_lock_counter, double_locked_acc, double_freeze, double_freeze_acc
+    global is_double_mode
     try:
-        is_double_mode = True # Set flag when double hand detection is called
-        data       = request.get_json(force=True)
-        right_raw  = data.get('right_landmarks')
-        left_raw   = data.get('left_landmarks')
-        target     = (data.get('targetMudra') or '').strip().lower()
-
-        original_target = target
-        target = FRONTEND_TO_MODEL.get(target, target)
+        is_double_mode = True
+        body = request.get_json(force=True)
+        left_lms  = body.get('left_landmarks', [])
+        right_lms = body.get('right_landmarks', [])
+        target    = body.get('targetMudra', '').lower().strip()
         
-        # ── MUDRA ISOLATION (Phase 12) ────────────────────────────────────
-        if not hasattr(detect_double_landmarks, 'last_target'):
-            detect_double_landmarks.last_target = ''
-            
-        if target != detect_double_landmarks.last_target:
-            detect_double_landmarks.last_target = target
-            detect_double_landmarks.smooth_acc = 0.0
-            detect_double_landmarks.prev_display = 0.0
-            ema_double_accuracy = 0.0
-            double_prediction_buffer.clear() # Clear voting on target change
-            double_freeze = False            # Reset freeze on target change
+        # Mapping to model class names
+        target = FRONTEND_TO_MODEL.get(target, target)
 
-        if not right_raw and not left_raw:
-            return jsonify({'detected': False, 'name': '', 'confidence': 0,
-                            'accuracy': 0, 'corrections': [], 'is_stable': False})
-
-        def to_pts(raw):
-            if not raw: return None
-            try:
-                return [[float(lm['x']), float(lm['y']), float(lm['z'])] for lm in raw]
-            except Exception as e:
-                print(f"[double] to_pts error: {e}")
-                return None
-
-        right_pts = to_pts(right_raw)
-        left_pts  = to_pts(left_raw)
-
-        # ── HAND ANCHORING (Phase 2) ──────────────────────────────────────
-        # If we are in a merged mudra, remember the last valid hand positions
-        # to bridge frame gaps during overlap.
-        if target and target in CROSS_MUDRAS:
-            if right_pts: last_valid_right = right_pts
-            if left_pts:  last_valid_left  = left_pts
-            
-            # If one hand is suddenly missing, restore it from the anchor
-            if not right_pts and last_valid_right: right_pts = last_valid_right
-            if not left_pts and last_valid_left:  left_pts  = last_valid_left
-
-        if _double_model is None:
+        if not left_lms or not right_lms:
             return jsonify({
-                'detected': False, 'name': '', 'confidence': 0, 'accuracy': 0,
-                'corrections': ['Double-hand model not loaded. Run train_double_mudra_model.py first.'],
-                'is_stable': False
+                "detected": False, "name": "Missing Hand", "confidence": 0,
+                "accuracy": 0, "corrections": ["Show both hands clearly"],
+                "is_stable": False
             })
 
-        # Merged/Crossed-Hand Exception with Hysteresis (STICKY MODE):
-        # We lock into mirroring mode if we lose a hand, preventing flickering.
-        is_one_hand = (not right_pts and left_pts) or (right_pts and not left_pts)
-        wants_mirror = (target in CROSS_MUDRAS and is_one_hand)
+        # Convert to Point list for feature extraction
+        def to_pts(raw):
+            return [LM(float(p['x']), float(p['y']), float(p['z'])) for p in raw]
+            
+        right_list = to_pts(right_lms)
+        left_list  = to_pts(left_lms)
 
-        if right_pts and left_pts:
-            # [FIX 5] INSTANT RESET: Both hands detected cleanly
-            double_mirror_mode   = False
-            double_mirror_frames = 0
-        elif wants_mirror:
-            double_mirror_mode = True
-            double_mirror_frames = MIRROR_STICKY_FRAMES
-        elif (target in ['anjali', 'kapotha']) and double_mirror_mode and double_mirror_frames > 0:
-            # Aggressive sticky mode for joined mudras
-            double_mirror_frames -= 1 # Discrete step (Phase 14)
-            double_mirror_mode = True
-        elif double_mirror_frames > 0:
-            double_mirror_frames -= 1
-            # Stay in mirror mode even if detection flickered to 2
-        else:
-            double_mirror_mode = False
+        # --- MIRRORING FALLBACK ---
+        # If one hand is missing but it's a JOINED mudra like Anjali, Kapotha, or Sivalinga
+        if (not right_list or not left_list) and target in ['anjali', 'kapotha', 'sivalinga']:
+            existing_pts = right_list if right_list else left_list
+            # Mirror the X coordinate to create the "Virtual" second hand
+            mirrored_pts = [LM(1.0 - p.x, p.y, p.z) for p in existing_pts]
+            
+            if not right_list: right_list = mirrored_pts
+            if not left_list:  left_list  = mirrored_pts
 
-        if double_mirror_mode:
-            # print(f"[double] Mirroring landmarks (Hysteresis Active) for '{target}'")
-            if not right_pts and left_pts: 
-                right_pts = [[float(1.0 - p[0]), float(p[1]), float(p[2])] for p in left_pts]
-            elif not left_pts and right_pts: 
-                left_pts = [[float(1.0 - p[0]), float(p[1]), float(p[2])] for p in right_pts]
-            # If both are present but we are in sticky mirror mode, we use the stronger hand? 
-            # For now, if both present, we just proceed with real data (mirror mode ends if count is stable)
+        # Extraction and Prediction
+        feats = extract_double_features(left_list, right_list)
+        probs = _double_model.predict_proba([feats])[0]
+        classes = list(_double_model.classes_)
+        top_i = int(np.argmax(probs))
+        name  = str(classes[top_i])
+        conf  = round(float(probs[top_i]) * 100.0, 1)
 
-        # ── Feature extraction + ML prediction ─────────────────────────────
-        global ema_double_probs, stable_double_mudra, stable_double_count
-        is_stable_global = False # Initial default
-        
-        # Ensure we have data to extract features from
-        if not right_pts and not left_pts:
-            return jsonify({'detected': False, 'name': '', 'confidence': 0,
-                            'accuracy': 0, 'corrections': ['Losing both hands'], 'is_stable': False})
-
-        features  = extract_double_features(left_pts, right_pts)
-        feat_vec  = np.array(features).reshape(1, -1)
-        proba     = _double_model.predict_proba(feat_vec)[0]
-        
-        # ── PROBABILITY EMA (Phase 14 Isolation) ─────────────────────
-        if ema_double_probs is None or len(ema_double_probs) != len(proba):
-            ema_double_probs = proba
-        else:
-            ema_double_probs = (ema_double_probs * (1.0 - EMA_ALPHA)) + (proba * EMA_ALPHA)
-
-        pred_idx  = int(np.argmax(ema_double_probs))
-        
-        # Robust name comparison (handles potential types like np.str_)
-        model_classes = [str(c) for c in _double_model_classes]
-        pred_name     = model_classes[pred_idx]
-        raw_conf      = float(ema_double_probs[pred_idx])        # 0.0 – 1.0
-        num_classes   = len(model_classes)
-        
-        # ── STABILITY TRACKING ──────────────────────────────────────────
-        if pred_name == stable_double_mudra:
-            stable_double_count = min(stable_double_count + 1, 15)
-        else:
-            stable_double_mudra = pred_name
-            stable_double_count = 1
-        
-        # ── [FIX 3] CLASS STABILITY BUFFER (VOTING) ────────────────────
-        double_prediction_buffer.append(stable_double_mudra)
-        if len(double_prediction_buffer) == 5:
-            # Pick the winner via voting
-            stable_double_mudra = max(set(double_prediction_buffer), key=list(double_prediction_buffer).count)
-        
-        is_stable_global = (stable_double_count >= MIN_STABLE_FRAMES)
-        
-        # ── [FIX 7] EMERGENCY STABILITY BREAK ─────────────────────────────
-        # If the detected mudra doesn't match the target, we must immediately 
-        # kill any active locks or freezes from previous correct frames.
-        if target and stable_double_mudra != target:
-            double_lock_counter = 0
-            double_freeze = False
-            double_locked_acc = 0
-            double_freeze_acc = 0
-            ema_double_accuracy = 0 # Drop EMA to 0 immediately for wrong mudras
-
-        # ── PRIORITY WINNER OVERRIDES (Phase 11 Update) ───────────────────
-        # If the target is a high-priority joined mudra and it's in the Top 5, 
-        # we force it as the winner to compensate for occlusion jitter.
-        priority_mudras = ['anjali', 'sivalinga', 'samputa', 'kapotha']
-        if target in priority_mudras and target in model_classes:
-            target_idx = model_classes.index(target)
-            target_prob = float(proba[target_idx])
-            top_5_indices = np.argsort(proba)[-5:]
-            if target_idx in top_5_indices:
-                pred_name = target
-                # Boost confidence slightly based on its proximity to the top
-                raw_conf  = min(1.0, target_prob * 1.5)
-
-        # ── PROPORTIONAL SCALING ACCURACY (OPTIMIZED) ──────────────────────
-        chance    = 1.0 / max(num_classes, 1)
-        accuracy  = 0.0
         corrections = []
+        accuracy = 0.0
 
         if target:
-            if target not in model_classes:
-                # Untrained target: use raw scaled confidence
-                accuracy = max(0.0, (raw_conf - chance) / (1.0 - chance)) * 100
-                corrections.append(f"Note: '{original_target}' not yet in trained model.")
+            # [FIX] Target Verification Guard
+            if name == target:
+                # Correct mudra — use confidence boosted as accuracy
+                accuracy = round(min(conf * 1.05, 100.0), 1)
+                # Ensure 100% is only for very high confidence
+                if conf < 85: accuracy = min(accuracy, 94.0)
             else:
-                target_idx = model_classes.index(target)
-                target_conf = float(proba[target_idx])
-
-                if pred_name == target and target_conf > 0.15:
-                    # ── NON-LINEAR SCALING (Phase 4) ────────────────────────
-                    # We use a square-root boost to "pull" low confidence upward.
-                    # This compensates for landmark occlusion in joined mudras.
-                    boosted_conf = math.sqrt(target_conf) 
-                    
-                    # Start accuracy at a floor of 65% for correct identification
-                    accuracy = 65.0 + (boosted_conf * 35.0)
-                    
-                    # Anjali/Sivalinga Joining Verification: Ensure 80%+ if physical form is clear
-                    if target == 'anjali' and (right_pts and left_pts):
-                        accuracy = max(80.0, accuracy)
-                    
-                    elif target == 'sivalinga' and (right_pts and left_pts):
-                        # Geometric Shield for Sivalinga (Phase 11)
-                        # Sivalinga = Pataka (base) + Shikhara (top)
-                        try:
-                            l_lm = [LM(p[0], p[1], p[2]) for p in left_pts]
-                            r_lm = [LM(p[0], p[1], p[2]) for p in right_pts]
-                            l_feat = extract_features(l_lm, label='Left')
-                            r_feat = extract_features(r_lm, label='Right')
-                            lp = model.predict_proba([l_feat])[0]
-                            rp = model.predict_proba([r_feat])[0]
-                            ln = model.classes_[np.argmax(lp)]
-                            rn = model.classes_[np.argmax(rp)]
-                            
-                            # If we see Pataka and Shikhara in any orientation, it's correct
-                            if (ln == 'pataka' and rn == 'shikhara') or (ln == 'shikhara' and rn == 'pataka'):
-                                accuracy = max(85.0, accuracy)
-                                # print(f"[double] Sivalinga Geometric Shield: Matched {ln}+{rn}")
-                        except: pass
-                else:
-                    # ── CASE 2: Misclassification or Very Low Confidence ───
-                    if target_conf < (chance * 2):
-                        accuracy = 0.0
-                        corrections.append(f"Form incorrect for {original_target}")
-                    else:
-                        # Scale based on target confidence relative to top prediction
-                        accuracy = (target_conf / raw_conf) * 50  # Cap at 50% for wrong mudra
-                        corrections.append(f"Showing {pred_name} instead of {original_target}")
+                # Wrong mudra — score 0, add correction
+                # This prevents "100% on wrong mudra" hallucination
+                corrections = [f"Wrong mudra — showing {name.capitalize()} instead of {target.capitalize()}"]
+                accuracy = 0.0
         else:
-            # Free practice mode: use raw scaled confidence
-            accuracy = max(0.0, (raw_conf - chance) / (1.0 - chance)) * 100
-
-        accuracy  = float(round(min(100.0, accuracy), 1))
-
-        # ── RELATIVE CONFIDENCE BOOST (NEW) ────────────────────────────────
-        # If the target mudra is the clear winner (significant gap from next best),
-        # we reward the accuracy into the high range even if raw confidence is moderate.
-        if target and pred_name == target:
-            sorted_probs = np.sort(proba)
-            top1 = sorted_probs[-1]
-            top2 = sorted_probs[-2] if len(sorted_probs) > 1 else 0.0
-            conf_gap = float(top1 - top2)   # Ensure float
-            
-            # If gap > 15%, boost accuracy to at least 85%
-            if conf_gap > 0.15:
-                accuracy = float(max(accuracy, 85.0 + (conf_gap * 10)))
-                accuracy = round(min(99.0, accuracy), 1)
-
-        # ── CROSS-MUDRAS PASS BOOST (SMOOTH RAMP) ──────────────────────────
-        if target and target in CROSS_MUDRAS and pred_name == target:
-            # Linear ramp: 50% -> 65%, 60% -> 85%
-            if accuracy > 50.0:
-                accuracy = 65.0 + (accuracy - 50.0) * 2.0
-                accuracy = min(100.0, accuracy)
-
-        # ── ANJALI SPECIAL TIPS CHECK (NEW) ────────────────────────────────
-        # Reward maintaining the "prayer" shape (fingertips touching)
-        if target == 'anjali' and right_pts and left_pts:
-            # Check Index tip (8) and Middle tip (12) distance between hands
-            try:
-                # 8 is Index Tip, 12 is Middle Tip
-                d_index  = get_distance(right_pts[8], left_pts[8])
-                d_middle = get_distance(right_pts[12], left_pts[12])
-                avg_tip_dist = (d_index + d_middle) / 2.0
-                
-                if avg_tip_dist < 0.12:
-                    accuracy = min(100.0, accuracy + 12.0)
-            except: pass
-
-        # ── [9-LAYER STABILITY ARCHITECTURE] ──────────────────────────────
-        
-        # STEP 1: IDENTITY (Layer 3 - Voting consensus)
-        double_prediction_buffer.append(pred_name)
-        if len(double_prediction_buffer) == 5:
-            # Pick the winner via voting
-            pred_name = max(set(double_prediction_buffer), key=list(double_prediction_buffer).count)
-        
-        # STEP 2: DYNAMIC SMOOTHING (Layer 2 - Dynamic Damping)
-        # Use heavier damping (0.1) for joined overdrive mudras, 0.2 for others
-        alpha = 0.1 if pred_name in JOINED_STABILITY_OVERDRIVE else 0.2
-        
-        if ema_double_accuracy == 0:
-            ema_double_accuracy = accuracy
-        else:
-            ema_double_accuracy = (alpha * accuracy) + ((1 - alpha) * ema_double_accuracy)
-        
-        accuracy = float(round(ema_double_accuracy, 1))
-
-        # STEP 3: NOISE FILTER (Layer 7 - Hard 65% Floor)
-        # Effectively zeros out mid-range flicker zone
-        if accuracy < 65:
-            accuracy = 0.0
-            ema_double_accuracy = 0.0 
-
-        # STEP 4: OVERDRIVE LOCK & FREEZE (Layer 5 & 6)
-        # Once form is correct, 'hold your breath' for the lock duration
-        if accuracy > 90:
-            # Dynamic lock length: 25 frames for joined hands, 10 for others
-            double_lock_counter = OVERDRIVE_LOCK_FRAMES if pred_name in JOINED_STABILITY_OVERDRIVE else DOUBLE_LOCK_FRAMES
-            double_locked_acc   = accuracy
-            
-        if double_lock_counter > 0:
-            double_lock_counter -= 1
-            accuracy = double_locked_acc
-
-        # Final Stability Freezing Logic
-        is_stable = bool(accuracy >= 70.0) and is_stable_global
-        
-        if is_stable and accuracy > 85:
-            if not double_freeze:
-                double_freeze = True
-                double_freeze_acc = accuracy
-        
-        if double_freeze:
-            # Break freeze only on significant drop or mudra change (checked in Isolation)
-            if accuracy < 60:
-                double_freeze = False
-            else:
-                accuracy = double_freeze_acc
-
-        # Combine accuracy threshold with frame agreement check (Phase 14)
-        is_stable = bool(accuracy >= 70.0) and is_stable_global
-        
-        # ── INTEGRATE IS_HAND_HELD (DECOUPLED) ────────────────────────────
-        # Send right/left combined landmarks to velocity processor
-        combined_lms = right_pts if (right_pts and not left_pts) else left_pts if (left_pts and not right_pts) else right_pts
-        held, hold_progress = is_hand_held_double(combined_lms, current_accuracy=accuracy)
-
-        # [PHASE 13] RESULT FALLBACK (Double Hand Finalization)
-        res_dict = {
-            'detected':    bool(raw_conf >= (0.15 if target in CROSS_MUDRAS else 0.22)),
-            'name':        str(pred_name),
-            'confidence':  float(round(raw_conf, 3)),
-            'accuracy':    accuracy,
-            'is_stable':   is_stable,
-            'corrections': corrections,
-            'both_hands':  bool(right_pts is not None and left_pts is not None),
-            'hold_progress': hold_progress,
-            'is_held':     held
-        }
-        
-        if target and target in JOINED_MUDRAS:
-            # 1. Update Cache on High Accuracy
-            if accuracy >= 95.0:
-                last_good_data[target] = res_dict
-            
-            # 2. Serve Fallback on Sudden Drop (Noise/Blink)
-            if accuracy < 25.0 and target in last_good_data:
-                # Bridge the blink using the perfect anchor
-                return jsonify(last_good_data[target])
-
-        # Missing hand warning (unified list)
-        if target and not (not right_pts and not left_pts):
-            if target not in CROSS_MUDRAS:
-                if not right_pts:
-                    corrections.insert(0, f"Show your right hand for {original_target}")
-                elif not left_pts:
-                    corrections.insert(0, f"Show your left hand for {original_target}")
-
-        print(f"[double] pred={pred_name} raw={raw_conf:.3f} final={accuracy:.1f}% target={target}")
+            accuracy = conf
 
         return jsonify({
-            'detected':    bool(raw_conf >= (0.15 if target in CROSS_MUDRAS else 0.22)), # Lowered for crossed mudras
-            'name':        str(pred_name),
-            'confidence':  float(round(raw_conf, 3)),
-            'accuracy':    float(accuracy),
-            'corrections': corrections,
-            'is_stable':   bool(is_stable),
-            'both_hands':  bool(right_pts is not None and left_pts is not None),
+            "detected":    conf >= 45.0,
+            "name":        name,
+            "confidence":  conf,
+            "accuracy":    accuracy,
+            "corrections": corrections,
+            "is_stable":   conf >= 55.0,
+            "hold_progress": 0,
+            "both_hands": True
         })
 
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         print(f"[detect_double_landmarks] EXCEPTION:\n{tb}")
-        return jsonify({'detected': False, 'name': '', 'confidence': 0,
-                        'accuracy': 0, 'corrections': [f'Server error: {str(e)}'],
-                        'traceback': tb, 'is_stable': False}), 500
+        return jsonify({
+            "detected": False, "name": "", "confidence": 0,
+            "accuracy": 0, "corrections": [f"Server error: {str(e)}"],
+            "is_stable": False, "hold_progress": 0, "both_hands": False
+        }), 500
 
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")

@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getSocket } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
-import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle, Volume2 } from 'lucide-react';
 
 const RTC_CONFIG = {
   iceServers: [
@@ -61,10 +61,14 @@ const StudentVideo = ({ stream, name }) => {
         console.log('[WebRTC Teacher] Attaching stream to monitor for:', name);
         videoRef.current.srcObject = stream;
       }
-      // Force play
-      videoRef.current.play().catch(err => {
-        console.warn('[WebRTC Teacher] Monitor play failed:', err);
-      });
+      
+      // Auto-play the monitor (Audio will play if the browser is 'unlocked' by a user gesture)
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.warn('[WebRTC Teacher] Monitor playback blocked (gesture needed):', name, err);
+        });
+      }
     }
   }, [stream, name]);
 
@@ -73,10 +77,29 @@ const StudentVideo = ({ stream, name }) => {
       ref={videoRef}
       autoPlay
       playsInline
-      muted
       className="w-full h-full object-cover"
       style={{ transform: 'scaleX(-1)' }}
     />
+  );
+};
+
+// ── Shared Premium Utilities ──────────────────────────
+const CircularScore = ({ score, color = '#10B981', size = 42 }) => {
+  const radius = (size / 2) - 4;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+
+  return (
+    <div className="relative flex items-center justify-center transition-all duration-700" style={{ width: size, height: size }}>
+      <svg className="transform -rotate-90" width={size} height={size}>
+        <circle cx={size/2} cy={size/2} r={radius} stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/5" />
+        <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="3" fill="transparent"
+          strokeDasharray={circumference}
+          style={{ strokeDashoffset: offset, transition: 'stroke-dashoffset 0.8s ease-in-out', strokeLinecap: 'round' }}
+        />
+      </svg>
+      <span className="absolute text-[10px] font-black text-white">{Math.round(score)}</span>
+    </div>
   );
 };
 
@@ -111,6 +134,7 @@ const StaffConductClass = () => {
   const lastOfferTimeRef = useRef(new Map());
   // NEW: lock to prevent concurrent answer processing for same student
   const processingAnswerRef = useRef(new Map());
+  const socketToUserIdRef = useRef({});
 
   useEffect(() => {
     const init = async () => {
@@ -252,19 +276,30 @@ const StaffConductClass = () => {
       if (peerConnectionsRef.current.get(studentSocketId) !== pc) return;
 
       console.log(`[WebRTC Teacher] Got track from student ${studentSocketId}:`, event.track.kind);
+      
+      const studentId = socketToUserIdRef.current[studentSocketId];
+      if (!studentId) {
+        console.warn('[WebRTC Teacher] ontrack — no userId registered for socket:', studentSocketId);
+        return;
+      }
+
+      // Use the first stream provided by the browser (Standard Unified Plan behavior)
+      const remoteStream = event.streams[0];
+      if (!remoteStream) {
+        console.error('[WebRTC Teacher] No stream provided in ontrack for:', studentSocketId);
+        return;
+      }
+
       setStudents(prev => {
-        const studentId = Object.keys(prev).find(id => prev[id].socketId === studentSocketId);
-        if (!studentId) return prev;
+        if (!prev[studentId]) return prev;
 
-        // FIX: Create a NEW MediaStream instance so React detects the reference change
-        // This ensures the StudentVideo component re-attaches the stream when new tracks arrive
-        const oldStream = prev[studentId].remoteStream;
-        const newStream = new MediaStream(oldStream ? oldStream.getTracks() : []);
-        newStream.addTrack(event.track);
+        // Only update state if it's a new stream object or if we don't have one yet
+        if (prev[studentId].remoteStream === remoteStream) return prev;
 
+        console.log('[WebRTC Teacher] Updating remoteStream for student:', studentId);
         return {
           ...prev,
-          [studentId]: { ...prev[studentId], remoteStream: newStream }
+          [studentId]: { ...prev[studentId], remoteStream: remoteStream }
         };
       });
     };
@@ -377,6 +412,9 @@ const StaffConductClass = () => {
         if (data.name === 'Teacher' || data.isTeacher) return;
         console.log('[WebRTC Teacher] Student joined:', data.name, data.id);
 
+        // ✅ Register mapping immediately
+        socketToUserIdRef.current[data.id] = data.userId;
+
         setStudents(prev => prev[data.userId] ? prev : {
           ...prev,
           [data.userId]: {
@@ -393,8 +431,12 @@ const StaffConductClass = () => {
       // Students already in room when teacher joins
       s.on('current_participants', (participants) => {
         participants.forEach(p => {
-          if (p.name === 'Teacher' || p.isTeacher) return;
-          setStudents(prev => prev[p.userId] ? prev : {
+            if (p.name === 'Teacher' || p.isTeacher) return;
+            
+            // ✅ Register mapping for existing participants
+            socketToUserIdRef.current[p.id] = p.userId;
+
+            setStudents(prev => prev[p.userId] ? prev : {
             ...prev,
             [p.userId]: {
               socketId: p.id, name: p.name || 'Student',
@@ -421,9 +463,9 @@ const StaffConductClass = () => {
 
         // FIX 9: if we get an answer and we're stable, check if it's a "zombie" connection
         if (pc.signalingState === 'stable') {
-          // If we are stable but don't have tracks or connection is failed, allow a reset
+          // If we are stable but don't have tracks OR connection is failed, allow a reset
           const hasTracks = pc.getReceivers().some(r => r.track && r.track.readyState === 'live');
-          if (!hasTracks || pc.iceConnectionState === 'failed') {
+          if (!hasTracks || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
             console.log('[WebRTC Teacher] Connection looks stale/zombie — force-restarting for:', studentSocketId);
             processingAnswerRef.current.delete(studentSocketId);
             handleCreateOffer(studentSocketId);
@@ -483,6 +525,9 @@ const StaffConductClass = () => {
       });
 
       s.on('participant_left', (data) => {
+        // ✅ Cleanup mapping
+        delete socketToUserIdRef.current[data.id];
+
         setStudents(prev => { const u = { ...prev }; delete u[data.userId]; return u; });
         const pc = peerConnectionsRef.current.get(data.id);
         if (pc) {
@@ -662,35 +707,59 @@ const StaffConductClass = () => {
           <h1 className="font-bold truncate max-w-[200px]" style={{ color: 'var(--text)' }}>{classData?.title}</h1>
         </div>
         <div className="flex items-center space-x-6">
-          {/* Spotlight Controls in Header */}
-          <div className="flex items-center bg-zinc-900/50 rounded-xl p-1 border border-white/5">
-            <div className="flex items-center px-3 space-x-3 border-r border-white/10">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Target</span>
-              <select 
-                value={currentMudra} 
-                onChange={e => handleMudraChange(e.target.value)}
-                className="bg-transparent text-xs font-black text-orange-500 outline-none cursor-pointer"
-              >
-                {(classData?.mudrasList || []).map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
-              </select>
+          {/* Unified Spotlight Pill */}
+          <div className="flex items-center bg-zinc-950 rounded-2xl p-1 border border-white/10 shadow-2xl shadow-black/50 overflow-hidden">
+            <div className="flex items-center px-4 py-1.5 space-x-3 border-r border-white/5 bg-gradient-to-r from-orange-500/10 to-transparent">
+              <Target className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+              <div className="flex flex-col">
+                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Target Mudra</span>
+                <select 
+                  value={currentMudra} 
+                  onChange={e => handleMudraChange(e.target.value)}
+                  className="bg-transparent text-xs font-black text-[#f97316] outline-none cursor-pointer hover:text-orange-400 transition-colors"
+                  style={{ textShadow: '0 0 10px rgba(249,115,22,0.3)' }}
+                >
+                  {(classData?.mudrasList || []).map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
+                </select>
+              </div>
             </div>
-            <div className="flex items-center px-3 space-x-4">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">AI Practice</span>
-              <div
-                onClick={() => handleModuleToggle('mudra')}
-                className="w-10 h-5 rounded-full cursor-pointer transition-all duration-300 relative border border-white/10"
-                style={{
-                  backgroundColor: activeModules.mudra ? '#10B981' : '#374151',
-                  boxShadow: activeModules.mudra ? '0 0 10px rgba(16,185,129,0.3)' : 'none'
-                }}
-              >
-                <div className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all duration-300 ${activeModules.mudra ? 'left-5.5' : 'left-0.5'}`}
-                  style={{ left: activeModules.mudra ? '22px' : '2px' }} />
+            <div className="flex items-center px-5 py-1.5 space-x-4">
+              <div className="flex flex-col">
+                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">AI Module</span>
+                <div
+                  onClick={() => handleModuleToggle('mudra')}
+                  className="w-9 h-4.5 rounded-full cursor-pointer transition-all duration-500 relative border border-white/10 shadow-inner"
+                  style={{
+                    backgroundColor: activeModules.mudra ? '#10B981' : '#374151',
+                    boxShadow: activeModules.mudra ? '0 0 15px rgba(16,185,129,0.2)' : 'none'
+                  }}
+                >
+                  <div className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-md transition-all duration-500 ${activeModules.mudra ? 'left-5' : 'left-0.5'}`} />
+                </div>
               </div>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            <Volume2 
+              className="w-4 h-4 text-emerald-500 cursor-pointer hover:scale-110 transition-transform" 
+              onClick={() => {
+                const audios = document.querySelectorAll('video');
+                audios.forEach(a => {
+                  a.play().catch(() => {});
+                  if (a.paused) a.muted = false;
+                });
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                if (ctx.state === 'suspended') ctx.resume();
+                const osc = ctx.createOscillator();
+                osc.connect(ctx.destination);
+                osc.start(); osc.stop(ctx.currentTime + 0.1);
+                console.log('[Audio] Browser audio context manually unlocked');
+                setAnnouncement('Audio playback unblocked');
+                setTimeout(() => setAnnouncement(''), 3000);
+              }}
+              title="Unblock Student Audio"
+            />
             <Clock className="w-4 h-4 text-orange-500" />
             <span className="font-mono text-sm font-bold">{formatTime(timer)}</span>
           </div>
@@ -721,13 +790,47 @@ const StaffConductClass = () => {
 
           {/* Removed redundant Target Mudra and AI Modules from sidebar — now in header */}
 
-          <div className="mt-auto p-4 rounded-2xl bg-zinc-900 space-y-2">
-            <p className="text-[10px] font-bold uppercase text-zinc-500">Broadcast</p>
-            <textarea value={announcement} onChange={e => setAnnouncement(e.target.value)}
-              placeholder="Message..." className="w-full bg-transparent border-b border-white/10 text-xs py-1" />
-            <button onClick={handleBroadcastAnnouncement}
-              className="w-full py-2 bg-blue-500 text-white rounded-lg text-[10px] font-black uppercase">
-              Send
+          <div className="p-4 rounded-2xl bg-black/40 border border-white/5 backdrop-blur-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-black tracking-widest uppercase text-zinc-500">Rankings</p>
+              <Award className="w-3.5 h-3.5 text-yellow-500" />
+            </div>
+            <div className="space-y-3 custom-scrollbar max-h-[200px] overflow-y-auto pr-2">
+              {Object.values(students)
+                .sort((a, b) => b.score - a.score)
+                .map((s, idx) => (
+                  <div key={s.socketId || idx} className="space-y-1.5 animate-fadeIn" style={{ animationDelay: `${idx * 100}ms` }}>
+                    <div className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-4 font-black ${idx === 0 ? 'text-yellow-500' : 'text-zinc-600'}`}>{idx + 1}</span>
+                        <span className="font-bold text-zinc-300 truncate max-w-[80px]">{s.name}</span>
+                      </div>
+                      <span className="font-black text-white">{s.score}%</span>
+                    </div>
+                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 transition-all duration-700" style={{ width: `${s.score}%` }} />
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          <div className="mt-auto p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-3">
+            <div className="flex items-center gap-2">
+              <Send className="w-3.5 h-3.5 text-blue-500" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Broadcast</p>
+            </div>
+            <textarea 
+              value={announcement} 
+              onChange={e => setAnnouncement(e.target.value)}
+              placeholder="Type announcement..." 
+              className="w-full bg-black/30 border border-white/5 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-blue-500/50 transition-all resize-none h-20" 
+            />
+            <button 
+              onClick={handleBroadcastAnnouncement}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
+            >
+              Push To Students
             </button>
           </div>
         </div>
@@ -742,22 +845,26 @@ const StaffConductClass = () => {
           </div>
 
           {/* Teacher Media Controls */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 z-20">
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-5 z-20">
             <button
               onClick={toggleMic}
-              className={`p-4 rounded-2xl backdrop-blur-md border transition-all ${
-                isMicOn ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30'
+              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${
+                isMicOn 
+                ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' 
+                : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
               }`}
             >
-              {isMicOn ? <Mic size={20} /> : <MicOff size={20} />}
+              {isMicOn ? <Mic size={24} /> : <MicOff size={24} />}
             </button>
             <button
               onClick={toggleCamera}
-              className={`p-4 rounded-2xl backdrop-blur-md border transition-all ${
-                isCameraOn ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30'
+              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${
+                isCameraOn 
+                ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' 
+                : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
               }`}
             >
-              {isCameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+              {isCameraOn ? <Video size={24} /> : <VideoOff size={24} />}
             </button>
           </div>
 
@@ -781,62 +888,76 @@ const StaffConductClass = () => {
 
           {Object.keys(students).length > 0 ? (
             <div className="space-y-6">
-              {Object.entries(students).map(([studentId, data]) => (
+              {Object.entries(students).map(([studentId, data], idx) => (
                 <div key={studentId}
-                  className={`p-4 rounded-2xl border-2 transition-all duration-500 overflow-hidden ${
-                    data.score >= 90 ? 'border-emerald-500/50 bg-emerald-500/5 shadow-[0_0_25px_rgba(16,185,129,0.2)]' :
-                    data.score >= 75 ? 'border-yellow-500/50 bg-yellow-500/5' :
-                    'border-red-500/50 bg-red-500/5'
-                  }`}>
+                  className={`relative p-5 rounded-[2rem] border-2 transition-all duration-700 animate-fadeIn overflow-hidden ${
+                    data.score >= 90 ? 'border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_40px_rgba(16,185,129,0.15)]' :
+                    data.score >= 75 ? 'border-amber-500/40 bg-amber-500/5 shadow-[0_0_30px_rgba(245,158,11,0.1)]' :
+                    'border-red-500/40 bg-red-500/5 shadow-[0_0_30px_rgba(239,68,68,0.1)]'
+                  }`}
+                  style={{ animationDelay: `${idx * 150}ms` }}
+                >
+                  {/* Decorative corner glow */}
+                  <div className={`absolute -top-10 -right-10 w-32 h-32 rounded-full blur-[60px] opacity-20 ${
+                    data.score >= 90 ? 'bg-emerald-500' : data.score >= 75 ? 'bg-amber-500' : 'bg-red-500'
+                  }`} />
 
-                  <div className="relative aspect-video rounded-xl bg-black mb-4 overflow-hidden border border-white/5">
+                  <div className="relative aspect-video rounded-2xl bg-black mb-5 overflow-hidden border border-white/10 group shadow-2xl">
                     {data.remoteStream ? (
                       <StudentVideo stream={data.remoteStream} name={data.name} />
                     ) : data.frame ? (
-                      <img src={data.frame} className="w-full h-full object-cover grayscale-[0.3]"
+                      <img src={data.frame} className="w-full h-full object-cover grayscale-[0.2]"
                         style={{ transform: 'scaleX(-1)' }} alt={data.name} />
                     ) : (
-                      <div className="h-full flex flex-col items-center justify-center opacity-20">
-                        <Users className="w-6 h-6 mb-2 text-white" />
-                        <span className="text-[8px] font-bold uppercase tracking-widest">Waiting for feed...</span>
+                      <div className="h-full flex flex-col items-center justify-center opacity-30">
+                        <Users className="w-8 h-8 mb-3 text-white animate-pulse" />
+                        <span className="text-[10px] font-black uppercase tracking-[3px]">Awaiting Stream</span>
                       </div>
                     )}
-                    <div className="absolute top-2 right-2 flex items-center space-x-1 px-2 py-0.5 rounded bg-black/80 border border-white/10">
-                      <div className={`w-1.5 h-1.5 rounded-full ${
-                        !activeModules.mudra ? 'bg-zinc-600' :
-                        data.score >= 90 ? 'bg-emerald-500' : data.score >= 75 ? 'bg-yellow-500' : 'bg-red-500'
-                      } ${activeModules.mudra ? 'animate-pulse' : ''}`} />
-                      <span className="text-[10px] font-black text-white">
-                        {activeModules.mudra ? `${data.score}%` : 'Off'}
-                      </span>
+                    
+                    {/* Floating Circular Score Overlay */}
+                    <div className="absolute top-3 right-3 p-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 group-hover:scale-110 transition-transform duration-500">
+                      <CircularScore 
+                        score={data.score} 
+                        color={data.score >= 90 ? '#10B981' : data.score >= 75 ? '#F59E0B' : '#EF4444'} 
+                      />
+                    </div>
+
+                    <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-white/10 flex items-center space-x-1.5">
+                      <div className={`w-1.5 h-1.5 rounded-full ${data.score >= 90 ? 'bg-emerald-500' : 'bg-zinc-500 opacity-50'} animate-pulse`} />
+                      <span className="text-[8px] font-black uppercase text-white/70">Secure Handshake</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start">
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-center">
                       <div>
-                        <h3 className="text-xs font-bold text-white mb-0.5">{data.name}</h3>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Current:</span>
-                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter">
-                            {activeModules.mudra ? (data.mudra || 'None') : 'Paused'}
+                        <h3 className="text-sm font-black text-white tracking-wide">{data.name}</h3>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <Activity className="w-3 h-3 text-zinc-500" />
+                          <span className={`text-[11px] font-black uppercase tracking-tight ${
+                            data.mudra && data.mudra !== 'No Hand' ? 'text-blue-400' : 'text-zinc-500'
+                          }`}>
+                            {activeModules.mudra ? (data.mudra || 'No Action') : 'AI Paused'}
                           </span>
                         </div>
                       </div>
-                      <span className={`text-[9px] font-black uppercase px-2 py-1 rounded bg-white/5 ${
-                        data.score >= 90 ? 'text-emerald-400' :
-                        data.score >= 75 ? 'text-yellow-400' :
-                        'text-red-400'
+                      <span className={`text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-xl border ${
+                        data.score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
+                        data.score >= 75 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' :
+                        'text-red-400 border-red-500/30 bg-red-500/10'
                       }`}>{data.status}</span>
                     </div>
-                    <div className="relative h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+
+                    {/* Premium Gradient Progress Bar */}
+                    <div className="relative h-2.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                       <div
-                        className={`absolute top-0 left-0 h-full transition-all duration-700 ease-out ${
-                          data.score >= 90 ? 'bg-emerald-500' :
-                          data.score >= 75 ? 'bg-yellow-500' :
-                          'bg-red-500'
+                        className={`absolute top-0 left-0 h-full transition-all duration-1000 ease-out rounded-full bg-gradient-to-r ${
+                          data.score >= 90 ? 'from-emerald-600 to-emerald-400' :
+                          data.score >= 75 ? 'from-amber-600 to-amber-400' :
+                          'from-red-600 to-red-400'
                         }`}
-                        style={{ width: `${data.score}%` }}
+                        style={{ width: `${data.score}%`, boxShadow: '0 0 20px rgba(0,0,0,0.5)' }}
                       />
                     </div>
                   </div>
@@ -844,30 +965,28 @@ const StaffConductClass = () => {
               ))}
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4 py-20 text-center">
-              <Users size={48} />
-              <p className="text-xs font-bold uppercase tracking-widest">Waiting for students to join...</p>
-            </div>
-          )}
-
-          {Object.keys(students).length > 0 && (
-            <div className="mt-8 pt-6 border-t border-white/5">
-              <h3 className="text-[10px] font-black uppercase tracking-[2px] text-zinc-500 mb-4">Rankings</h3>
-              <div className="space-y-2">
-                {Object.values(students)
-                  .sort((a, b) => b.score - a.score)
-                  .map((s, idx) => (
-                    <div key={s.socketId || idx} className="flex items-center justify-between text-[10px]">
-                      <span className="text-zinc-600 w-4 font-black">{idx + 1}</span>
-                      <span className="flex-1 font-bold text-zinc-400 truncate px-2">{s.name}</span>
-                      <span className="font-black text-zinc-200">{s.score}%</span>
-                    </div>
-                  ))}
+            <div className="h-[60vh] flex flex-col items-center justify-center opacity-20 space-y-6 text-center">
+              <div className="relative">
+                <Users size={80} className="text-white" />
+                <div className="absolute inset-0 bg-blue-500 blur-[80px] opacity-30" />
               </div>
+              <p className="text-sm font-black uppercase tracking-[6px] text-white">Observing Classroom Presence</p>
             </div>
           )}
         </div>
       </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn { animation: fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1) both; }
+      `}</style>
     </div>
   );
 };
