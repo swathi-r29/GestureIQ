@@ -139,6 +139,13 @@ _face_mesh = _mp_face.FaceMesh(
     min_tracking_confidence=0.5,
 )
 
+# --- GLOBAL STABILITY REGISTRY ---
+# Using a global dict is much more stable than attaching attributes to functions.
+SMOOTHING_REGISTRY = {
+    "single": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""},
+    "double": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""}
+}
+
 cap = cv2.VideoCapture(0)
 
 # =============================================================================
@@ -193,11 +200,11 @@ last_valid_right      = None
 last_valid_left       = None
 
 # --- Samyuta Categories (Phase 16) ---
-CROSS_MUDRAS = ['svastika', 'utsanga', 'nagabandha', 'khatwa', 'bherunda', 'bheranda', 'kartarisvastika']
-JOINED_MUDRAS = ['anjali', 'kapotha', 'pushpaputa', 'samputa', 'shankha', 'chakra', 'matsya', 'kurma', 'varaha']
+CROSS_MUDRAS = ['svastika', 'utsanga', 'nagabandha', 'katva', 'bherunda', 'katakavardhana', 'kartarisvastika']
+JOINED_MUDRAS = ['anjali', 'kapotha', 'puspaputa', 'samputa', 'sankha', 'chakra', 'matsya', 'kurma', 'varaha']
 STACKED_MUDRAS = ['sivalinga', 'matsya']
-INTERLOCKED_MUDRAS = ['pasha', 'kilaka', 'karkata']
-ALL_DOUBLE_MUDRAS = JOINED_MUDRAS + STACKED_MUDRAS + CROSS_MUDRAS + INTERLOCKED_MUDRAS
+INTERLOCKED_MUDRAS = ['pasa', 'kilaka', 'karkata']
+ALL_DOUBLE_MUDRAS = JOINED_MUDRAS + STACKED_MUDRAS + CROSS_MUDRAS + INTERLOCKED_MUDRAS + ['sakata', 'dola']
 
 # [PHASE 13] Landmark Anchoring & Result Fallback
 last_good_data = {} # { 'mudra_name': { result_dict } }
@@ -330,29 +337,29 @@ MUDRA_MEANINGS = {
     "vyaaghr":      "Tiger — regional mudra",
 
     # Double Hand Mudra Meanings
-    "anjali":          "Offering — greeting, prayer, respect",
-    "kapotha":         "Pigeon — respectful address, humble request",
-    "karkata":         "Crab — coming together, collective strength",
-    "svastika":        "Crossed — fear, praise, dispute",
-    "dola":            "Swing — beginning of dance, relaxation",
-    "puspaputa":       "Flower casket — offering flowers, receiving gifts",
-    "utsanga":         "Embrace — modesty, embrace, cold",
-    "sivalinga":       "Lord Shiva — representation of Shiva Linga",
-    "katakavardhana":  "Bracelet cross — marriage, coronation, worship",
-    "kartarisvastika": "Scissors cross — trees, hill tops, peaks",
-    "sakata":          "Demon / Cart — representation of a demon or cart",
-    "sankha":          "Conch — conch shell, ritual sound",
-    "chakra":          "Wheel / Disc — Lord Vishnu's discus, wheel",
-    "samputa":         "Casket — hiding a secret, closing a box",
-    "pasa":            "Noose — quarrel, rope, bond",
-    "kilaka":          "Bond — friendship, affection, talk",
-    "matsya":          "Fish — fish, Lord Vishnu's Matsya avatar",
-    "kurma":           "Tortoise — tortoise, Lord Vishnu's Kurma avatar",
-    "varaha":          "Boar — wild boar, Lord Vishnu's Varaha avatar",
-    "garuda":          "Eagle — Garuda bird, flying",
-    "nagabandha":      "Serpent bond — snakes, coiling, twin bond",
-    "bherunda":        "Two-headed bird — mythical bird Bherunda",
-    "katva":           "Cot — bed, cot, litter",
+    "anjali":          "Salutation — prayer, greeting, offering",
+    "kapotha":         "Pigeon — respect, shyness",
+    "karkata":         "Crab — stretching, abundance",
+    "svastika":        "Cross/Auspicious — blessing",
+    "dola":            "Swing — beginning of a dance",
+    "puspaputa":       "Flower basket — offering flowers, puja",
+    "utsanga":         "Embrace — hug, self-comfort",
+    "sivalinga":       "Lord Shiva — strength, creation",
+    "katakavardhana":  "Link of bracelets — coronation, worship",
+    "kartarisvastika": "Crossed scissors — trees, branches, hills",
+    "sakata":          "Cart/Demon — shakata demon, cart",
+    "sankha":          "Conch — conch shell, sacred sound",
+    "chakra":          "Wheel/Disc — Sudarshana chakra, spinning disc",
+    "samputa":         "Hollow container — offering bowl, vessel",
+    "pasa":            "Noose/Rope — binding, Varuna's noose",
+    "kilaka":          "Bond/Link — chain, bond, link",
+    "matsya":          "Fish — Matsya avatar, water",
+    "kurma":           "Tortoise — Kurma avatar, stability",
+    "varaha":          "Boar — Varaha avatar, lifting earth",
+    "garuda":          "Eagle/Garuda — Vishnu's eagle",
+    "nagabandha":      "Serpent bond — snakes intertwined",
+    "bherunda":        "Fierce bird — power",
+    "katva":           "Bedpost — furniture, post, pillar",
 }
 
 # =============================================================================
@@ -1369,47 +1376,57 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
                 is_stable   = True
 
-        # FIX: Use stable_name (post-hybrid) not top_name for wrong mudra check
-        wrong_mudra = False
-        if target_key:
-            if stable_name.lower().strip() != target_key and raw_conf >= 20:
-                wrong_mudra = True
-            # Also catch cases where the ML hallucinates the target, but geometry proves it's totally wrong
-            elif geom_scores.get(target_key, 0) < 40 and best_geom_acc > 70 and best_geom_name != target_key:
-                wrong_mudra = True
-                stable_name = best_geom_name
-
-        if wrong_mudra:
-            wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
-            corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
-            corrections.insert(0, wrong_msg)
-
-        stability_factor = 1.0 if is_stable else 0.80
-        total_accuracy   = ((smooth_conf * 0.7) + (art_accuracy * 0.3)) * stability_factor
-
-        if wrong_mudra:
-            print(f"[DEBUG] Wrong Mudra! Target={target_key}, Detected={stable_name}")
-            total_accuracy = 0.0
+        # --- STRICT VALIDATION LAYERS ---
+        # 1. Identity Gate: If ML is sure it's the WRONG mudra, kill accuracy immediately.
+        is_wrong_identity = (target_key and stable_name.lower().strip() != target_key and smooth_conf > 45)
+        
+        if is_wrong_identity:
+            # Check if geometry is so perfect (>85%) it overrides the ML's wrong label
+            # This is rare but useful for very similar mudras
+            if art_accuracy < 85:
+                print(f"[STRICT] Wrong Identity: ML={stable_name}, Target={target_key}. Killing accuracy.")
+                total_accuracy = 0.0
+                wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
+                corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
+                corrections.insert(0, wrong_msg)
         elif target_key and stable_name.lower().strip() == target_key:
+            # Boost accuracy slightly if it's the correct mudra and geometry is good
             total_accuracy = min(100.0, total_accuracy + 10)
 
-        # ── SUCCESS HYSTERESIS (Unified Phase 10) ─────────────────────────
-        # 1. Smooth the final accuracy score
-        if not hasattr(run_madm, "smooth_acc"):
-            run_madm.smooth_acc = total_accuracy
+        # 2. Layer 7 Noise Filter: Hard floor at 65%
+        if total_accuracy < 65.0:
+            total_accuracy = 0.0
+
+        # --- STATE RESET & ASYMMETRIC SMOOTHING (GLOBAL REGISTRY) ---
+        st = SMOOTHING_REGISTRY["single"]
+        curr_target = target_mudra.lower().strip()
         
-        alpha_smooth = 0.15 # Unified damping factor
-        run_madm.smooth_acc = (run_madm.smooth_acc * (1.0 - alpha_smooth)) + (total_accuracy * alpha_smooth)
+        # Reset if target changes
+        if curr_target != st["last_target"]:
+            st["smooth_acc"]  = total_accuracy
+            st["prev_display"] = total_accuracy
+            st["last_target"]  = curr_target
+
+        # Asymmetric Rise (Instant Feedback)
+        if total_accuracy > st["smooth_acc"]:
+            st["smooth_acc"] = total_accuracy
+        else:
+            # Smooth Fall (Stability)
+            alpha_smooth = 0.15
+            st["smooth_acc"] = (st["smooth_acc"] * (1.15 - 0.15)) + (total_accuracy * 0.15) # Simplified EMA logic check
+            # Correction: EMA formula is (old * (1-alpha)) + (new * alpha)
+            st["smooth_acc"] = (st["smooth_acc"] * (1.0 - 0.15)) + (total_accuracy * 0.15)
         
-        # 2. Prevent "Rapid Drops" (3% max per frame)
-        if not hasattr(run_madm, "prev_display"):
-            run_madm.prev_display = run_madm.smooth_acc
-            
-        if run_madm.smooth_acc < run_madm.prev_display:
-            run_madm.smooth_acc = float(max(run_madm.smooth_acc, run_madm.prev_display - 3.0))
+        # Guard against rapid drops
+        if st["smooth_acc"] < st["prev_display"]:
+            st["smooth_acc"] = float(max(st["smooth_acc"], st["prev_display"] - 3.0))
         
-        run_madm.prev_display = run_madm.smooth_acc
-        total_accuracy = float(round(run_madm.smooth_acc, 1))
+        st["prev_display"] = st["smooth_acc"]
+        total_accuracy = float(round(st["smooth_acc"], 1))
+
+        # Layer 7 Noise Filter: Hard floor at 40% (allows earlier feedback)
+        if total_accuracy < 40.0:
+            total_accuracy = 0.0
 
         print(f"[DEBUG] Final Accuracy: {total_accuracy:.1f} (Geom: {art_accuracy:.1f}, ML: {smooth_conf:.1f})")
 
@@ -1988,82 +2005,253 @@ def predict_double():
         print(f"[predict_double] Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+def compute_double_geometric_score(target, right_lms, left_lms):
+    """
+    Returns a geometry-based accuracy score (0–100) for double-hand mudras.
+
+    Uses raw JSON landmark dicts {"x":…, "y":…, "z":…} from the request body.
+    Falls back to 50.0 on any error so the caller always gets a usable value.
+
+    Landmark indices (MediaPipe 21-point skeleton [Ref 1]):
+        0  = wrist          9  = mid-palm (metacarpal)
+        8  = index tip     12  = middle tip
+        16 = ring tip      20  = pinky tip
+    """
+    def p(lst, i):
+        return (float(lst[i]['x']), float(lst[i]['y']))
+
+    def d(a, b):
+        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+    def prox(dist, max_d):
+        """Linear proximity: 0 apart → 100 %, max_d apart → 0 %."""
+        return max(0.0, (max_d - dist) / max_d * 100.0)
+
+    try:
+        rW = p(right_lms,  0);  lW = p(left_lms,  0)   # wrists
+        rI = p(right_lms,  8);  lI = p(left_lms,  8)   # index tips
+        rM = p(right_lms, 12);  lM = p(left_lms, 12)   # middle tips
+        rR = p(right_lms, 16);  lR = p(left_lms, 16)   # ring tips
+        rP = p(right_lms, 20);  lP = p(left_lms, 20)   # pinky tips
+
+        wd            = d(rW, lW)
+        fingertip_avg = (d(rI, lI) + d(rM, lM) + d(rR, lR) + d(rP, lP)) / 4
+
+        t = target
+
+        # ── JOINED family ────────────────────────────────────────────────
+        if t == 'anjali':
+            # Palms pressed flat — primary signal is wrist proximity [Ref 3]
+            p_score = prox(wd, 0.24)
+            # Bonus: fingertips pointing upward (tip.y < wrist.y in normalised coords)
+            r_up = 1.0 if rI[1] < rW[1] else 0.0
+            l_up = 1.0 if lI[1] < lW[1] else 0.0
+            return min(100.0, p_score * 0.85 + (r_up + l_up) * 7.5)
+
+        elif t == 'kapotha':
+            # Hollow pigeon — wrists edge-to-edge, slight gap at palm centre
+            return prox(wd, 0.30)
+
+        elif t == 'puspaputa':
+            # Side-by-side cupped palms — wrists adjacent, slightly wider gap
+            return prox(wd, 0.32)
+
+        elif t == 'samputa':
+            # Closed box — symmetric, very close
+            return prox(wd, 0.26)
+
+        elif t in ('sankha', 'chakra'):
+            # Interlocked circular — moderate proximity
+            return prox(wd, 0.28)
+
+        # ── INTERLOCKED family ────────────────────────────────────────────
+        elif t == 'karkata':
+            # Fingers interdigitated — fingertip average distance is key
+            return prox(fingertip_avg, 0.22)
+
+        elif t in ('pasa', 'kilaka'):
+            # Hooked index/pinky — single fingertip pair
+            return prox(d(rI, lI), 0.20)
+
+        # ── STACKED family ────────────────────────────────────────────────
+        elif t == 'sivalinga':
+            # Right fist ON left flat palm — clear vertical stack
+            y_diff   = abs(rW[1] - lW[1])
+            x_align  = max(0.0, (0.22 - abs(rW[0] - lW[0])) / 0.22 * 50)
+            stk      = min(50.0, y_diff / 0.16 * 50)
+            return min(100.0, stk + x_align)
+
+        elif t in ('matsya', 'kurma', 'varaha'):
+            # One hand on back of other — vertical proximity + mild stack
+            y_diff  = abs(rW[1] - lW[1])
+            p_score = prox(wd, 0.30)
+            stk_b   = min(20.0, y_diff / 0.10 * 20)
+            return min(100.0, p_score * 0.8 + stk_b)
+
+        # ── CROSS/ARM family ──────────────────────────────────────────────
+        elif t in ('svastika', 'garuda'):
+            # Wrists crossed at centre
+            return prox(wd, 0.20)
+
+        elif t in ('utsanga', 'nagabandha', 'katva', 'bherunda',
+                   'katakavardhana', 'kartarisvastika'):
+            # Arms folded / crossed — slightly wider range
+            return prox(wd, 0.38)
+
+        # ── SPECIAL ───────────────────────────────────────────────────────
+        elif t == 'dola':
+            # Both hands hanging low — wrists should be in lower half of frame
+            r_low = max(0.0, (rW[1] - 0.45) / 0.55 * 100)
+            l_low = max(0.0, (lW[1] - 0.45) / 0.55 * 100)
+            return min(100.0, (r_low + l_low) / 2)
+
+        # ── Generic fallback ─────────────────────────────────────────────
+        else:
+            return prox(wd, 0.35)
+
+    except Exception as e:
+        print(f"[geo_score] Error for target='{target}': {e}")
+        return 50.0   # safe fallback
+
 @app.route('/api/detect_double_landmarks', methods=['POST'])
 def detect_double_landmarks():
     """
-    Finalized, Target-Verified Double Hand Detection for Presentation.
-    Fixes Case: '100% on wrong mudra' and 'No hand bias'.
+    Target-verified double-hand detection for LearnDouble.jsx.
+
+    Accuracy = 60 % ML confidence + 40 % geometric score [Ref 4].
+    If ML predicts the wrong class but geometry is strong (≥ 68 %),
+    we use geometry as an override so the user still gets feedback.
+
+    Isolation: sets is_double_mode = True, which prevents single-hand EMA
+    state from contaminating the double-hand pipeline (see run_madm guard).
     """
     global is_double_mode
     try:
         is_double_mode = True
-        body = request.get_json(force=True)
-        left_lms  = body.get('left_landmarks', [])
-        right_lms = body.get('right_landmarks', [])
-        target    = body.get('targetMudra', '').lower().strip()
-        
-        # Mapping to model class names
+        body       = request.get_json(force=True)
+        left_lms   = body.get('left_landmarks',  [])
+        right_lms  = body.get('right_landmarks', [])
+        target     = body.get('targetMudra', '').lower().strip()
+
+        # Normalise frontend names to model class names
         target = FRONTEND_TO_MODEL.get(target, target)
+
+        # ── Mirroring fallback for overlapping / crossed-wrist mudras ─────
+        # When both palms press together MediaPipe may only see one "blob".
+        # We mirror the available hand so the ML model still receives a full
+        # two-hand feature vector [Ref 2].
+        OVERLAP_PRONE = [
+            'anjali', 'kapotha', 'sivalinga', 'kartarisvastika', 'garuda',
+            'svastika', 'nagabandha', 'puspaputa', 'samputa', 'sankha',
+            'chakra', 'utsanga', 'bherunda', 'katakavardhana',
+        ]
+        if (not left_lms or not right_lms) and (left_lms or right_lms):
+            if target in OVERLAP_PRONE:
+                raw_pts  = left_lms if left_lms else right_lms
+                mirrored = [{'x': 1.0 - p['x'], 'y': p['y'], 'z': p['z']} for p in raw_pts]
+                if not left_lms:  left_lms  = mirrored
+                if not right_lms: right_lms = mirrored
 
         if not left_lms or not right_lms:
             return jsonify({
-                "detected": False, "name": "Missing Hand", "confidence": 0,
-                "accuracy": 0, "corrections": ["Show both hands clearly"],
-                "is_stable": False
+                'detected': False, 'name': 'Missing Hand', 'confidence': 0,
+                'accuracy': 0, 'corrections': ['Show both hands clearly'],
+                'is_stable': False,
             })
 
-        # Convert to Point list for feature extraction
         def to_pts(raw):
             return [LM(float(p['x']), float(p['y']), float(p['z'])) for p in raw]
-            
+
         right_list = to_pts(right_lms)
         left_list  = to_pts(left_lms)
 
-        # --- MIRRORING FALLBACK ---
-        # If one hand is missing but it's a JOINED mudra like Anjali, Kapotha, or Sivalinga
-        if (not right_list or not left_list) and target in ['anjali', 'kapotha', 'sivalinga']:
-            existing_pts = right_list if right_list else left_list
-            # Mirror the X coordinate to create the "Virtual" second hand
-            mirrored_pts = [LM(1.0 - p.x, p.y, p.z) for p in existing_pts]
-            
-            if not right_list: right_list = mirrored_pts
-            if not left_list:  left_list  = mirrored_pts
-
-        # Extraction and Prediction
-        feats = extract_double_features(left_list, right_list)
-        probs = _double_model.predict_proba([feats])[0]
+        # ── ML prediction ─────────────────────────────────────────────────
+        feats   = extract_double_features(left_list, right_list)
+        probs   = _double_model.predict_proba([feats])[0]
         classes = list(_double_model.classes_)
-        top_i = int(np.argmax(probs))
-        name  = str(classes[top_i])
-        conf  = round(float(probs[top_i]) * 100.0, 1)
+        top_i   = int(np.argmax(probs))
+        name    = str(classes[top_i])
+        conf    = round(float(probs[top_i]) * 100.0, 1)
+
+        # Diagnostic: print top-3 every call
+        top3_idx = np.argsort(probs)[::-1][:3]
+        print(f"[detect_double] target={target!r} | ML top-3:", [
+            f"{classes[i]}:{probs[i]*100:.0f}%" for i in top3_idx
+        ])
 
         corrections = []
-        accuracy = 0.0
+        raw_accuracy = 0.0
+
+        # ── Geometric score (always computed for target, used as fallback) ─
+        geo_score = compute_double_geometric_score(target, right_lms, left_lms) if target else 0.0
 
         if target:
-            # [FIX] Target Verification Guard
             if name == target:
-                # Correct mudra — use confidence boosted as accuracy
-                accuracy = round(min(conf * 1.05, 100.0), 1)
-                # Ensure 100% is only for very high confidence
-                if conf < 85: accuracy = min(accuracy, 94.0)
+                # ML agrees: blend ML (60 %) + geometry (40 %) [Ref 4]
+                raw_accuracy = round(min(conf * 0.60 + geo_score * 0.40, 100.0), 1)
+
             else:
-                # Wrong mudra — score 0, add correction
-                # This prevents "100% on wrong mudra" hallucination
-                corrections = [f"Wrong mudra — showing {name.capitalize()} instead of {target.capitalize()}"]
-                accuracy = 0.0
+                # ML disagrees — let geometry provide a rescue path
+                if geo_score >= 65:
+                    # Geometry strongly suggests the right mudra; rescue the detection.
+                    # Blend: 75% Geometry + 25% AI (to respect the ML's uncertainty)
+                    raw_accuracy = round(geo_score * 0.75 + conf * 0.25, 1)
+                    corrections  = []   # suppress "wrong mudra" noise for strong rescues
+                    print(f"[detect_double] Geo-Rescue: geo={geo_score:.1f}% AI={conf:.1f}% -> acc={raw_accuracy:.1f}%")
+                elif geo_score >= 50:
+                    # Geometry is partial — give limited credit
+                    raw_accuracy = round(geo_score * 0.50, 1)
+                else:
+                    raw_accuracy = 0.0
+                    corrections.insert(
+                        0,
+                        f"Wrong Mudra: Showing {name.capitalize()} instead of {target.capitalize()}"
+                    )
         else:
-            accuracy = conf
+            raw_accuracy = conf
+
+        # ── Low-confidence safety gate (lowered 45 → 28) ─────────────────
+        # Below 28 % ML confidence, rely on geometry alone
+        if conf < 28:
+            if target and geo_score >= 58:
+                raw_accuracy = round(geo_score * 0.65, 1)
+                corrections  = []
+            else:
+                raw_accuracy = 0.0
+
+        # ── Asymmetric EMA smoothing (rise fast, fall slow) ───────────────
+        st = SMOOTHING_REGISTRY["double"]
+        if target != st["last_target"]:
+            st["smooth_acc"]   = raw_accuracy
+            st["prev_display"] = raw_accuracy
+            st["last_target"]  = target
+
+        if raw_accuracy > st["smooth_acc"]:
+            st["smooth_acc"] = raw_accuracy
+        else:
+            alpha = 0.15
+            st["smooth_acc"] = st["smooth_acc"] * (1.0 - alpha) + raw_accuracy * alpha
+
+        # Guard rapid drops (max 3 % per frame)
+        if st["smooth_acc"] < st["prev_display"]:
+            st["smooth_acc"] = float(max(st["smooth_acc"], st["prev_display"] - 3.0))
+        st["prev_display"] = st["smooth_acc"]
+
+        accuracy = round(st["smooth_acc"], 1)
+
+        # Noise floor: below 38 % is just noise [Ref 2]
+        if accuracy < 38.0:
+            accuracy = 0.0
 
         return jsonify({
-            "detected":    conf >= 45.0,
-            "name":        name,
-            "confidence":  conf,
-            "accuracy":    accuracy,
-            "corrections": corrections,
-            "is_stable":   conf >= 55.0,
+            "detected":      conf >= 38.0 or geo_score >= 60.0,
+            "name":          name,
+            "confidence":    conf,
+            "accuracy":      accuracy,
+            "corrections":   corrections,
+            "is_stable":     conf >= 72.0 or geo_score >= 72.0,
             "hold_progress": 0,
-            "both_hands": True
+            "both_hands":    True
         })
 
     except Exception as e:

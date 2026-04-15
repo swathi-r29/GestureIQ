@@ -15,7 +15,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
-import { checkGeometricAnchors } from '../utils/geometricRules';
+import { checkGeometricAnchors, MERGEABLE_MUDRAS } from '../utils/geometricRules';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
 const { Hands, HAND_CONNECTIONS } = window;
@@ -23,39 +23,174 @@ const { drawConnectors, drawLandmarks } = window;
 
 // ── Samyuta mudra list ──────────────────────────────────────────────────────
 const DOUBLE_MUDRA_CONFIG = {
-    anjali: { level: 'Basic', fingers: "Press both palms together flat, fingers pointing upward. Keep thumbs side by side.", meaning: "Salutation", usage: "Prayer, greeting, offering" },
-    kapotha: { level: 'Basic', fingers: "Cross the hands at the wrists, palms facing you. Keep all fingers together and pointing upward.", meaning: "Pigeon", usage: "Pigeon, respect, shyness" },
-    karkata: { level: 'Basic', fingers: "Interlock fingers loosely with fingers spread wide, like an open crab claw.", meaning: "Crab", usage: "Crab, stretching, abundance" },
-    svastika: { level: 'Basic', fingers: "Cross both wrists in front of the chest. Spread all fingers wide on both hands.", meaning: "Cross/Auspicious", usage: "Auspiciousness, blessing" },
-    pushpaputa: { level: 'Basic', fingers: "Both palms open and slightly cupped, held side by side as if holding flower petals.", meaning: "Flower basket", usage: "Offering flowers, puja" },
-    utsanga: { level: 'Basic', fingers: "Left hand rests on the right shoulder, right hand rests on the left shoulder. Both arms cross at the chest.", meaning: "Embrace", usage: "Embrace, hug, self-comfort" },
-    sivalinga: { level: 'Basic', fingers: "Left palm faces up. Right hand forms a fist with thumb pointing up, resting on top of the left palm.", meaning: "Lord Shiva", usage: "God, strength, creation" },
+    // Basic Level
+    anjali: {
+        level: 'Basic',
+        fingers: "Press both palms together flat, fingers pointing upward. Keep thumbs side by side.",
+        meaning: "Salutation",
+        usage: "Prayer, greeting, offering",
+        defaultAngles: { thumb: 170, index: 175, middle: 175, ring: 175, pinky: 175 }
+    },
+    kapotha: {
+        level: 'Basic',
+        fingers: "Join palms at the edges, creating a hollow space in the center.",
+        meaning: "Pigeon",
+        usage: "Respect, taking an oath",
+        defaultAngles: { thumb: 140, index: 160, middle: 160, ring: 160, pinky: 160 }
+    },
+    karkata: {
+        level: 'Basic',
+        fingers: "Interlock the fingers of both hands. Palms can face inward or outward.",
+        meaning: "Crab",
+        usage: "Arrival of people, blowing a conch, or twisting limbs.",
+        defaultAngles: { isInterlocked: true, allFingers: 90 }
+    },
+    svastika: {
+        level: 'Basic',
+        fingers: "Cross both hands at the wrists, palms facing opposite directions.",
+        meaning: "Auspicious",
+        usage: "Showing a crocodile, sky, or wide spread of water.",
+        defaultAngles: { wristCrossed: true, thumb: 170, index: 170 }
+    },
+    puspaputa: {
+        level: 'Basic',
+        fingers: "Hold both palms side-by-side, slightly cupped, like holding water or flowers.",
+        meaning: "Flower Casket",
+        usage: "Offering flowers to God, receiving fruits, or evening prayers.",
+        defaultAngles: { thumb: 130, index: 150, middle: 150, ring: 150, pinky: 150 }
+    },
+    utsanga: {
+        level: 'Basic',
+        fingers: "Cross the arms and place the palms on opposite shoulders.",
+        meaning: "Embrace",
+        usage: "Showing modesty, shyness, or an embrace.",
+        defaultAngles: { armCrossed: true }
+    },
+    sivalinga: {
+        level: 'Basic',
+        fingers: "Right hand in Shikhara (fist up) placed on the flat left palm.",
+        meaning: "Lord Shiva",
+        usage: "Representing the Lingam, Lord Shiva, or Phallic symbol.",
+        defaultAngles: { rightThumb: 180, leftPalm: 180 }
+    },
 
-    chakra: { level: 'Intermediate', fingers: "Interlock all fingers of both hands tightly. Rotate both wrists so palms face outward.", meaning: "Wheel/Disc", usage: "Sudarshana chakra, spinning disc" },
-    shakata: { level: 'Intermediate', fingers: "Right hand points index and little finger forward. Left hand holds right wrist from below.", meaning: "Cart/Demon", usage: "Shakata demon, cart" },
-    shankha: { level: 'Intermediate', fingers: "Left fist wraps around right thumb. Right hand's fingers wrap around the left fist. Both thumbs touch.", meaning: "Conch", usage: "Conch shell, sacred sound" },
-    pasha: { level: 'Intermediate', fingers: "Interlock index fingers of both hands. Keep remaining fingers folded into fists.", meaning: "Noose/Rope", usage: "Binding, Varuna's noose" },
-    kilaka: { level: 'Intermediate', fingers: "Hook the index fingers of both hands together like two links of a chain.", meaning: "Bond/Link", usage: "Chain, bond, link" },
-    samputa: { level: 'Intermediate', fingers: "Cup both hands together, palms facing each other with a hollow space between them.", meaning: "Hollow container", usage: "Offering bowl, vessel" },
+    // Intermediate Level
+    chakra: {
+        level: 'Intermediate',
+        fingers: "Interlock the fingers and fan the palms out to form a circle.",
+        meaning: "Wheel",
+        usage: "The Sudarshana Chakra of Lord Vishnu.",
+        defaultAngles: { thumb: 180, circularShape: true }
+    },
+    sakata: {
+        level: 'Intermediate',
+        fingers: "Thumb and middle fingers touch; index and little fingers are extended.",
+        meaning: "Cart",
+        usage: "Gestures of demons or ancient transport carts.",
+        defaultAngles: { index: 175, middle: 45, pinky: 175 }
+    },
+    sankha: {
+        level: 'Intermediate',
+        fingers: "The right thumb is enclosed by the left fingers, and left thumb touches the right index.",
+        meaning: "Conch",
+        usage: "Blowing the conch for rituals or war.",
+        defaultAngles: { enclosedThumb: true }
+    },
+    pasa: {
+        level: 'Intermediate',
+        fingers: "Interlock the index fingers of both hands like a chain.",
+        meaning: "Noose",
+        usage: "Quarrels, strings, or a noose.",
+        defaultAngles: { indexHooked: true }
+    },
+    kilaka: {
+        level: 'Intermediate',
+        fingers: "Hook the index fingers of both hands together like two links of a chain.",
+        meaning: "Bond/Link",
+        usage: "Affection, conversation between friends, or a link.",
+        defaultAngles: { pinkyHooked: true }
+    },
+    samputa: {
+        level: 'Intermediate',
+        fingers: "Both hands in Brahmara (index and thumb touch), held together.",
+        meaning: "Box",
+        usage: "Concealing secrets, holding a jewelry box.",
+        defaultAngles: { thumbIndexTouch: true }
+    },
 
-    matsya: { level: 'Advanced', fingers: "Right hand rests flat on top of left hand, thumbs spread wide on both sides like fish fins.", meaning: "Fish", usage: "Fish, Matsya avatar, water" },
-    kurma: { level: 'Advanced', fingers: "Interlock thumbs. Curl all other fingers down against the back of the other hand, like a turtle shell.", meaning: "Tortoise", usage: "Kurma avatar, stability" },
-    varaha: { level: 'Advanced', fingers: "Right thumb presses against the left palm. Left hand holds the right wrist from below.", meaning: "Boar", usage: "Varaha avatar, lifting earth" },
-    garuda: { level: 'Advanced', fingers: "Interlock thumbs. Wave all fingers of both hands like wings. Keep wrists crossed.", meaning: "Eagle/Garuda", usage: "Garuda, Vishnu's eagle" },
-    nagabandha: { level: 'Advanced', fingers: "Cross both wrists. Spread all fingers downward like two snake hoods.", meaning: "Serpent bond", usage: "Snakes intertwined, Nagabandha" },
-    khatwa: { level: 'Advanced', fingers: "Hold right hand above left, both in mushti (fist). Offset the knuckles like a bedpost joint.", meaning: "Bedpost", usage: "Furniture, post, pillar" },
-    bherunda: { level: 'Advanced', fingers: "Both hands form a beak shape with all fingertips meeting at a point, facing each other.", meaning: "Fierce bird (Bherunda)", usage: "Bherunda bird, power" },
-    avahitta: { level: 'Advanced', fingers: "Both hands face downward with fingers pointing forward and slightly spread.", meaning: "Concealment", usage: "Hiding, concealing, restraint" },
-    padmakosham: { level: 'Advanced', fingers: "Both hands form padmakosha shape with fingertips almost touching at the center.", meaning: "Full lotus", usage: "Full bloomed lotus, wholeness" },
-    sarpasiras: { level: 'Advanced', fingers: "Both hands flat and pressed together, wrists touching, fingers pointing forward like a double snake hood.", meaning: "Two snake heads", usage: "Twin serpents, guardians" },
+    // Advanced Level
+    matsya: {
+        level: 'Advanced',
+        fingers: "Place one hand on the back of the other, thumbs extended like fins.",
+        meaning: "Fish",
+        usage: "Lord Vishnu's Matsya avatar, or a fish in water.",
+        defaultAngles: { thumb: 160, palmFlat: true }
+    },
+    kurma: {
+        level: 'Advanced',
+        fingers: "Interlock the middle and ring fingers, keeping others slightly curved.",
+        meaning: "Tortoise",
+        usage: "Lord Vishnu's Kurma avatar, stability.",
+        defaultAngles: { thumb: 120, index: 90, pinky: 90 }
+    },
+    varaha: {
+        level: 'Advanced',
+        fingers: "Place one hand over the other in Mrigashira (deer head) position.",
+        meaning: "Boar",
+        usage: "Lord Vishnu's Varaha avatar.",
+        defaultAngles: { thumb: 170, pinky: 170, middleRing: 60 }
+    },
+    garuda: {
+        level: 'Advanced',
+        fingers: "Hook thumbs together and fan out the fingers like wings.",
+        meaning: "Eagle",
+        usage: "The mount of Lord Vishnu (Garuda).",
+        defaultAngles: { thumbHooked: true, fingersSpread: 180 }
+    },
+    nagabandha: {
+        level: 'Advanced',
+        fingers: "Cross the wrists and hold hands in Sarpasiras (snake head) posture.",
+        meaning: "Serpent Tie",
+        usage: "Coiled snakes, Atharvana veda charms.",
+        defaultAngles: { wristCrossed: true, indexMiddleRing: 150 }
+    },
+    katva: {
+        level: 'Advanced',
+        fingers: "Place one hand's index and middle fingers over the other hand's.",
+        meaning: "Cot/Bed",
+        usage: "Showing a bed, a palanquin, or a bridge.",
+        defaultAngles: { fingersOverlaid: true }
+    },
+    bherunda: {
+        level: 'Advanced',
+        fingers: "Cross the wrists and hold the hands in Kapitha (fist with thumb-index touch).",
+        meaning: "Double-headed Bird",
+        usage: "Strength, ancient bird Bherunda.",
+        defaultAngles: { wristCrossed: true, fistShape: true }
+    },
+    kartarisvastika: {
+        level: 'Advanced',
+        fingers: "Cross the wrists while in Kartarimukha (scissors) position.",
+        meaning: "Crossed Scissors",
+        usage: "Stems, hills, or trees.",
+        defaultAngles: { index: 180, middle: 180, ringPinky: 20 }
+    },
+    katakavardhana: {
+        level: 'Advanced',
+        fingers: "Cross the wrists while in Katakamukha position.",
+        meaning: "Link of Bracelets",
+        usage: "Coronation, worship, marriage.",
+        defaultAngles: { thumbIndexMiddleTouch: true, ringPinky: 170 }
+    },
+    dola: {
+        level: 'Advanced',
+        fingers: "Hang both hands loosely at the sides of the thighs in Pataka.",
+        meaning: "Swing",
+        usage: "Beginning of a dance, relaxation.",
+        defaultAngles: { armsDown: true, palmFlat: 180 }
+    }
 };
 
-// ── Mudras that naturally overlap (merged by MediaPipe) ─────────────────────
-const CROSS_MUDRAS = [
-    'anjali', 'karkata', 'kapotha', 'svastika', 'pushpaputa', 'utsanga', 
-    'shakata', 'shankha', 'pasha', 'kilaka', 'samputa', 'matsya', 'kurma', 
-    'varaha', 'garuda', 'nagabandha', 'khatwa', 'bherunda', 'sarpasiras'
-];
 
 const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
     folder,
@@ -67,10 +202,54 @@ const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
 }));
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const STABILITY_THRESHOLD = 5; // Speed Optimization (Was 10, then 4)
-const WRONG_MUDRA_GATE = 5;
-const ACCURACY_THRESHOLD = 75;
-const HOLD_DURATION_MS = 1000;
+const STABILITY_THRESHOLD    = 1;
+const WRONG_MUDRA_GATE       = 5;
+const ACCURACY_THRESHOLD     = 68;   // ← lowered from 75 (double-hand harder) [Ref IEEE ICICV 2021]
+const MAINTENANCE_THRESHOLD  = 60;   // ← lowered from 68
+const HOLD_DURATION_MS       = 1000;
+
+/**
+ * Per-mudra accuracy thresholds.
+ * Joined/merged mudras (Anjali, Kapotha…) score lower because palm overlap
+ * causes partial landmark occlusion [Zhang et al. 2020 MediaPipe Hands].
+ * Cross-wrist and interlocked mudras also have higher variance → lower gate.
+ */
+const MUDRA_THRESHOLDS = {
+  // ── Joined / pressed ────────────────────────────────────
+  anjali:        58,   // palms fully overlapping — heavy occlusion
+  kapotha:       58,
+  puspaputa:     60,
+  samputa:       58,
+  sankha:        60,
+  chakra:        60,
+
+  // ── Interlocked / hooked ─────────────────────────────────
+  karkata:       58,
+  pasa:          58,
+  kilaka:        58,
+
+  // ── Crossed-wrist / arm family ───────────────────────────
+  svastika:      58,
+  utsanga:       55,   // arms cross at shoulder — hardest spatial
+  nagabandha:    58,
+  katva:         58,
+  katakavardhana:58,
+  kartarisvastika:58,
+  bherunda:      58,
+  garuda:        58,
+
+  // ── Stacked / overlapping ────────────────────────────────
+  sivalinga:     60,
+  matsya:        60,
+  kurma:         60,
+  varaha:        60,
+
+  // ── Hanging / relaxed ────────────────────────────────────
+  dola:          52,   // both hands at sides — no proximity signal
+
+  // ── Standard ─────────────────────────────────────────────
+  sakata:        65,
+};
 
 const STAGES = { CATEGORIES: 'CATEGORIES', LIST: 'LIST', PRACTICE: 'PRACTICE' };
 const PRACTICE_STEPS = [
@@ -80,8 +259,8 @@ const PRACTICE_STEPS = [
 ];
 
 // ── Hand indicator badge ─────────────────────────────────────────────────────
-function HandsBadge({ handsDetected, isCrossed }) {
-    const isMerged = isCrossed && handsDetected === 1;
+function HandsBadge({ handsDetected, isMergeable }) {
+    const isMerged = isMergeable && handsDetected === 1;
     const color = (handsDetected === 2 || isMerged) ? '#4ade80' : handsDetected === 1 ? '#fbbf24' : '#f87171';
     const label = (handsDetected === 2 || isMerged) ? (isMerged ? '✓ Hands Merged' : '✓ Both hands') : handsDetected === 1 ? '⚠ One hand' : '✗ No hands';
     return (
@@ -135,6 +314,7 @@ export default function LearnDouble() {
     const lostHandFramesRef = useRef(0);
     const lowAccuracyFramesRef = useRef(0);
     const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
+    const peakAccuracyRef = useRef(0);      // Tracks maximum accuracy achieved during the "Hold" period
 
 
     // ── Camera refs ───────────────────────────────────────────────────────────
@@ -201,20 +381,32 @@ export default function LearnDouble() {
             if (results.multiHandLandmarks?.length > 0) {
                 const handMap = {};
                 const numFound = results.multiHandLandmarks.length;
+
                 results.multiHandLandmarks.forEach((lms, idx) => {
-                    const xCoord = lms[0].x;
-                    const label = xCoord < 0.5 ? 'Right' : 'Left';
-                    const score = results.multiHandedness?.[idx]?.classification?.[0]?.score || 1.0;
+                    // FIX: Don't rely solely on MediaPipe's label. Force assignment if 2 hands seen.
+                    const mpLabel = results.multiHandedness?.[idx]?.label;
+                    let label = mpLabel;
 
-                    handMap[label] = { landmarks: lms, score };
+                    // If we found two hands but they are both labeled the same, force them into separate slots
+                    if (numFound === 2 && idx === 1 && mpLabel === results.multiHandedness?.[0]?.label) {
+                        label = mpLabel === 'Right' ? 'Left' : 'Right';
+                    }
 
-                    // Draw each hand in a distinct color
+                    // Draw
                     const color = label === 'Right' ? '#f59e0b' : '#60a5fa';
                     drawConnectors(ctx, lms, HAND_CONNECTIONS, { color, lineWidth: 3 });
                     drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+
+                    handMap[label] = { landmarks: lms };
                 });
 
-                landmarksRef.current = handMap;  // { Right: {...}, Left: {...} }
+                // Fail-safe: If 2 hands detected but only 1 label slot filled, split them
+                if (numFound === 2 && Object.keys(handMap).length < 2) {
+                    handMap['Right'] = { landmarks: results.multiHandLandmarks[0] };
+                    handMap['Left'] = { landmarks: results.multiHandLandmarks[1] };
+                }
+
+                landmarksRef.current = handMap;
                 setHandsDetected(prev => (prev !== numFound ? numFound : prev));
             } else {
                 landmarksRef.current = null;
@@ -305,7 +497,7 @@ export default function LearnDouble() {
 
         lastFrameTimeRef.current = Date.now();
         const interval = setInterval(async () => {
-            if (isDetectingRef.current) return;
+            if (isDetectingRef.current || masteredRef.current) return;
             isDetectingRef.current = true;
 
             try {
@@ -346,6 +538,38 @@ export default function LearnDouble() {
                 const rightLm = toLmArray(handMap['Right']);
                 const leftLm = toLmArray(handMap['Left']);
 
+                // ── GEOMETRIC GATEKEEPER ──────────────────────────────────────
+                const geo = checkGeometricAnchors(selectedMudra.folder, Object.values(handMap).map(h => h.landmarks));
+                let isMergeable = selectedMudra && MERGEABLE_MUDRAS.includes(selectedMudra.folder);
+                
+                // [Diagnostic Logs]
+                if (selectedMudra?.folder === 'anjali') {
+                    console.log('[Anjali Debug] handMap:', Object.keys(handMap));
+                    console.log('[Anjali Debug] geo result:', geo);
+                }
+
+                // New: Allow mergeable mudras (like Anjali) to bypass geometric stop
+                // This lets the AI try to detect even if hands overlap into one blob
+                if (!geo.isValid && !isMergeable) {
+                    // STOP progress for non-mergeable mudras that fail geometry
+                    setDetected({
+                        name: 'Adjust Position',
+                        accuracy: 0,
+                        detected: false,
+                        corrections: geo.corrections
+                    });
+
+                    // Accelerate drain
+                    const now = Date.now();
+                    const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 200;
+                    lastFrameTimeRef.current = now;
+                    holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0);
+                    setHoldProgress((holdAccumulatorRef.current / HOLD_DURATION_MS) * 100);
+
+                    isDetectingRef.current = false;
+                    return; 
+                }
+
                 // console.log('[LearnDouble] Polling Flask...', { target: selectedMudra.folder, r: !!rightLm, l: !!leftLm });
                 const res = await fetch(`/api/detect_double_landmarks`, {
                     method: 'POST',
@@ -355,51 +579,37 @@ export default function LearnDouble() {
                         left_landmarks: leftLm,
                         targetMudra: selectedMudra.folder,
                     }),
-                    signal: AbortSignal.timeout(3000), // Increase timeout to 3s
+                    signal: AbortSignal.timeout(3000),
                 });
 
                 const data = await res.json();
+                const isStableAPI = data.is_stable || false;
+                const accuracy = data.accuracy || 0;
+                const corrections = data.corrections || [];
+                let detectedName = data.name || '';
 
-                if (data.accuracy === 0 || data.name === 'No Hand' || data.name === 'Adjusting...') {
-                    // Soft Reset: Let the decay logic handle the ring drainage
+                if (accuracy === 0 || detectedName === 'No Hand' || detectedName === 'Adjusting...') {
                     setDetected({ name: 'Adjusting...', accuracy: 0, detected: false });
                 } else {
                     setDetected(data);
                 }
 
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
-                let detectedName = data.name || '';
-                const isStableAPI = data.is_stable || false;
-                const accuracy = data.accuracy || 0;
-                const corrections = data.corrections || [];
-
-                // GEOMETRIC OVERRIDE
-                if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
-                    const geo = checkGeometricAnchors(detectedName, Object.values(handMap).map(h => h.landmarks));
-                    if (!geo.isValid) {
-                        detectedName = null;
-                        // Use geometric correction as priority
-                        setDetected({
-                           ...data,
-                           name: 'Adjust Position',
-                           accuracy: 0,
-                           detected: false,
-                           corrections: [geo.corrections[0], ...corrections]
-                        });
-                    }
-                }
-
                 if (detectedName && detectedName === consecutiveRef.current.name) {
                     consecutiveRef.current.count++;
+                    // Track peak accuracy during stability
+                    if (accuracy > peakAccuracyRef.current) {
+                        peakAccuracyRef.current = accuracy;
+                    }
                 } else {
                     consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
                     wrongMudraFramesRef.current = 0;
+                    peakAccuracyRef.current = 0; // Reset peak for new/wrong mudra
                 }
 
-                const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
-
-                const wrongMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-                const fingerCorr = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
+                const isWrongMudraMsg = (c) => typeof c === 'string' && (c.toLowerCase().startsWith('wrong mudra') || c.toLowerCase().includes('instead of'));
+                const wrongMsg = corrections.find(c => isWrongMudraMsg(c));
+                const fingerCorr = corrections.filter(c => !isWrongMudraMsg(c));
 
                 let displayCorrections = [...corrections];
                 if (wrongMsg) {
@@ -410,11 +620,22 @@ export default function LearnDouble() {
                     wrongMudraFramesRef.current = 0;
                 }
 
-                // Add "one hand missing" warning if applicable (not for crossed mudras)
-                const isCrossed = selectedMudra && CROSS_MUDRAS.includes(selectedMudra.folder);
-                if (Object.keys(handMap).length < 2 && !isCrossed) {
-
+                isMergeable = selectedMudra && MERGEABLE_MUDRAS.includes(selectedMudra.folder);
+                if (Object.keys(handMap).length < 2 && !isMergeable) {
                     displayCorrections = [`Show both hands! Second hand missing.`, ...displayCorrections];
+                }
+
+                const activeThreshold = MUDRA_THRESHOLDS[selectedMudra.folder] || ACCURACY_THRESHOLD;
+                const locallyStable = !!detectedName && accuracy >= activeThreshold && !wrongMsg;
+
+                // ── STATLESS INSTANT TRIGGER (Matching Detect.jsx) ─────────────
+                // If this frame is perfect, we master instantly without the 1s hold
+                const isPerfectFrame = data.detected && accuracy >= activeThreshold && !wrongMsg && locallyStable;
+                if (isPerfectFrame && !saveMutexRef.current) {
+                    saveMutexRef.current = true;
+                    handleMudraMastered(selectedMudra.folder, accuracy);
+                    isDetectingRef.current = false;
+                    return;
                 }
 
                 const displayData = {
@@ -427,27 +648,30 @@ export default function LearnDouble() {
 
 
                 // ── VOICE ─────────────────────────────────────────────────────
-                if (voiceEnabledRef.current && locallyStable) {
+                if (voiceEnabledRef.current) {
                     const now = Date.now();
                     const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
 
                     if (stableWrongMsg) {
                         const prev = lastWrongVoiceRef.current;
-                        if (stableWrongMsg !== prev.text || (now - prev.time) > 7000) {
+                        // Use 3-second throttle for wrong mudra as requested
+                        if (stableWrongMsg !== prev.text || (now - prev.time) > 3000) {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                            announce.raw(`Wrong mudra detected. The target is ${selectedMudra.name}.`, 3);
+                            announce.raw(stableWrongMsg, 3);
                         }
-                    } else if (fingerCorr.length > 0) {
-                        const topCorr = fingerCorr[0];
-                        const prev = lastCorrVoiceRef.current;
-                        if (topCorr !== prev.text || (now - prev.time) > 5000) {
-                            lastCorrVoiceRef.current = { text: topCorr, time: now };
+                    } else if (locallyStable) {
+                        if (fingerCorr.length > 0) {
+                            const topCorr = fingerCorr[0];
+                            const prev = lastCorrVoiceRef.current;
+                            if (topCorr !== prev.text || (now - prev.time) > 5000) {
+                                lastCorrVoiceRef.current = { text: topCorr, time: now };
                             announce.raw(topCorr, 1);
                         }
-                    } else if (data.detected && accuracy >= 72 && fingerCorr.length === 0 && !stableWrongMsg) {
-                        if (now - lastOkVoiceRef.current > 8000) {
-                            lastOkVoiceRef.current = now;
-                            announce.raw('Correct! Great form.', 3);
+                        } else if (data.detected && accuracy >= ACCURACY_THRESHOLD && fingerCorr.length === 0 && !stableWrongMsg) {
+                            if (now - lastOkVoiceRef.current > 8000) {
+                                lastOkVoiceRef.current = now;
+                                announce.raw('Correct! Great form.', 3);
+                            }
                         }
                     }
                 }
@@ -458,8 +682,8 @@ export default function LearnDouble() {
                 const hasBoth = numHands === 2;
                 const hasOne = numHands === 1;
 
-                // Allow Anjali with 1 hand, others require 2 (with a 3-frame grace period for loss)
-                let visible = isAnjali ? (hasOne || hasBoth) : hasBoth;
+                // Allow Mergeable mudras (overlapping) with 1 hand, others require 2
+                let visible = isMergeable ? (hasOne || hasBoth) : hasBoth;
 
                 // Grace period for hand loss (prevents flickering)
                 if (!visible) {
@@ -471,13 +695,17 @@ export default function LearnDouble() {
                     lostHandFramesRef.current = 0;
                 }
 
-                const isHighAccuracy = accuracy >= ACCURACY_THRESHOLD;
+                // 1. Accuracy Hysteresis
+                // If we are already saving, use the lower maintenance threshold
+                const threshold = (holdAccumulatorRef.current > 0) ? MAINTENANCE_THRESHOLD : ACCURACY_THRESHOLD;
+                const isHighAccuracy = accuracy >= threshold;
+
                 let isGoodFrame = !wrongMsg && data.detected && visible && isHighAccuracy && locallyStable;
                 let isFrozen = false;
 
-                // Blink Protection: If we were previously good, allow 10 frames (~500ms) of noise or hand-loss
+                // 2. Extended Blink Protection: allow 15 frames (~750ms) of noise/loss
                 if (!isGoodFrame && holdAccumulatorRef.current > 0 && !wrongMsg) {
-                    if (lowAccuracyFramesRef.current < 10) {
+                    if (lowAccuracyFramesRef.current < 15) {
                         lowAccuracyFramesRef.current++;
                         isFrozen = true; // Freeze progress, don't drain
                     }
@@ -491,16 +719,24 @@ export default function LearnDouble() {
 
                 if (isGoodFrame) {
                     holdAccumulatorRef.current = Math.min(HOLD_DURATION_MS, holdAccumulatorRef.current + dt);
+                    // ── PEAK TRACKING ──────────────────────────────────────────
+                    // Record the best accuracy we've seen during this successful hold
+                    peakAccuracyRef.current = Math.max(peakAccuracyRef.current, accuracy);
                 } else if (!isFrozen) {
+                    // ── RESET PEAK IF HOLD IS LOST ──────────────────────────────
+                    if (holdAccumulatorRef.current === 0) {
+                        peakAccuracyRef.current = 0;
+                    }
                     // ── DRAIN LOGIC ( truly failing after the 6-frame buffer ) ─────
-                    lowAccuracyFramesRef.current = 0; 
+                    lowAccuracyFramesRef.current = 0;
                     if (wrongMsg) {
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 2.0); // Wrong mudra drains fast
-                    } else if (isHighAccuracy && !visible) {
+                    } else if (accuracy >= MAINTENANCE_THRESHOLD && !visible) {
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.1); // Missing hands drains very slowly
                     } else {
+                        // Success-Stickiness: Drains even slower if you are above 60% accuracy
                         const isPartialGood = data.detected && accuracy >= 60;
-                        const drainRate = isPartialGood ? 0.2 : 1.0;
+                        const drainRate = isPartialGood ? 0.2 : 1.3;
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * drainRate);
                     }
                 }
@@ -514,7 +750,7 @@ export default function LearnDouble() {
                     masteredRef.current = true;
                     saveInProgressRef.current = true;
                     // Success lock removed (unused)
-                    handleMudraMastered(selectedMudra.folder, accuracy);
+                    handleMudraMastered(selectedMudra.folder, peakAccuracyRef.current || accuracy);
                 }
 
             } catch (err) {
@@ -552,15 +788,28 @@ export default function LearnDouble() {
     };
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
+        // Block further calls immediately
+        masteredRef.current = true;
+        saveInProgressRef.current = true;
+
         if (!folder) return;
-        const score = Math.round(currentAccuracy);
+
+        // 1. Immediately Freeze the UI to give user instant feedback
+        // Use the peak accuracy achieved during the stable period
+        const score = Math.round(peakAccuracyRef.current || currentAccuracy);
         const snapshot = captureFrame();
+
         setFrozenFrame(snapshot);
         setIsFrozen(true);
         setSessionScore(score);
         setSessionComplete(true);
         stopWebcam();
         setHoldProgress(0);
+
+        // Block any further interval ticks
+        masteredRef.current = true;
+        saveInProgressRef.current = true;
+
         if (voiceEnabledRef.current) {
             const cfg = DOUBLE_MUDRA_CONFIG[folder];
             const name = selectedMudra?.name || folder;
@@ -568,24 +817,24 @@ export default function LearnDouble() {
                                 It means ${cfg?.meaning || 'a sacred gesture'}. 
                                 It is traditionally used for ${cfg?.usage || 'artistic expression'}. 
                                 Great job!`;
-            announce.raw(fullLesson, 4); // Priority 4 = ULTRA (Non-interruptible)
+            announce.raw(fullLesson, 4);
         }
 
         attemptsRef.current = 0;
-        try {
-            const token = localStorage.getItem('token');
-            const res = await axios.post(
-                '/api/user/progress/update',
-                { mudraName: folder, score },
-                { headers: { 'x-auth-token': token }, timeout: 5000 }
-            );
+
+        // 2. Fire and Forget the save request (don't await the UI update)
+        const token = localStorage.getItem('token');
+        axios.post('/api/user/progress/update',
+            { mudraName: folder, score },
+            { headers: { 'x-auth-token': token } }
+        ).then(res => {
             setProgress(res.data.detectedMudras || []);
             setBestScores(res.data.mudraScores || {});
-        } catch {
-            console.warn('[LearnDouble] Save failed.');
-        } finally {
+        }).catch(err => {
+            console.error("Save failed, but UI is already success", err);
+        }).finally(() => {
             saveInProgressRef.current = false;
-        }
+        });
     };
 
     const enterPractice = (mudra) => {
@@ -619,14 +868,16 @@ export default function LearnDouble() {
     };
 
     // ── Derived display ───────────────────────────────────────────────────────
+    const isWrongMudraMsg = (c) => typeof c === 'string' && (c.toLowerCase().startsWith('wrong mudra') || c.toLowerCase().includes('instead of'));
     const accuracy = detected.accuracy || 0;
     const corrections = detected.corrections || [];
-    const fingerCorrs = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
-    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+    const fingerCorrs = corrections.filter(c => !isWrongMudraMsg(c));
+    const wrongMudraMsg = corrections.find(c => isWrongMudraMsg(c));
     const isAdjusting = detected._isAdjusting;
-    const isCrossed = selectedMudra && CROSS_MUDRAS.includes(selectedMudra.folder);
+    const isMergeable = selectedMudra && MERGEABLE_MUDRAS.includes(selectedMudra.folder);
     // Consistent with hold logic: if accuracy is high, it's correct.
-    const isCorrect = detected.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMudraMsg && (isCrossed || fingerCorrs.length === 0);
+    const activeDisplayThreshold = (selectedMudra && MUDRA_THRESHOLDS[selectedMudra.folder]) || ACCURACY_THRESHOLD;
+    const isCorrect = detected.detected && accuracy >= activeDisplayThreshold && !wrongMudraMsg;
     const fingerGuideText = selectedMudra ? (DOUBLE_MUDRA_CONFIG[selectedMudra.folder]?.fingers || '') : '';
 
     if (loading) return (
@@ -931,6 +1182,28 @@ export default function LearnDouble() {
                                 <canvas ref={canvasRef} className="hidden" />
                                 {cameraOn ? (
                                     <>
+                                        {/* Adjusting overlay */}
+                                        {isAdjusting && !isCorrect && (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+                                                <div className="bg-white/10 backdrop-blur-xl border border-white/20 px-6 py-3 rounded-2xl flex items-center gap-3">
+                                                    <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
+                                                    <span className="text-white text-[10px] tracking-[4px] uppercase font-bold">Stabilizing</span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Mudra Detected Overlay */}
+                                        {isCorrect && (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-green-500/10 pointer-events-none animate-in fade-in zoom-in duration-300">
+                                                <div className="bg-green-500/90 backdrop-blur-md shadow-2xl px-10 py-5 rounded-[2rem] border border-white/20 flex flex-col items-center gap-2 transform -rotate-1">
+                                                    <div className="bg-white text-green-600 rounded-full p-2">
+                                                        <CheckCircle2 size={32} />
+                                                    </div>
+                                                    <span className="text-white text-xl font-black tracking-[6px] uppercase italic">Mudra Detected!</span>
+                                                    <span className="text-white/80 text-[8px] tracking-[4px] uppercase font-bold">Hold position to save</span>
+                                                </div>
+                                            </div>
+                                        )}
                                         <video ref={videoRef} autoPlay playsInline muted
                                             className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
 
@@ -938,19 +1211,19 @@ export default function LearnDouble() {
                                         <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex flex-col items-end gap-1">
                                             <span className="text-[8px] tracking-[3px] uppercase text-white/50">Accuracy</span>
                                             <span className="text-2xl font-mono font-bold"
-                                                style={{ color: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
+                                                style={{ color: accuracy >= ACCURACY_THRESHOLD ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
                                                 {accuracy > 0 ? `${accuracy.toFixed(0)}%` : '…'}
                                             </span>
                                             {!isAdjusting && (
                                                 <div className="w-24 h-1.5 bg-white/10 rounded-full">
                                                     <div className="h-full rounded-full transition-all duration-300"
-                                                        style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }} />
+                                                        style={{ width: `${accuracy}%`, backgroundColor: accuracy >= ACCURACY_THRESHOLD ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }} />
                                                 </div>
                                             )}
                                         </div>
 
                                         {/* Both-hands status badge */}
-                                        <HandsBadge handsDetected={handsDetected} isCrossed={isCrossed} />
+                                        <HandsBadge handsDetected={handsDetected} isMergeable={isMergeable} />
 
                                         {/* Hold progress */}
                                         {holdProgress > 0 && (
@@ -964,18 +1237,6 @@ export default function LearnDouble() {
                                             </div>
                                         )}
 
-                                        {/* Adjusting overlay */}
-                                        {isAdjusting && (
-                                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                                                <div className="px-5 py-2.5 rounded-full backdrop-blur-md"
-                                                    style={{ backgroundColor: 'rgba(0,0,0,0.72)', border: '1px solid rgba(245,158,11,0.18)' }}>
-                                                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold" style={{ color: 'rgba(251,191,36,0.8)' }}>
-                                                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                                                        Adjusting…
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
 
                                         {/* Wrong mudra overlay */}
                                         {!isAdjusting && wrongMudraMsg && (
@@ -1096,7 +1357,7 @@ export default function LearnDouble() {
                                     <div className="text-[9px] tracking-[4px] uppercase text-center w-full py-3 border rounded-xl"
                                         style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
                                         {cameraOn
-                                            ? (handsDetected < 2 && !isCrossed)
+                                            ? (handsDetected < 2 && !isMergeable)
                                                 ? `⚠ Show both hands — ${handsDetected}/2 detected`
                                                 : isAdjusting
                                                     ? '⟳ Stabilizing — hold both hands steady'

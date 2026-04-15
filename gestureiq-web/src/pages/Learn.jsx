@@ -128,6 +128,7 @@ export default function Learn() {
 
     const lastDetectedNameRef = useRef('');
     const wrongMudraFramesRef = useRef(0);
+    const stableFramesRef = useRef(0);
 
     const videoRef = useRef(null);
     const canvasRef = useRef(null);

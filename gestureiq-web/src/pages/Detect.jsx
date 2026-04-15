@@ -353,7 +353,7 @@ export default function Detect() {
       let detectedName = json.detected && json.confidence >= 40 ? json.name : null;
 
       // GEOMETRIC OVERRIDE
-      if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
+      if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha', 'garuda'].includes(detectedName.toLowerCase())) {
         const geo = checkGeometricAnchors(detectedName, results.multiHandLandmarks);
         if (!geo.isValid) {
           detectedName = null;
