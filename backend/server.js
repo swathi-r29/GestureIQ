@@ -66,6 +66,16 @@ app.use('/api/mudras', require('./routes/mudraRoutes'));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Ensure directories exist for saving reports
+const dirs = ['reports', 'uploads'];
+dirs.forEach(dir => {
+    const p = path.join(__dirname, dir);
+    if (!fs.existsSync(p)) {
+        fs.mkdirSync(p, { recursive: true });
+        console.log(`Created directory: ${p}`);
+    }
+});
+
 // MongoDB connection
 const connectDB = async () => {
     try {

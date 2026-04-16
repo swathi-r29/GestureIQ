@@ -884,7 +884,7 @@ const StudentLiveClass = () => {
       });
       const saved = await res.json();
       setReport(saved);
-    } catch {
+    } catch (error) {
       setReport({
         studentId: user?.id || user?._id || 'unknown', classId,
         mudraName: bestMudraRef.current || 'N/A',

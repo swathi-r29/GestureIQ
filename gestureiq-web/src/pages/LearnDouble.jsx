@@ -449,7 +449,8 @@ export default function LearnDouble() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
             streamRef.current = stream;
             setCameraOn(true);
-        } catch {
+        } catch (error) {
+            console.error('Webcam failed:', error);
             alert('Camera access denied. Please allow camera permission and use HTTPS.');
         }
     }, []);

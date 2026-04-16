@@ -108,7 +108,7 @@ export default function Detect() {
   const socketRef      = useRef(null);
   const intervalRef    = useRef(null);
   const landmarksRef   = useRef(null);
-  const bufferRef      = useRef([]);
+  const bufferRef      = useRef([]); // Prediction buffer for majority vote
   const inFlightRef    = useRef(false);
   const lockRef        = useRef({ name: null, until: 0 });
   const prevKeyRef     = useRef(null);
@@ -191,7 +191,7 @@ export default function Detect() {
   const initSingleHands = useCallback(() => {
     if (handsRef.current) return;
     const h = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-    h.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    h.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     h.onResults((results) => {
       const canvas = canvasRef.current;
       const video  = videoRef.current;
@@ -222,7 +222,7 @@ export default function Detect() {
   const initDoubleHands = useCallback(() => {
     if (handsRef.current) return;
     const h = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-    h.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    h.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     h.onResults((results) => {
       const canvas = canvasRef.current;
       const video  = videoRef.current;
@@ -251,17 +251,7 @@ export default function Detect() {
     handsRef.current = h;
   }, []);
 
-  // ── Capture frame for double mode ─────────────────────────
-  const captureFrame = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || video.readyState < 2) return null;
-    const c = document.createElement('canvas');
-    c.width = 640; c.height = 480;
-    const ctx = c.getContext('2d');
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, -640, 0, 640, 480);
-    return c.toDataURL('image/jpeg', 0.6);
-  }, []);
+  // captureFrame logic removed as part of Phase 3 optimization (Landmark Streaming)
 
   // ── Single-hand detection ──────────────────────────────────
   const runSingleDetection = useCallback(async () => {
@@ -288,7 +278,7 @@ export default function Detect() {
     inFlightRef.current = true;
     try {
       const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
-      const res = await fetch(`/api/predict`, {
+      const res = await fetch(`/api/detect_landmarks`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(800),
       });
@@ -300,9 +290,21 @@ export default function Detect() {
       const isValid = (json.confidence || 0) >= MIN_CONF && !!json.name;
       const detectedName = isValid ? json.name : null;
 
+      // ── MAJORITY VOTE SMOOTHING (3-Frame Buffer) ──
+      bufferRef.current.push(detectedName);
+      if (bufferRef.current.length > 3) bufferRef.current.shift();
+
+      let finalVote = null;
+      if (bufferRef.current.length === 3) {
+        const counts = {};
+        bufferRef.current.forEach(n => { if (n) counts[n] = (counts[n] || 0) + 1; });
+        const winner = Object.entries(counts).find(([_, c]) => c >= 2);
+        if (winner) finalVote = winner[0];
+      }
+
       // RELAXED 10-FRAME GATE (with Grace Window)
-      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
-      if (detectedName) graceRef.current = 0; else graceRef.current++;
+      const effectiveName = finalVote || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+      if (finalVote) graceRef.current = 0; else graceRef.current++;
 
       if (effectiveName && effectiveName === consecutiveRef.current.name) {
         consecutiveRef.current.count++;
@@ -319,7 +321,7 @@ export default function Detect() {
       }
       setBufSize(consecutiveRef.current.count);
       setTop3(json.top3 || []);
-    } catch {
+    } catch (error) {
       engineErrCount.current++;
       if (engineErrCount.current >= 3) setEngineOk(false);
     } finally {
@@ -358,38 +360,41 @@ export default function Detect() {
     inFlightRef.current = true;
 
     try {
-      const frame = captureFrame();
-      if (!frame) { inFlightRef.current = false; return; }
+        const lmsList = results.multiHandLandmarks;
+        const handsList = results.multiHandedness || [];
+        
+        let left = null, right = null;
+        handsList.forEach((h, i) => {
+            if (h.label === 'Left') left = lmsList[i];
+            else right = lmsList[i];
+        });
+        
+        // Fallback or mirror logic can be handled server-side now or here
+        if (!left && lmsList.length > 1) left = lmsList[1];
+        if (!right && lmsList.length > 1) right = lmsList[0];
 
-      const res = await fetch(`/api/predict_double`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frame }), signal: AbortSignal.timeout(1200),
-      });
-      if (!res.ok) throw new Error('Flask error');
-      const json = await res.json();
-      setEngineOk(true);
-      engineErrCount.current = 0;
+        const payload = {
+            left_landmarks: left ? Array.from(left).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })) : null,
+            right_landmarks: right ? Array.from(right).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })) : null,
+            targetMudra: '' // Detection mode
+        };
 
-      let detectedName = json.detected && json.confidence >= 40 ? json.name : null;
+        const res = await fetch(`/api/detect_double_landmarks`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload), signal: AbortSignal.timeout(1200),
+        });
+        if (!res.ok) throw new Error('Flask error');
+        const json = await res.json();
+        setEngineOk(true);
+        engineErrCount.current = 0;
 
-      // GEOMETRIC OVERRIDE
-      if (detectedName && ['anjali', 'karkata', 'sivalinga', 'sankha', 'garuda'].includes(detectedName.toLowerCase())) {
-        const geo = checkGeometricAnchors(detectedName, results.multiHandLandmarks);
-        if (!geo.isValid) {
-          detectedName = null;
-          setDoubleMsg(geo.corrections[0] || "Adjust your hand position");
+        let detectedName = json.detected && json.confidence >= 40 ? json.name : null;
+
+        if (detectedName && detectedName === consecutiveRef.current.name) {
+          consecutiveRef.current.count++;
+        } else {
+          consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
         }
-      }
-
-      // RELAXED 10-FRAME GATE (with Grace Window)
-      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
-      if (detectedName) graceRef.current = 0; else graceRef.current++;
-
-      if (effectiveName && effectiveName === consecutiveRef.current.name) {
-        consecutiveRef.current.count++;
-      } else {
-        consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
-      }
 
       if (consecutiveRef.current.count >= 4) { // Insta-Gate (4 frames)
         setDetectedKey(consecutiveRef.current.name);
@@ -402,13 +407,14 @@ export default function Detect() {
       }
       setBufSize(consecutiveRef.current.count);
       setTop3(json.top3 || []);
-    } catch {
+    } catch (error) {
+      console.error("Double detection failed:", error);
       engineErrCount.current++;
       if (engineErrCount.current >= 3) setEngineOk(false);
     } finally {
       inFlightRef.current = false;
     }
-  }, [captureFrame]);
+  }, []);
 
 
   // ── Camera start / stop ────────────────────────────────────
@@ -420,7 +426,8 @@ export default function Detect() {
       if (mode === 'single') initSingleHands();
       else                   initDoubleHands();
       setCameraOn(true);
-    } catch {
+    } catch (error) {
+      console.error("Camera access failed:", error);
       engineErrCount.current++;
       if (engineErrCount.current >= 3) setEngineOk(false);
     }
@@ -459,7 +466,7 @@ export default function Detect() {
     };
     rafRef.current = requestAnimationFrame(loop);
     const detect = mode === 'single' ? runSingleDetection : runDoubleDetection;
-    intervalRef.current = setInterval(detect, mode === 'single' ? 150 : 300);
+    intervalRef.current = setInterval(detect, 100); // High-frequency streaming for "instant" feel
     return () => { cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
   }, [cameraOn, mode, runSingleDetection, runDoubleDetection]);
 

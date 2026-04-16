@@ -31,8 +31,8 @@ const StaffMyClasses = () => {
         { headers: { 'x-auth-token': token } }
       );
       setClasses(res.data);
-    } catch {
-      console.error('Failed to fetch classes');
+    } catch (error) {
+      console.error('Failed to fetch classes', error);
     } finally {
       setLoading(false);
     }
@@ -53,7 +53,7 @@ const StaffMyClasses = () => {
         { headers: { 'x-auth-token': token } }
       );
       fetchClasses();
-    } catch {
+    } catch (error) {
       alert('Failed to cancel class');
     }
   };

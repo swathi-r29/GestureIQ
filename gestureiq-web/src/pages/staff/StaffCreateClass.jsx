@@ -73,7 +73,7 @@ const StaffCreateClass = () => {
       );
       setSuccess(res.data);
       setTimeout(() => navigate('/staff/classes'), 5000);
-    } catch {
+    } catch (error) {
       alert('Failed to create class. Please check your inputs.');
     } finally {
       setLoading(false);

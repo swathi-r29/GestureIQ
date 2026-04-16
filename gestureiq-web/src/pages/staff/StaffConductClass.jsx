@@ -680,7 +680,7 @@ const StaffConductClass = () => {
         updated,
         { headers: { 'x-auth-token': token } }
       );
-    } catch { console.error('Failed to save modules'); }
+    } catch (error) { console.error('Failed to save modules', error); }
   };
 
   const handleBroadcastAnnouncement = () => {
@@ -717,7 +717,7 @@ const StaffConductClass = () => {
       setSidebarHidden(false); // Restore sidebar on end
       alert('Session completed. Report generated.');
       navigate('/staff/reports');
-    } catch { 
+    } catch (error) { 
       setSidebarHidden(false); // Restore sidebar even on error
       alert('Error ending session'); 
     }

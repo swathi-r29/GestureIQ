@@ -115,6 +115,7 @@ export default function Learn() {
     const [show3D, setShow3D] = useState(true);
     const [isFrozen, setIsFrozen] = useState(false);
     const [frozenFrame, setFrozenFrame] = useState(null);
+    const [isMuted, setIsMuted] = useState(false); // 500ms detection mute during swap
 
     const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
     const activeModulesRef = useRef(activeModules);
@@ -145,6 +146,7 @@ export default function Learn() {
     const lowAccuracyFramesRef = useRef(0); // [PHASE 10] Blink Protection
     const successLockRef = useRef(false);   // [PHASE 10] Mastered UI lock
     const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
+    const detectedRef = useRef(null);      // Task 4: For canvas drawing access
 
     const voiceEnabledRef = useRef(false);
     const lastWrongVoiceRef = useRef({ text: '', time: 0 });
@@ -197,7 +199,7 @@ export default function Learn() {
         handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
         handsRef.current.setOptions({
             maxNumHands: selectedType === 'Double' ? 2 : 1,
-            modelComplexity: 1,
+            modelComplexity: 0,
             minDetectionConfidence: 0.3,
             minTrackingConfidence: 0.3
         });
@@ -223,6 +225,37 @@ export default function Learn() {
                 lmsList.forEach((lms, idx) => {
                     drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
                     drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+                    
+                    // ── Task 4: Heatmap Guru Overlay (Red Glow) ──
+                    if (detectedRef.current?.problematic_joints) {
+                        const joints = detectedRef.current.problematic_joints;
+                        const JOINT_MAP = {
+                            thumb_mcp: 2, thumb_ip: 3, thumb_tip: 4,
+                            index_mcp: 5, index_pip: 6, index_dip: 7, index_tip: 8,
+                            middle_mcp: 9, middle_pip: 10, middle_dip: 11, middle_tip: 12,
+                            ring_mcp: 13, ring_pip: 14, ring_dip: 15, ring_tip: 16,
+                            pinky_mcp: 17, pinky_pip: 18, pinky_dip: 19, pinky_tip: 20
+                        };
+
+                        joints.forEach(j => {
+                            const idx = JOINT_MAP[j.joint] || JOINT_MAP[j.joint.replace('_mcp','_pip')];
+                            if (idx !== undefined && lms[idx]) {
+                                const pt = lms[idx];
+                                const screenX = pt.x * canvas.width;
+                                const screenY = pt.y * canvas.height;
+                                
+                                // Create radial gradient for "Heat" effect (Pro-Tip)
+                                const gradient = ctx.createRadialGradient(screenX, screenY, 5, screenX, screenY, 40);
+                                gradient.addColorStop(0, 'rgba(239, 68, 68, 0.7)'); // Red-500
+                                gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
+                                
+                                ctx.beginPath();
+                                ctx.fillStyle = gradient;
+                                ctx.arc(screenX, screenY, 40, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
+                        });
+                    }
                 });
 
                 if (selectedType === 'Double') {
@@ -285,7 +318,8 @@ export default function Learn() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
             streamRef.current = stream;
             setCameraOn(true);
-        } catch {
+        } catch (error) {
+            console.error('Camera failed:', error);
             alert('Camera access denied. Please allow camera permission and use HTTPS.');
         }
     }, []);
@@ -337,9 +371,9 @@ export default function Learn() {
         const interval = setInterval(async () => {
             if (isDetectingRef.current) return;
 
-            // GATEKEEPER: If teacher disabled the module, skip all AI logic
-            if (!activeModulesRef.current.mudra) {
-                setDetected({ name: 'AI Paused', confidence: 0, detected: false });
+            // GATEKEEPER: If teacher disabled the module OR we are in "mute" window, skip
+            if (!activeModulesRef.current.mudra || isMuted) {
+                setDetected({ name: isMuted ? 'Positioning...' : 'AI Paused', confidence: 0, detected: false });
                 setHoldProgress(0);
                 return;
             }
@@ -378,6 +412,7 @@ export default function Learn() {
                     isDetectingRef.current = false;
                     return;
                 }
+
 
                 attemptsRef.current += 1;
 
@@ -423,10 +458,11 @@ export default function Learn() {
 
                 // ── STABLE EVALUATION WINDOW ──────────────────────────────────
                 const detectedName = data.name || '';
-                const isStableAPI = data.is_stable || false;
+                const isStableAPI = data.is_stable === true; // Task 1
                 const accuracy = data.accuracy || 0;
                 const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
                 const corrections = data.corrections || [];
+                const problematicJoints = data.problematic_joints || []; // Task 4
 
                 // RELAXED 10-FRAME GATE (with Grace Window)
                 const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
@@ -466,7 +502,10 @@ export default function Learn() {
                     // If backend sent a wrongMsg, suppress "Adjusting…" and show the alert instead
                     // ── RELAXED ADJUSTING LOGIC: Show accuracy immediately if detection is live ──
                     _isAdjusting: !locallyStable && !isStableAPI && accuracy === 0 && !wrongMsg,
+                    _isMoving: !isStableAPI && data.status === 'Stabilizing...',
+                    problematic_joints: problematicJoints,
                 };
+                detectedRef.current = displayData;
 
                 // ── SUCCESS LOCK ─────────────────────────────────────────────
                 if (successLockRef.current) {
@@ -586,7 +625,7 @@ export default function Learn() {
             } finally {
                 isDetectingRef.current = false;
             }
-        }, 200);
+        }, 100); // High-frequency streaming for "instant" feel
 
         return () => {
             clearInterval(interval);
@@ -605,7 +644,7 @@ export default function Learn() {
             const res = await axios.get('/api/user/progress', { headers: { 'x-auth-token': token } });
             setProgress(res.data.progress.detectedMudras || []);
             setBestScores(res.data.progress.mudraScores || {});
-        } catch { } finally { setLoading(false); }
+        } catch (error) { } finally { setLoading(false); }
     };
 
     const fetchMudraContent = async (mudraName) => {
@@ -614,7 +653,7 @@ export default function Learn() {
             const token = localStorage.getItem('token');
             const res = await axios.get(`/api/user/mudra/content/${mudraName}`, { headers: { 'x-auth-token': token } });
             setMudraContent(res.data);
-        } catch { } finally { setContentLoading(false); }
+        } catch (error) { } finally { setContentLoading(false); }
     };
 
     const handleMudraMastered = async (folder, currentAccuracy) => {
@@ -639,6 +678,20 @@ export default function Learn() {
 
         try {
             const token = localStorage.getItem('token');
+            const studentId = user?.id || 'anonymous';
+            const classId = 'learning_session';
+
+            // ── Phase 4: AI Session Report ──
+            await axios.post('/api/session_report', {
+                studentId,
+                classId,
+                mudraName: folder,
+                detectedName: detected.name,
+                aiScore: score,
+                problematicJoints: detected.problematic_joints || [],
+                timeTaken: 0, // Could be calculated
+            }).catch(e => console.warn('[SessionReport] Failed:', e));
+
             const res = await axios.post(
                 '/api/user/progress/update',
                 { mudraName: folder, score },
@@ -646,8 +699,8 @@ export default function Learn() {
             );
             setProgress(res.data.detectedMudras || []);
             setBestScores(res.data.mudraScores || {});
-        } catch {
-            console.warn('[handleMudraMastered] Progress save failed (backend may be offline). UI already updated.');
+        } catch (error) {
+            console.warn('[handleMudraMastered] Progress save failed (backend may be offline). UI already updated.', error);
         } finally {
             saveInProgressRef.current = false;
         }
@@ -668,9 +721,13 @@ export default function Learn() {
         setIsFrozen(false);
         setFrozenFrame(null);
         attemptsRef.current = 0;
-        successLockRef.current = false;
-        saveMutexRef.current = false; // Reset mutex for new mudra
         lowAccuracyFramesRef.current = 0;
+        
+        // ── ATOMIC RESET & MUTE ──
+        setIsMuted(true);
+        setTimeout(() => setIsMuted(false), 500);
+        axios.post('/api/reset_registry').catch(() => {}); // Flush backend smoothing
+
         setStage(STAGES.PRACTICE);
     };
 
@@ -688,7 +745,9 @@ export default function Learn() {
     const accuracy = detected.accuracy || 0;
     const corrections = detected.corrections || [];
     const fingerCorrs = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
-    const wrongMudraMsg = corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
+    const wrongMudraMsg = detected.isWrongMudra 
+        ? `You are showing ${detected.actualMudra?.capitalize?.() || detected.actualMudra} instead of ${selectedMudra?.name}`
+        : corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
     const isAdjusting = detected._isAdjusting;
     const isCorrect = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0;
 
@@ -979,12 +1038,15 @@ export default function Learn() {
                                 </div>
 
                                 {/* Adjusting state */}
-                                {cameraOn && isAdjusting && !isCorrect && (
-                                    <div className="mb-4 p-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5">
-                                        <div className="text-[9px] tracking-[3px] uppercase text-yellow-500 font-bold flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" /> Adjusting…
+                                {cameraOn && (isAdjusting || detected._isMoving) && !isCorrect && (
+                                    <div className={`mb-4 p-3 rounded-xl border ${detected._isMoving ? 'border-orange-500/20 bg-orange-500/5' : 'border-yellow-500/20 bg-yellow-500/5'}`}>
+                                        <div className={`text-[9px] tracking-[3px] uppercase ${detected._isMoving ? 'text-orange-500' : 'text-yellow-500'} font-bold flex items-center gap-2`}>
+                                            <span className={`w-2 h-2 rounded-full ${detected._isMoving ? 'bg-orange-400' : 'bg-yellow-400'} animate-pulse`} /> 
+                                            {detected._isMoving ? 'Stabilizing…' : 'Adjusting…'}
                                         </div>
-                                        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Hold your hand steady for a moment</p>
+                                        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                                            {detected._isMoving ? 'Hold your hand still for detection' : 'Hold your hand steady for a moment'}
+                                        </p>
                                     </div>
                                 )}
 
