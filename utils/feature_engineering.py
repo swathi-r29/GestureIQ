@@ -66,11 +66,10 @@ def extract_features(landmarks, label="Right"):
     for t in tips:
         features.append(get_distance(pts[0], pts[t]))
 
-    # - 4 Finger Gaps (Distance between adjacent fingertips)
+    # - 3 Finger Gaps (Distance between adjacent fingertips)
     features.append(get_distance(pts[8],  pts[12]))  # index-middle gap
     features.append(get_distance(pts[12], pts[16]))  # middle-ring gap
     features.append(get_distance(pts[16], pts[20]))  # ring-pinky gap
-    features.append(get_distance(pts[4],  pts[8]))   # thumb-index gap
 
     # - 5 Tip-Curl ratios (Y-diff between Tip and MCP)
     mcp = [2, 5, 9, 13, 17]
@@ -81,5 +80,5 @@ def extract_features(landmarks, label="Right"):
     spread = get_distance(pts[4], pts[20])
     features.append(spread)
 
-    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 4 (gaps) + 5 (curls) + 1 (spread) = 83
+    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 3 (gaps) + 5 (curls) + 1 (spread) = 82
     return features

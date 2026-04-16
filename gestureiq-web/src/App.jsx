@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { LayoutProvider } from './context/LayoutContext';
 import Navbar from './components/Navbar';
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoutes';
 import Home from './pages/Home';
@@ -39,8 +40,9 @@ import Announcements from './pages/staff/Announcements';
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
+      <LayoutProvider>
+        <AuthProvider>
+          <BrowserRouter>
           <div className="min-h-screen transition-colors duration-300"
             style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
             <Routes>
@@ -107,8 +109,9 @@ export default function App() {
               } />
             </Routes>
           </div>
-        </BrowserRouter>
-      </AuthProvider>
+          </BrowserRouter>
+        </AuthProvider>
+      </LayoutProvider>
     </ThemeProvider>
   );
 }

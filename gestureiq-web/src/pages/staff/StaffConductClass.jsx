@@ -4,6 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getSocket } from '../../utils/socket';
 import { useAuth } from '../../context/AuthContext';
+import { useVoiceGuide } from '../../hooks/useVoiceGuide';
+import { useLayout } from '../../context/LayoutContext';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle, Volume2 } from 'lucide-react';
 
 const RTC_CONFIG = {
@@ -77,6 +79,7 @@ const StudentVideo = ({ stream, name }) => {
       ref={videoRef}
       autoPlay
       playsInline
+      muted={false} // --- FIX: ENABLE STUDENT AUDIO MONITORING ---
       className="w-full h-full object-cover"
       style={{ transform: 'scaleX(-1)' }}
     />
@@ -107,6 +110,7 @@ const StaffConductClass = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { setSidebarHidden } = useLayout();
   const [classData, setClassData] = useState(null);
   const [students, setStudents] = useState({});
   const [currentMudra, setCurrentMudra] = useState('');
@@ -116,6 +120,8 @@ const StaffConductClass = () => {
   const [announcement, setAnnouncement] = useState('');
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
+
+  const { announce, unlock } = useVoiceGuide({ language: 'en' });
 
   const timerRef = useRef(null);
   const studentScoresRef = useRef({});
@@ -144,6 +150,7 @@ const StaffConductClass = () => {
     init();
 
     return () => {
+      setSidebarHidden(false); // Restore sidebar on leave
       if (timerRef.current) clearInterval(timerRef.current);
       iceRestartTimersRef.current.forEach(t => clearTimeout(t));
       if (socketRef.current) socketRef.current.disconnect();
@@ -181,7 +188,13 @@ const StaffConductClass = () => {
 
   const startLocalStream = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
       localStreamRef.current = stream;
       streamReadyRef.current = true;
 
@@ -189,6 +202,7 @@ const StaffConductClass = () => {
         localVideoRef.current.srcObject = stream;
       }
 
+      unlock(); // Bypass browser autoplay blocks
       console.log('[WebRTC Teacher] Camera ready — sending offers to existing students');
 
       peerConnectionsRef.current.forEach((pc, studentSocketId) => {
@@ -407,6 +421,8 @@ const StaffConductClass = () => {
         });
       }
 
+      setSidebarHidden(true); // Hide sidebar when live
+
       // Student joins → create offer for them
       s.on('participant_joined', (data) => {
         if (data.name === 'Teacher' || data.isTeacher) return;
@@ -516,11 +532,23 @@ const StaffConductClass = () => {
         }
       });
 
+      s.on('update_class_state_ack', (data) => {
+        console.log('[Socket] State update acknowledging:', data);
+      });
+
+      // --- NEW: AI VOICE PROXY LISTENER ---
+      // Allows the teacher to hear what the student's AI is saying
+      s.on('receive_proxy_voice', (data) => {
+        console.log(`[Proxy Voice] Student ${data.from} AI says: ${data.text}`);
+        // Use priority 2 to ensure it doesn't drown out essential classroom alerts
+        announce?.raw(`Student AI: ${data.text}`, 2);
+      });
+
       // Student requests offer (e.g. they refreshed or joined late)
-      s.on('request_webrtc_offer', (data) => {
-        console.log('[WebRTC Teacher] Student requested offer:', data.from);
+      s.on('request_webrtc_offer', async ({ from }) => {
+        console.log('[WebRTC Teacher] Student requested offer:', from);
         if (streamReadyRef.current) {
-          handleCreateOffer(data.from);
+          handleCreateOffer(from);
         }
       });
 
@@ -686,9 +714,13 @@ const StaffConductClass = () => {
         { studentReports },
         { headers: { 'x-auth-token': token } }
       );
+      setSidebarHidden(false); // Restore sidebar on end
       alert('Session completed. Report generated.');
       navigate('/staff/reports');
-    } catch { alert('Error ending session'); }
+    } catch { 
+      setSidebarHidden(false); // Restore sidebar even on error
+      alert('Error ending session'); 
+    }
   };
 
   const formatTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;

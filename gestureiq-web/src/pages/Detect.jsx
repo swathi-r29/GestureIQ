@@ -10,7 +10,7 @@ const { drawConnectors, drawLandmarks } = window;
 
 // ── Single-hand mudra data ─────────────────────────────────
 const MUDRA_DATA = {
-  pataka:       { name: 'Pataka',       meaning: 'Flag',               description: 'The Pataka mudra represents a flag, clouds, forest, beginning of dance, and river. It is one of the most fundamental mudras in Bharatanatyam, used to depict blessing, a forest, the sea, and the night sky.', usage: 'Clouds, forest, river, blessing', symbol: '🏳️' },
+  pataka:       { name: 'Pataka',       meaning: 'Flag',               description: 'The Pataka mudra represents a flag, clouds, forest, and river. Hold all four fingers straight and pressed together; bend your thumb inward to touch the base of the index finger.', usage: 'Rain clouds, forest, river, blessing, and opening doors', symbol: '🏳️' },
   tripataka:    { name: 'Tripataka',    meaning: 'Three-part Flag',    description: 'Tripataka is derived from Pataka with the ring finger bent. It represents a crown, tree, lamp flame, and arrow. Used widely in storytelling sequences to depict royalty and divine objects.', usage: 'Crown, tree, lamp flame, arrow', symbol: '🌿' },
   ardhapataka:  { name: 'Ardhapataka', meaning: 'Half Flag',           description: 'Ardhapataka represents a knife, two leaves, and river banks. This mudra is formed by bending the ring and little fingers while keeping the other two straight.', usage: 'Knife, two leaves, river banks', symbol: '🍃' },
   kartarimukha: { name: 'Kartarimukha', meaning: 'Scissors Face',      description: 'Kartarimukha resembles scissor blades and is used to depict separation, the corner of an eye, death, and lightning. A powerful expressive mudra in classical dance.', usage: 'Separation, lightning, corner of eye', symbol: '✂️' },
@@ -93,6 +93,7 @@ export default function Detect() {
   const [engineOk,    setEngineOk]    = useState(true);
   const [showModal,   setShowModal]   = useState(false);
   const [modalMudra,  setModalMudra]  = useState(null);
+  const [isNarrating, setIsNarrating] = useState(false);
   const [doubleMsg,   setDoubleMsg]   = useState('Show both hands to the camera');
 
   const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
@@ -137,28 +138,47 @@ export default function Detect() {
 
   // ── Modal + voice on detection ─────────────────────────────
   useEffect(() => {
-    // [RECTIFICATION] Manual cancel removed to prevent interruption on hand loss
-    if (detectedKey && detectedKey !== prevKeyRef.current) {
+    if (detectedKey && detectedKey !== prevKeyRef.current && !isNarrating) {
       prevKeyRef.current = detectedKey;
       const data = mode === 'single' ? MUDRA_DATA[detectedKey] : DOUBLE_MUDRA_DATA[detectedKey];
       if (!data) return;
 
       if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
+      
+      // TRIGGER NARRATION & FREEZE
+      setIsNarrating(true);
+      
       modalTimerRef.current = setTimeout(() => {
         setModalMudra({ ...data, isDouble: mode === 'double' });
         setShowModal(true);
         
-        // [RECTIFICATION] Use Unified Hook and Ultra Priority (4)
-        const text = `${data.name} mudra detected. ${data.meaning}. Used for ${data.usage}.`;
-        announce.raw(text, 4, { onEnd: () => setShowModal(false) });
-      }, 1500);
+        const text = `${data.name}. ${data.description}. Used for ${data.usage}.`;
+        announce.raw(text, 4, { 
+          onEnd: () => {
+            // Give 1 second of "Reading Time" after voice ends
+            setTimeout(() => {
+              setIsNarrating(false);
+              setShowModal(false);
+              
+              // RESET DETECTION (Clear Slate)
+              setDetectedKey(null);
+              setConfidence(0);
+              setTop3([]);
+              setBufSize(0);
+              consecutiveRef.current = { name: null, count: 0 };
+              prevKeyRef.current = null;
+            }, 1000);
+          } 
+        });
+      }, 800); // Trigger faster than previous 1500ms
     }
-    if (!detectedKey) {
+    
+    if (!detectedKey && !isNarrating) {
       prevKeyRef.current = null;
       if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
       setShowModal(false);
     }
-  }, [detectedKey, mode]);
+  }, [detectedKey, isNarrating, mode]);
 
   const doCleanup = useCallback(() => {
     if (rafRef.current)      cancelAnimationFrame(rafRef.current);
@@ -245,7 +265,7 @@ export default function Detect() {
 
   // ── Single-hand detection ──────────────────────────────────
   const runSingleDetection = useCallback(async () => {
-    if (showModal) return; // [LOCK] Pause while explaining
+    if (isNarrating || showModal) return; // [LOCK] Pause while narrating or showing modal
     if (inFlightRef.current) return;
     
     // GATEKEEPER: If module is off, skip detection API call
@@ -309,7 +329,7 @@ export default function Detect() {
 
   // ── Double-hand detection ──────────────────────────────────
   const runDoubleDetection = useCallback(async () => {
-    if (showModal) return; // [LOCK] Pause while explaining
+    if (isNarrating || showModal) return; // [LOCK] Pause while narrating or showing modal
     if (inFlightRef.current) return;
 
     // GATEKEEPER: If module is off, skip detection API call

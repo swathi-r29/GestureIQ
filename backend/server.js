@@ -5,6 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
+const MudraContent = require('./models/MudraContent');
 
 dotenv.config();
 
@@ -59,6 +60,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/live', require('./routes/liveClass'));
 app.use('/api/staff', require('./routes/staffRoutes'));
 app.use('/api/student', require('./routes/studentRoutes'));
+app.use('/api/mudras', require('./routes/mudraRoutes'));
 
 // Static files (for mudra images/videos)
 
@@ -180,26 +182,54 @@ io.on('connection', (socket) => {
         io.emit('class_started', { classId });
     });
 
-    socket.on('set_target_mudra', (data) => {
+    socket.on('set_target_mudra', async (data) => {
         const { classId, target } = data;
         if (!classId) return;
 
         console.log(`[Socket] Room ${classId} target mudra -> ${target}`);
-        io.to(classId).emit('target_changed', { target });
+        
+        // Fetch full details for the toast/voice
+        try {
+            const mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${target}$`, 'i') } });
+            io.to(classId).emit('mudra_changed', {
+                newMudra: target,
+                name: mudra?.mudraName || target,
+                nameta: mudra?.nameta || target,
+                meaning: mudra?.description?.meaning || "the specified mudra",
+                meaningta: mudra?.description?.meaningta || "குறிப்பிட்ட முத்திரை"
+            });
+        } catch (err) {
+            console.error('[Socket] Mudra fetch error:', err);
+            io.to(classId).emit('target_changed', { target });
+        }
     });
 
     // NEW: Real-Time Teacher-Controlled Spotlight
-    socket.on('update_class_state', (data) => {
+    socket.on('update_class_state', async (data) => {
         const { classId, targetMudra, activeModules } = data;
         if (!classId) return;
 
         console.log(`[Socket] Room ${classId} state update:`, { targetMudra, activeModules });
         
-        // Broadcast to everyone in the room
+        // Broadcast state update
         io.to(classId).emit('update_class_state', { targetMudra, activeModules });
         
-        // Reliability: also emit individual events for older client versions
-        if (targetMudra) io.to(classId).emit('target_changed', { target: targetMudra });
+        if (targetMudra) {
+            try {
+                const mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${targetMudra}$`, 'i') } });
+                io.to(classId).emit('mudra_changed', {
+                    newMudra: targetMudra,
+                    name: mudra?.mudraName || targetMudra,
+                    nameta: mudra?.nameta || targetMudra,
+                    meaning: mudra?.description?.meaning || "the specified mudra",
+                    meaningta: mudra?.description?.meaningta || "குறிப்பிட்ட முத்திரை"
+                });
+            } catch (err) {
+                console.error('[Socket] Mudra fetch error:', err);
+                io.to(classId).emit('target_changed', { target: targetMudra });
+            }
+        }
+        
         if (activeModules) io.to(classId).emit('modules_changed', { modules: activeModules });
     });
 
@@ -261,6 +291,21 @@ io.on('connection', (socket) => {
                 candidate: data.candidate
             });
         }
+    });
+
+    // ── AI Voice Proxy ────────────────────────────────────────
+    socket.on('proxy_voice_instruction', (data) => {
+        const { classId, text, senderRole } = data;
+        if (!classId) return;
+
+        console.log(`[Socket] Proxying AI Voice in room ${classId}: "${text}"`);
+
+        // Relay to everyone else in the room (teachers and other students)
+        socket.to(classId).emit('receive_proxy_voice', {
+            text,
+            senderRole,
+            from: socket.id
+        });
     });
 
     socket.on('disconnect', () => {

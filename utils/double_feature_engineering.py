@@ -19,8 +19,8 @@ def get_angle(p1, p2, p3):
 
 def _extract_single_hand_features(landmarks, label="Right"):
     """
-    Extract 83 features from one hand's 21 landmarks.
-    Returns a 83-element list.
+    Extract 82 features from one hand's 21 landmarks.
+    Returns a 82-element list.
     Mirrors X coords if label == "Left" so model always sees Right-hand geometry.
     """
     if hasattr(landmarks[0], 'x'):
@@ -57,17 +57,15 @@ def _extract_single_hand_features(landmarks, label="Right"):
     features.append(get_distance(pts[8],  pts[12]))  # index-middle gap
     features.append(get_distance(pts[12], pts[16]))  # middle-ring gap
     features.append(get_distance(pts[16], pts[20]))  # ring-pinky gap
-    features.append(get_distance(pts[4],  pts[8]))   # thumb-index gap
-
     mcp = [2, 5, 9, 13, 17]
     for i, t in enumerate(tips):     # 5 tip-curl ratios
         features.append(pts[t][1] - pts[mcp[i]][1])
 
-    # Total: 63+5+5+4+5 = 82 features + 1 thumb-spread ratio = 83
+    # Total: 63+5+5+3+5 = 81 features + 1 thumb-spread ratio = 82
     spread = get_distance(pts[4], pts[20])
     features.append(spread)
 
-    assert len(features) == 83, f"Single-hand feature count: {len(features)}"
+    assert len(features) == 82, f"Single-hand feature count: {len(features)}"
     return features
 
 
@@ -89,15 +87,15 @@ def extract_double_features(left_landmarks, right_landmarks,
     if right_landmarks is not None:
         right_feats = _extract_single_hand_features(right_landmarks, label=right_label)
     else:
-        right_feats = [0.0] * 83
+        right_feats = [0.0] * 82
 
     if left_landmarks is not None:
         left_feats = _extract_single_hand_features(left_landmarks, label=left_label)
     else:
-        left_feats = [0.0] * 83
+        left_feats = [0.0] * 82
 
     features = right_feats + left_feats   # right hand first, then left
-    assert len(features) == 166, f"Double-hand feature count: {len(features)}"
+    assert len(features) == 164, f"Double-hand feature count: {len(features)}"
     return features
 
 

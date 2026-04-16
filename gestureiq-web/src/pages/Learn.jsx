@@ -5,7 +5,7 @@ import io from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import BorderPattern from '../components/BorderPattern';
 import HandVisualiser from '../components/HandVisualiser';
-import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
+import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG, translate, getMudraName } from '../hooks/useVoiceGuide';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 
 const { Hands, HAND_CONNECTIONS } = window;
@@ -367,9 +367,12 @@ export default function Learn() {
 
                     if (voiceEnabledRef.current) {
                         const now = Date.now();
-                        if (now - lastNoHandRef.current > 6000) {
-                            lastNoHandRef.current = now;
-                            announce.raw(lang === 'ta' ? 'உங்கள் கையை கேமராவில் காட்டுங்கள்' : 'Show your hand to the camera', 2);
+                        // Only announce "Show your hand" if not currently holding a success state
+                        if (holdAccumulatorRef.current === 0) {
+                            if (now - lastNoHandRef.current > 8000) {
+                                lastNoHandRef.current = now;
+                                announce.raw(lang === 'ta' ? 'உங்கள் கையை கேமராவில் காட்டுங்கள்' : 'Show your hand to the camera', 2);
+                            }
                         }
                     }
                     isDetectingRef.current = false;
@@ -422,6 +425,7 @@ export default function Learn() {
                 const detectedName = data.name || '';
                 const isStableAPI = data.is_stable || false;
                 const accuracy = data.accuracy || 0;
+                const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
                 const corrections = data.corrections || [];
 
                 // RELAXED 10-FRAME GATE (with Grace Window)
@@ -476,67 +480,56 @@ export default function Learn() {
                     return displayData;
                 });
 
-                // ── VOICE — gating is now handled individually inside ──────────────────
+                // --- UPDATED VOICE & SUCCESS LOGIC ---
                 if (voiceEnabledRef.current) {
                     const now = Date.now();
-                    const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
+                    const currentHoldPct = (holdAccumulatorRef.current / holdMs) * 100;
 
-                    // Small gate for finger corrections to avoid jitter
-                    if (fingerCorr.length > 0) {
-                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
-                    } else {
-                        stableCorrFramesRef.current = 0;
-                    }
-                    const stableFingerCorr = stableCorrFramesRef.current >= 2 ? fingerCorr[0] : null;
-
-                    if (stableWrongMsg) {
-                        const prev = lastWrongVoiceRef.current;
-                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4000) {
-                            lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                            const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
-                            const tgtMatch = stableWrongMsg.match(/(?:target is|instead of) ([a-zA-Z]+)/i);
-                            const detName = detMatch ? detMatch[1] : detectedName;
-                            const tgtName = tgtMatch ? tgtMatch[1] : selectedMudra.folder;
-                            const capitalize = (s) => (s && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
-                            const detDisp = capitalize(detName);
-                            const tgtDisp = capitalize(tgtName);
-
-                            let voiceMsg = lang === 'ta'
-                                ? `தவறான முத்திரை. நீங்கள் ${getMudraName(lang, detName)} காட்டுகிறீர்கள். சரியான முத்திரை ${getMudraName(lang, tgtName)}.`
-                                : lang === 'hi'
-                                    ? `गलत मुद्रा। आप ${getMudraName(lang, detName)} दिखा रहे हैं। सही मुद्रा ${getMudraName(lang, tgtName)} है।`
-                                    : `Wrong mudra. You are performing ${detDisp}. The correct one is ${tgtDisp}.`;
-
-                            if (fingerCorr.length > 0) {
-                                voiceMsg += ` ${translate(lang, fingerCorr[0])}`;
-                                // Synchronize to avoid immediate repeat
-                                lastCorrVoiceRef.current = { text: fingerCorr[0], time: now };
-                            }
-                            announce.raw(voiceMsg, 3);
-                        }
-                    } else if (stableFingerCorr) {
-                        // Relaxed stability for corrections — speaks as long as error is consistent for 2 frames
-                        const prev = lastCorrVoiceRef.current;
-                        if (stableFingerCorr !== prev.text || (now - prev.time) > 4000) {
-                            lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
-                            announce.raw(translate(lang, stableFingerCorr), 1);
-                        }
-                    } else if (locallyStable && data.detected && accuracy >= 72 && fingerCorr.length === 0 && !stableWrongMsg) {
+                    // 1. SUCCESS STATE: User is holding the pose
+                    if (currentHoldPct > 10 && !sessionComplete) {
                         if (now - lastOkVoiceRef.current > 8000) {
                             lastOkVoiceRef.current = now;
-                            const msg = lang === 'ta' ? 'சரியானது! அருமையான கோலம்'
-                                : lang === 'hi' ? 'सही है! बहुत अच्छा'
-                                    : 'Correct! Great form.';
-                            announce.raw(msg, 3);
+                            const msg = lang === 'ta' 
+                                ? 'அப்படியே பிடியுங்கள்! நீங்கள் செய்துவிட்டீர்கள்!' 
+                                : 'Hold for a second, you did it!';
+                            announce.raw(msg, 4); // Priority 4 (Ultra) to prevent interruptions
                         }
                     }
+                    // 2. WRONG MUDRA STATE (Guard with holdProgress === 0)
+                    else if (wrongMsg && holdAccumulatorRef.current === 0) {
+                        const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
+                        if (stableWrongMsg) {
+                            const prev = lastWrongVoiceRef.current;
+                            if (stableWrongMsg !== prev.text || (now - prev.time) > 5000) {
+                                lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
+                                const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
+                                const detName = detMatch ? detMatch[1] : detectedName;
+                                
+                                let voiceMsg = lang === 'ta'
+                                    ? `தவறான முத்திரை. நீங்கள் ${getMudraName(lang, detName)} காட்டுகிறீர்கள்.`
+                                    : `Wrong mudra. You are showing ${detName}.`;
+                                announce.raw(voiceMsg, 3);
+                            }
+                        }
+                    } 
+                    // 3. FINGER CORRECTIONS (Guard with holdProgress === 0)
+                    else if (fingerCorr.length > 0 && holdAccumulatorRef.current === 0) {
+                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
+                        if (stableCorrFramesRef.current >= 2) {
+                            const currentCorr = fingerCorr[0];
+                            const prev = lastCorrVoiceRef.current;
+                            if (currentCorr !== prev.text || (now - prev.time) > 4500) {
+                                lastCorrVoiceRef.current = { text: currentCorr, time: now };
+                                announce.raw(translate(lang, currentCorr), 2);
+                            }
+                        }
+                    } 
                 }
 
                 // ── HOLD + SAVE ───────────────────────────────────────────────
                 const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg;
                 const isGoodFrame = isCorrect;
 
-                const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
                 const now = Date.now();
                 const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 0;
                 lastFrameTimeRef.current = now;
@@ -559,7 +552,7 @@ export default function Learn() {
                 }
 
                 let displayPct = (holdAccumulatorRef.current / holdMs) * 100;
-                if (!isGoodFrame && (isCorrectMudra && accuracy >= 62)) {
+                if (!isGoodFrame && (isCorrect && accuracy >= 62)) {
                     displayPct = Math.min(75, displayPct);
                 }
                 
@@ -572,10 +565,20 @@ export default function Learn() {
                 // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
                 if (holdAccumulatorRef.current >= holdMs && !saveMutexRef.current) {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
-                    masteredRef.current = true;
-                    saveInProgressRef.current = true;
-                    successLockRef.current = true; // Lock UI at 100%
-                    handleMudraMastered(selectedMudra.folder, accuracy);
+                    
+                    // 1. First, tell the user they did it
+                    if (voiceEnabledRef.current) {
+                        const msg = lang === 'ta' ? 'அற்புதம்! முடித்துவிட்டீர்கள்.' : 'Excellent! You did it.';
+                        announce.raw(msg, 4); 
+                    }
+
+                    // 2. Wait 1.5 seconds for the voice to play BEFORE showing the mastery page
+                    setTimeout(() => {
+                        masteredRef.current = true;
+                        saveInProgressRef.current = true;
+                        successLockRef.current = true; // Lock UI at 100%
+                        handleMudraMastered(selectedMudra.folder, accuracy);
+                    }, 1500); 
                 }
 
             } catch (err) {
@@ -627,7 +630,10 @@ export default function Learn() {
         setHoldProgress(0);
 
         if (voiceEnabledRef.current) {
-            announce.mastered({ mudra: selectedMudra?.name || folder, score, attempts: attemptsRef.current });
+            const congrats = lang === 'ta' 
+                ? `வாழ்த்துகள்! நீங்கள் ${selectedMudra.name} முத்திரையை வெற்றிகரமாக முடித்துவிட்டீர்கள்!`
+                : `Congratulations! You have successfully mastered the ${selectedMudra.name} mudra!`;
+            announce.raw(congrats, 4);
         }
         attemptsRef.current = 0;
 

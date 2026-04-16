@@ -319,27 +319,40 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         correct: () => {
             const lang = langRef.current;
             const msgs = { en: "Excellent!", ta: "அருமை!", hi: "बहुत बढ़िया!" };
-            _doSpeak(msgs[lang] || msgs.en, PRIO.HIGH);
+            const msg = msgs[lang] || msgs.en;
+            _doSpeak(msg, PRIO.HIGH);
+            return msg;
         },
-        noHand: () => speak("Show your hand to the camera", { minInterval: 6000, priority: PRIO.MEDIUM }),
+        noHand: () => {
+            const msg = "Show your hand to the camera";
+            speak(msg, { minInterval: 6000, priority: PRIO.MEDIUM });
+            return msg;
+        },
         
         start: (folder) => {
             const inst = getInstruction(folder);
             _doSpeak(inst, PRIO.HIGH);
+            return inst;
         },
         
         mastered: ({ mudra, score }) => {
             const lang = langRef.current;
             const name = getMudraName(lang, mudra);
+            let msg = "";
             if (lang === 'ta') {
-                _doSpeak(`அற்புதம்! நீங்கள் ${name} முத்திரையை ${score} சதவீத துல்லியத்துடன் கற்றுக்கொண்டீர்கள்.`, PRIO.HIGH);
+                msg = `அற்புதம்! நீங்கள் ${name} முத்திரையை ${score} சதவீத துல்லியத்துடன் கற்றுக்கொண்டீர்கள்.`;
             } else {
-                _doSpeak(`Excellent! You mastered ${mudra} with ${score} percent accuracy.`, PRIO.HIGH);
+                msg = `Excellent! You mastered ${mudra} with ${score} percent accuracy.`;
             }
+            _doSpeak(msg, PRIO.HIGH);
+            return msg;
         },
-        raw: (msg, priority = PRIO.MEDIUM, opts = {}) => _doSpeak(msg, priority, opts),
+        raw: (msg, priority = PRIO.MEDIUM, opts = {}) => {
+            _doSpeak(msg, priority, opts);
+            return msg;
+        },
         fromResult: (data) => {
-            if (!data) return;
+            if (!data) return null;
             const lang = langRef.current;
             const now = Date.now();
             
@@ -359,18 +372,22 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 if (isStatusTransition || scoreJump || now - lastOkVoiceRef.current > 10000) {
                     lastOkVoiceRef.current = now;
                     const msgs = { en: "Perfect! Hold it right there.", ta: "மிகச்சிறப்பு! அப்படியே பிடியுங்கள்.", hi: "बेहतरीन! इसे ऐसे ही बनाए रखें।" };
-                    _doSpeak(msgs[lang] || msgs.en, PRIO.HIGH);
+                    const msg = msgs[lang] || msgs.en;
+                    _doSpeak(msg, PRIO.HIGH);
+                    return msg;
                 }
-                return;
+                return null;
             }
 
             if (currentScore >= 75) {
                 if (isStatusTransition || now - lastOkVoiceRef.current > 8000) {
                     lastOkVoiceRef.current = now;
                     const msgs = { en: "Good! Now hold this position.", ta: "நல்லது! இந்த நிலையை பிடித்திருங்கள்.", hi: "अच्छा! अब इस स्थिति को बनाए रखें।" };
-                    _doSpeak(msgs[lang] || msgs.en, PRIO.MEDIUM);
+                    const msg = msgs[lang] || msgs.en;
+                    _doSpeak(msg, PRIO.MEDIUM);
+                    return msg;
                 }
-                return;
+                return null;
             }
 
             if (data.corrections && data.corrections.length > 0) {
@@ -380,8 +397,9 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                     lastCorrectionRef.current = translated;
                     lastCorrectionTimeRef.current = now;
                     _doSpeak(translated, PRIO.MEDIUM);
+                    return translated;
                 }
-                return;
+                return null;
             }
 
             if (data.is_stable && currentMudra !== 'No Hand' && currentMudra !== 'Joining...') {
@@ -393,9 +411,12 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                         ta: `நீங்கள் ${getMudraName(lang, mat)} காட்டுகிறீர்கள். விரல்களை சரிசெய்யவும்.`, 
                         hi: `आप ${getMudraName(lang, mat)} दिखा रहे हैं। अपनी उंगलियों को ठीक करें।` 
                     };
-                    _doSpeak(msgs[lang] || msgs.en, PRIO.MEDIUM);
+                    const msg = msgs[lang] || msgs.en;
+                    _doSpeak(msg, PRIO.MEDIUM);
+                    return msg;
                 }
             }
+            return null;
         },
         resetWrongGate: () => { wrongMudraCountRef.current = 0; }
     }), [getInstruction, _doSpeak, speak]);

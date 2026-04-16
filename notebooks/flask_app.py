@@ -402,6 +402,9 @@ CORRECTION_THRESHOLDS = {
     "thumb": 45, "index": 42, "middle": 42, "ring": 42, "pinky": 42,
 }
 
+# Mudras that are geometrically similar but must be strictly distinguished
+STRICT_CONFLICT_PAIRS = [('ardhapataka', 'kartarimukha'), ('pataka', 'ardhachandra')]
+
 STRAIGHT_FINGER_MUDRAS = {
     "pataka", "tripataka", "ardhachandra", "trishula", "arala", "sarpashira"
 }
@@ -1030,8 +1033,21 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
             seen.add(msg)
             unique_deviations.append((score, msg))
 
+    # --- GENERATE FINGER COLORS FOR SKELETON ---
+    finger_colors = {
+        "thumb": "#00FF00", "index": "#00FF00", "middle": "#00FF00", 
+        "ring": "#00FF00", "pinky": "#00FF00"
+    }
+    for _, msg in deviations:
+        m = msg.lower()
+        if "thumb" in m: finger_colors["thumb"] = "#FF0000"
+        if "index" in m: finger_colors["index"] = "#FF0000"
+        if "middle" in m: finger_colors["middle"] = "#FF0000"
+        if "ring" in m: finger_colors["ring"] = "#FF0000"
+        if "pinky" in m or "little" in m: finger_colors["pinky"] = "#FF0000"
+
     accuracy = max(0.0, 100.0 - (total_error / 10.0))
-    return [d[1] for d in unique_deviations], float("{:.1f}".format(accuracy))
+    return [d[1] for d in unique_deviations], float("{:.1f}".format(accuracy)), finger_colors
 
 # =============================================================================
 # LANDMARK SERIALIZER
@@ -1140,7 +1156,7 @@ def is_hand_held_double(landmarks, current_accuracy=0.0):
 # CORE MADM PIPELINE
 # =============================================================================
 def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
-    global ema_probs, ema_landmarks, stable_mudra, stable_count, last_good_data
+    global ema_probs, ema_landmarks, stable_mudra, stable_count, last_good_data, last_stable_name
     global is_double_mode
     
     # ── [FIX 6] HARD INTERFERENCE CLEANUP ─────────────────────────────
@@ -1188,8 +1204,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                         for i in range(21)]
 
         features = extract_features(smooth_lm, label=label)
-        if len(features) != 83:
-            print(f"[ERROR] Feature size mismatch: Expected 83, got {len(features)}")
+        if len(features) != 82:
+            print(f"[ERROR] Feature size mismatch: Expected 82, got {len(features)}")
             return {"detected": False, "feedback": "Feature error"}
 
         raw_probs  = model.predict_proba([features])[0]
@@ -1205,7 +1221,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         geom_acc   = 0
         target_key = target_mudra.lower().strip() if target_mudra else ""
         if target_key and target_key in MUDRA_REFERENCE_ANGLES:
-            _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
+            _, geom_acc, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             if target_key == "hamsasya":
                 if dist_lm(lm_wrapper, 4, 8, palm_size) < 0.12 and finger_angles.get("index", 180) < 110:
                     geom_acc = 95.0
@@ -1222,7 +1238,9 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             eval_name = target_key if target_key else stable_name
             active_corrections, display_acc = [], 0.0
             if eval_name in MUDRA_REFERENCE_ANGLES:
-                active_corrections, display_acc = get_corrections(eval_name, finger_angles, lm_wrapper, palm_size)
+                active_corrections, display_acc, current_finger_colors = get_corrections(eval_name, finger_angles, lm_wrapper, palm_size)
+            else:
+                current_finger_colors = None
 
             # Wrong mudra check — use stable_name after EMA
             is_wrong = (target_key and stable_name.lower().strip() != eval_name and
@@ -1245,6 +1263,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 "landmarks":   lm_to_json(lm_list),
                 "hold_progress": 0,
                 "hold_state":  "idle",
+                "finger_colors": current_finger_colors,
             }
 
         print(f"[INFO] Mudra: {stable_name}, Conf: {smooth_conf:.2f}")
@@ -1264,7 +1283,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             best_geom_name = ""
             geom_scores    = {}
             for m_name in MUDRA_REFERENCE_ANGLES.keys():
-                _, acc = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
+                _, acc, _ = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
                 geom_scores[m_name] = acc
                 if acc > best_geom_acc:
                     best_geom_acc  = acc
@@ -1363,7 +1382,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             }
 
         eval_mudra = target_key if target_key else stable_name
-        corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
+        corrections, art_accuracy, current_finger_colors = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
 
         # SANITY CHECK: If ML picked an Open Mudra but it needs 'Straighten', 'Extend' etc.
         # and we have a high-accuracy Geometric Match (e.g. Pataka), SWAP!
@@ -1376,14 +1395,25 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 corrections, art_accuracy = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
                 is_stable   = True
 
+        # --- INITIALIZE TOTAL ACCURACY ---
+        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
+
         # --- STRICT VALIDATION LAYERS ---
         # 1. Identity Gate: If ML is sure it's the WRONG mudra, kill accuracy immediately.
         is_wrong_identity = (target_key and stable_name.lower().strip() != target_key and smooth_conf > 45)
         
         if is_wrong_identity:
-            # Check if geometry is so perfect (>85%) it overrides the ML's wrong label
-            # This is rare but useful for very similar mudras
-            if art_accuracy < 85:
+            # Check for known conflict pairs where geometric similarity might cause confusion
+            current_pair = (target_key, stable_name.lower().strip())
+            if current_pair in STRICT_CONFLICT_PAIRS:
+                print(f"[STRICT-CONFLICT] Blocked Similarity: Target={target_key}, Detected={stable_name}")
+                total_accuracy = 0.0
+                wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()}. Fold your ring and pinky fingers tighter for {target_key.capitalize()}."
+                corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
+                corrections.insert(0, wrong_msg)
+            
+            # Legacy Identity check
+            elif art_accuracy < 85:
                 print(f"[STRICT] Wrong Identity: ML={stable_name}, Target={target_key}. Killing accuracy.")
                 total_accuracy = 0.0
                 wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
@@ -1480,6 +1510,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             # Extra field so frontend can show both detected and target names clearly
             "detected_mudra_name": stable_name,
             "target_mudra_name":   target_key,
+            "finger_colors":       current_finger_colors,
         }
 
         current_mudra.update({
@@ -1908,11 +1939,13 @@ def evaluate_session():
             p_w = [lm_list[0].x, lm_list[0].y, lm_list[0].z]
             p_m = [lm_list[9].x, lm_list[9].y, lm_list[9].z]
             palm_size = get_distance(p_w, p_m) or 1.0
-            _, geom_acc = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
+            _, geom_acc, finger_colors = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             # Blend ML score (60%) + geometry (40%) for single-target mode
             score_pct = round((score_pct * 0.6) + (geom_acc * 0.4), 1)
             if best_name != target_key and geom_acc > score_pct:
                 best_name = target_key
+        else:
+            finger_colors = None
 
         status = "Correct" if score_pct >= 75 else \
                  "Needs Improvement" if score_pct >= 50 else \
@@ -1924,7 +1957,8 @@ def evaluate_session():
             "matchedMudra": best_name,
             "score": score_pct,
             "status": status,
-            "detected": bool(score_pct >= 50)
+            "detected": bool(score_pct >= 50),
+            "finger_colors": finger_colors
         })
 
     except Exception as e:

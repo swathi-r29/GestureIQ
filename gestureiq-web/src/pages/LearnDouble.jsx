@@ -505,10 +505,11 @@ export default function LearnDouble() {
             try {
                 const handMap = landmarksRef.current;
 
-                // ── NO HANDS ──────────────────────────────────────────────────
-                if (!handMap || Object.keys(handMap).length === 0) {
+                // ── NO HANDS / SINGLE HAND GATING ───────────────────────────
+                const numHands = Object.keys(handMap || {}).length;
+                
+                if (numHands === 0) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
-                    // Drain progress on no hands, but don't reset instantly
                     const now = Date.now();
                     const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 200;
                     lastFrameTimeRef.current = now;
@@ -521,11 +522,37 @@ export default function LearnDouble() {
 
                     if (voiceEnabledRef.current) {
                         const now = Date.now();
-                        if (now - lastNoHandRef.current > 6000) {
+                        if (now - lastNoHandRef.current > 8000) {
                             lastNoHandRef.current = now;
-                            announce.raw('Show BOTH hands to the camera', 2);
+                            announce.raw(lang === 'ta' ? 'உங்கள் கையை காட்டுங்கள்' : 'Show your hands to the camera', 2);
                         }
                     }
+                    isDetectingRef.current = false;
+                    return;
+                }
+
+                let isMergeable = selectedMudra && MERGEABLE_MUDRAS.includes(selectedMudra.folder);
+
+                if (numHands === 1 && !isMergeable) {
+                    // For non-touching mudras, we REQUIRE two hands.
+                    setDetected({ name: 'Show both hands', confidence: 0, detected: false });
+                    
+                    if (voiceEnabledRef.current) {
+                        const now = Date.now();
+                        if (now - lastNoHandRef.current > 7000) {
+                            lastNoHandRef.current = now;
+                            const msg = lang === 'ta' ? 'இரண்டு கைகளையும் காட்டுங்கள்' : 'Please show both hands clearly';
+                            announce.raw(msg, 2);
+                        }
+                    }
+
+                    // Drain progress because it's effectively "not the mudra" yet
+                    const now = Date.now();
+                    const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 200;
+                    lastFrameTimeRef.current = now;
+                    holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 1.5);
+                    setHoldProgress((holdAccumulatorRef.current / HOLD_DURATION_MS) * 100);
+
                     isDetectingRef.current = false;
                     return;
                 }
@@ -542,18 +569,10 @@ export default function LearnDouble() {
 
                 // ── GEOMETRIC GATEKEEPER ──────────────────────────────────────
                 const geo = checkGeometricAnchors(selectedMudra.folder, Object.values(handMap).map(h => h.landmarks));
-                let isMergeable = selectedMudra && MERGEABLE_MUDRAS.includes(selectedMudra.folder);
                 
-                // [Diagnostic Logs]
-                if (selectedMudra?.folder === 'anjali') {
-                    console.log('[Anjali Debug] handMap:', Object.keys(handMap));
-                    console.log('[Anjali Debug] geo result:', geo);
-                }
-
-                // New: Allow mergeable mudras (like Anjali) to bypass geometric stop
-                // This lets the AI try to detect even if hands overlap into one blob
+                // If it's NOT mergeable and fails geometry, stop.
+                // Mergeable mudras (like Anjali) skip the geo-check to allow mirroring fallback in backend.
                 if (!geo.isValid && !isMergeable) {
-                    // STOP progress for non-mergeable mudras that fail geometry
                     setDetected({
                         name: 'Adjust Position',
                         accuracy: 0,
@@ -643,27 +662,16 @@ export default function LearnDouble() {
                     return;
                 }
 
-                // ── VOICE — gating is now handled individually inside ──────────────────
+                // --- RESTORED VOICE CORRECTIONS LOGIC ---
                 if (voiceEnabledRef.current) {
                     const now = Date.now();
-                    const WRONG_MUDRA_GATE = 3;
-                    const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
-
-                    // Small gate for finger corrections to avoid jitter
-                    if (fingerCorr.length > 0) {
-                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
-                    } else {
-                        stableCorrFramesRef.current = 0;
-                    }
-                    const stableFingerCorr = stableCorrFramesRef.current >= 2 ? fingerCorr[0] : null;
+                    const stableWrongMsg = wrongMudraFramesRef.current >= 3 ? wrongMsg : null;
 
                     if (stableWrongMsg) {
                         const prev = lastWrongVoiceRef.current;
-                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4000) {
+                        if (stableWrongMsg !== prev.text || (now - prev.time) > 4500) {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                            const capitalize = (s) => (s && s.length > 0) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
                             
-                            // For double hand, we simplify the wrong mudra voice as it's complex to name both
                             let voiceMsg = lang === 'ta'
                                 ? `தவறான வடிவம். ஒருமுறை சரிபார்க்கவும்.`
                                 : lang === 'hi'
@@ -676,14 +684,22 @@ export default function LearnDouble() {
                             }
                             announce.raw(voiceMsg, 3);
                         }
-                    } else if (stableFingerCorr) {
-                        const prev = lastCorrVoiceRef.current;
-                        if (stableFingerCorr !== prev.text || (now - prev.time) > 4000) {
-                            lastCorrVoiceRef.current = { text: stableFingerCorr, time: now };
-                            announce.raw(translate(lang, stableFingerCorr), 1);
+                    } else if (fingerCorr.length > 0) {
+                        // Use a 2-frame gate for immediate responsiveness
+                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
+                        
+                        if (stableCorrFramesRef.current >= 2) {
+                            const currentCorr = fingerCorr[0];
+                            const prev = lastCorrVoiceRef.current;
+                            
+                            if (currentCorr !== prev.text || (now - prev.time) > 4000) {
+                                lastCorrVoiceRef.current = { text: currentCorr, time: now };
+                                announce.raw(translate(lang, currentCorr), 2);
+                            }
                         }
-                    } else if (locallyStable && data.detected && accuracy >= 75 && fingerCorr.length === 0 && !stableWrongMsg) {
-                        if (now - lastOkVoiceRef.current > 8000) {
+                    } else if (locallyStable && data.detected && accuracy >= 72) {
+                        // Positive feedback - respects 10s cooldown to avoid spam
+                        if (now - lastOkVoiceRef.current > 10000) {
                             lastOkVoiceRef.current = now;
                             const msg = lang === 'ta' ? 'மிகச்சிறப்பு! அப்படியே பிடியுங்கள்'
                                 : lang === 'hi' ? 'सही है! बहुत अच्छा'
@@ -701,38 +717,7 @@ export default function LearnDouble() {
                 };
                 setDetected(displayData);
 
-
-                // ── VOICE ─────────────────────────────────────────────────────
-                if (voiceEnabledRef.current) {
-                    const now = Date.now();
-                    const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
-
-                    if (stableWrongMsg) {
-                        const prev = lastWrongVoiceRef.current;
-                        // Use 3-second throttle for wrong mudra as requested
-                        if (stableWrongMsg !== prev.text || (now - prev.time) > 3000) {
-                            lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                            announce.raw(stableWrongMsg, 3);
-                        }
-                    } else if (locallyStable) {
-                        if (fingerCorr.length > 0) {
-                            const topCorr = fingerCorr[0];
-                            const prev = lastCorrVoiceRef.current;
-                            if (topCorr !== prev.text || (now - prev.time) > 5000) {
-                                lastCorrVoiceRef.current = { text: topCorr, time: now };
-                            announce.raw(topCorr, 1);
-                        }
-                        } else if (data.detected && accuracy >= ACCURACY_THRESHOLD && fingerCorr.length === 0 && !stableWrongMsg) {
-                            if (now - lastOkVoiceRef.current > 8000) {
-                                lastOkVoiceRef.current = now;
-                                announce.raw('Correct! Great form.', 3);
-                            }
-                        }
-                    }
-                }
-
                 // ── HOLD + SAVE ───────────────────────────────────────────────
-                const numHands = Object.keys(handMap).length;
                 const isAnjali = selectedMudra.folder === 'anjali';
                 const hasBoth = numHands === 2;
                 const hasOne = numHands === 1;
@@ -802,10 +787,19 @@ export default function LearnDouble() {
                 // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
                 if (holdAccumulatorRef.current >= HOLD_DURATION_MS && !saveMutexRef.current) {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
-                    masteredRef.current = true;
-                    saveInProgressRef.current = true;
-                    // Success lock removed (unused)
-                    handleMudraMastered(selectedMudra.folder, peakAccuracyRef.current || accuracy);
+                    
+                    // 1. Tell the user they did it
+                    if (voiceEnabledRef.current) {
+                        const msg = lang === 'ta' ? 'அற்புதம்! முடித்துவிட்டீர்கள்.' : 'Excellent! You did it.';
+                        announce.raw(msg, 4); 
+                    }
+
+                    // 2. Wait 1.5s for the voice before transitioning
+                    setTimeout(() => {
+                        masteredRef.current = true;
+                        saveInProgressRef.current = true;
+                        handleMudraMastered(selectedMudra.folder, peakAccuracyRef.current || accuracy);
+                    }, 1500);
                 }
 
             } catch (err) {

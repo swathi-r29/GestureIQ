@@ -4,14 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Calendar, Clock, Users, Globe, CheckCircle, Copy, ChevronRight } from 'lucide-react';
 
-const MUDRAS = [
-  "Pataka", "Tripataka", "Ardhapataka", "Kartarimukha", "Mayura",
-  "Ardhachandra", "Arala", "Shukatunda", "Mushti", "Shikhara",
-  "Kapittha", "Katakamukha", "Suchi", "Chandrakala", "Padmakosha",
-  "Sarpashirsha", "Mrigashirsha", "Simhamukha", "Langula", "Alapadma",
-  "Chatura", "Bhramara", "Hamsasya", "Hamsapaksha", "Sandamsha",
-  "Mukula", "Tamrachuda", "Trishula"
-];
+// Mudras now fetched dynamically from backend
 
 // ── FIX: Always use VITE_PUBLIC_URL (ngrok) so link works for anyone ──
 const getJoinLink = (classId) => {
@@ -22,18 +15,39 @@ const getJoinLink = (classId) => {
 const StaffCreateClass = () => {
   const [formData, setFormData] = useState({
     title: '', description: '', scheduledAt: '', time: '',
-    duration: 60, maxStudents: 50, language: 'English', mudrasList: []
+    duration: 60, language: 'English', mudrasList: []
   });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(null);
+  const [mudraCategory, setMudraCategory] = useState(null); // 'Single' or 'Double'
+  const [mudraList, setMudraList] = useState([]);
   const navigate = useNavigate();
 
-  const handleMudraToggle = (mudra) => {
+  // 1. Fetch mudras based on category
+  React.useEffect(() => {
+    if (!mudraCategory) return;
+    const fetchMudras = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`/api/mudras?type=${mudraCategory}`, {
+                headers: { 'x-auth-token': token }
+            });
+            setMudraList(res.data);
+            // Reset selection when category changes
+            setFormData(prev => ({ ...prev, mudrasList: [] }));
+        } catch (err) {
+            console.error("Error fetching mudras:", err);
+        }
+    };
+    fetchMudras();
+  }, [mudraCategory]);
+
+  const handleMudraToggle = (mudraFolder) => {
     setFormData(prev => ({
       ...prev,
-      mudrasList: prev.mudrasList.includes(mudra)
-        ? prev.mudrasList.filter(m => m !== mudra)
-        : [...prev.mudrasList, mudra]
+      mudrasList: prev.mudrasList.includes(mudraFolder)
+        ? prev.mudrasList.filter(m => m !== mudraFolder)
+        : [...prev.mudrasList, mudraFolder]
     }));
   };
 
@@ -43,8 +57,15 @@ const StaffCreateClass = () => {
     try {
       const token = localStorage.getItem('token');
       const scheduledDateTime = new Date(`${formData.scheduledAt}T${formData.time}`);
-      const payload = { ...formData, scheduledAt: scheduledDateTime };
+      
+      // Default maxStudents to 500 as it's no longer a field but expected by backend
+      const payload = { 
+        ...formData, 
+        scheduledAt: scheduledDateTime,
+        maxStudents: 500 
+      };
       delete payload.time;
+
       const res = await axios.post(
         `/api/staff/class/create`,
         payload,
@@ -156,29 +177,89 @@ const StaffCreateClass = () => {
             </div>
 
             {/* Mudra Selection */}
-            <div className="p-6 rounded-2xl border"
+            <div className="p-6 rounded-2xl border space-y-6"
               style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--text)' }}>
-                Select Mudras to Cover
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {MUDRAS.map(mudra => (
-                  <div key={mudra} onClick={() => handleMudraToggle(mudra)}
-                    className="flex items-center space-x-2 p-3 rounded-xl cursor-pointer transition-all border"
-                    style={{
-                      backgroundColor: formData.mudrasList.includes(mudra) ? 'var(--accent)' : 'var(--bg-card2)',
-                      borderColor: formData.mudrasList.includes(mudra) ? 'var(--accent)' : 'var(--border)',
-                      color: formData.mudrasList.includes(mudra) ? '#fff' : 'var(--text)'
-                    }}>
-                    <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${formData.mudrasList.includes(mudra) ? 'border-white' : 'border-current opacity-30'}`}>
-                      {formData.mudrasList.includes(mudra) && <CheckCircle className="w-3 h-3 text-white" />}
+              <div>
+                <label className="block text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
+                  Select Mudra Category
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    type="button"
+                    onClick={() => setMudraCategory('Single')}
+                    className={`p-4 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                      mudraCategory === 'Single' 
+                        ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-3xl">🖐️</span>
+                    <div className="text-center">
+                      <div className="text-sm font-black" style={{ color: 'var(--text)' }}>Single Hand</div>
+                      <div className="text-[10px] opacity-50 uppercase tracking-widest font-bold">Asamyuta</div>
                     </div>
-                    <span className="text-xs font-medium">{mudra}</span>
-                  </div>
-                ))}
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setMudraCategory('Double')}
+                    className={`p-4 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                      mudraCategory === 'Double' 
+                        ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-3xl">🙌</span>
+                    <div className="text-center">
+                      <div className="text-sm font-black" style={{ color: 'var(--text)' }}>Double Hand</div>
+                      <div className="text-[10px] opacity-50 uppercase tracking-widest font-bold">Samyuta</div>
+                    </div>
+                  </button>
+                </div>
               </div>
-              {formData.mudrasList.length === 0 && (
-                <p className="mt-4 text-xs text-red-500">* Select at least one mudra</p>
+
+              {mudraCategory && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-bold" style={{ color: 'var(--text)' }}>
+                      Select Mudras to Cover
+                    </label>
+                    <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest bg-violet-500/10 px-2 py-0.5 rounded">
+                      {formData.mudrasList.length} Selected
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto p-1 pr-2 scrollbar-thin">
+                    {mudraList.map(m => (
+                      <div 
+                        key={m.folder} 
+                        onClick={() => handleMudraToggle(m.folder)}
+                        className={`flex items-center space-x-2 p-3 rounded-xl cursor-pointer transition-all border ${
+                          formData.mudrasList.includes(m.folder)
+                            ? 'bg-violet-600 border-violet-600 shadow-lg shadow-violet-600/20 scale-[1.02]'
+                            : 'bg-white border-slate-200 hover:border-violet-300'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                          formData.mudrasList.includes(m.folder) ? 'border-white bg-white/20' : 'border-slate-300'
+                        }`}>
+                          {formData.mudrasList.includes(m.folder) && <CheckCircle className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={`text-xs font-bold transition-colors ${
+                          formData.mudrasList.includes(m.folder) ? 'text-white' : 'text-slate-700'
+                        }`}>
+                          {m.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {formData.mudrasList.length === 0 && mudraCategory && (
+                <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest flex items-center gap-1.5 mt-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Select at least one mudra to continue
+                </p>
               )}
             </div>
           </div>
@@ -198,20 +279,11 @@ const StaffCreateClass = () => {
               </div>
               <div>
                 <label className="block text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
-                  Max Students
-                </label>
-                <input type="number" required min="1" max="500" value={formData.maxStudents}
-                  onChange={e => setFormData({ ...formData, maxStudents: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border"
-                  style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)', color: 'var(--text)' }} />
-              </div>
-              <div>
-                <label className="block text-sm font-bold mb-2" style={{ color: 'var(--text)' }}>
                   Instruction Language
                 </label>
                 <select value={formData.language}
                   onChange={e => setFormData({ ...formData, language: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border"
+                  className="w-full px-4 py-3 rounded-xl border text-sm"
                   style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)', color: 'var(--text)' }}>
                   <option>English</option>
                   <option>Sanskrit</option>

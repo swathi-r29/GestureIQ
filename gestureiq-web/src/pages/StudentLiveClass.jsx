@@ -64,6 +64,12 @@ const StudentLiveClass = () => {
   const [teacherConnected, setTeacherConnected] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  
+  // MUDRA SYNC & TOAST STATES
+  const [targetMudra, setTargetMudra] = useState('');
+  const [showMudraToast, setShowMudraToast] = useState(false);
+  const [toastData, setToastData] = useState({ name: '', meaning: '', nameta: '', meaningta: '' });
+  const [fingerDeviations, setFingerDeviations] = useState(null);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -101,7 +107,10 @@ const StudentLiveClass = () => {
   const consecutiveRef = useRef({ name: null, count: 0 });
   const graceRef = useRef(0); // For stability grace window (hysteresis)
   const STABILITY_THRESHOLD = 10;
-  const STABILITY_THRESHOLD_DOUBLE = 4; 
+  const STABILITY_THRESHOLD_DOUBLE = 4;
+
+  const targetMudraRef = useRef('');
+  const fingerDeviationsRef = useRef(null);
 
   useEffect(() => { classDataRef.current = classData; }, [classData]);
 
@@ -175,6 +184,9 @@ const StudentLiveClass = () => {
         if (remoteVideoRef.current.srcObject !== stream) {
           remoteVideoRef.current.srcObject = stream;
         }
+
+        // --- NEW: EXPLICIT UNMUTE FOR TEACHER AUDIO ---
+        remoteVideoRef.current.muted = false;
         
         // Force play
         remoteVideoRef.current.play().catch(e => console.warn('[WebRTC Student] Teacher stream play failed:', e));
@@ -289,16 +301,54 @@ const StudentLiveClass = () => {
         sock.on('modules_changed', (data) => setActiveModules(data.modules || data));
         sock.on('target_changed', (data) => {
           setClassData(prev => prev ? { ...prev, targetMudra: data.target || data.mudra } : prev);
+          targetMudraRef.current = data.target || data.mudra;
         });
 
         // NEW: Real-Time Teacher-Controlled Spotlight
         sock.on('update_class_state', (data) => {
           if (data.targetMudra) {
             setClassData(prev => prev ? { ...prev, targetMudra: data.targetMudra } : prev);
+            targetMudraRef.current = data.targetMudra;
           }
           if (data.activeModules) {
             setActiveModules(data.activeModules);
           }
+        });
+
+        // FIX: SYNC MUDRA CHANGE TOAST AND VOICE (Teacher selection)
+        sock.on('mudra_changed', (data) => {
+          console.log('[Socket] Teacher changed mudra:', data.newMudra);
+          setTargetMudra(data.newMudra);
+          targetMudraRef.current = data.newMudra;
+          setToastData({
+            name: data.name,
+            meaning: data.meaning,
+            nameta: data.nameta,
+            meaningta: data.meaningta
+          });
+          setShowMudraToast(true);
+
+          // Voice Guide Announcement (Wait for Toast)
+          setTimeout(() => {
+            const msg = lang === 'ta' 
+              ? `அடுத்த முத்திரை: ${data.nameta || data.name}. ${data.meaningta || ''}` 
+              : `The next mudra is ${data.name}. This symbolizes ${data.meaning}.`;
+            
+            // PRIO 3 (High) to override small corrections
+            announce?.raw(msg, 3);
+
+            // --- NEW: PROXY VOICE EMISSION ---
+            if (sock && sock.connected) {
+              sock.emit('proxy_voice_instruction', {
+                classId: classId,
+                text: msg,
+                senderRole: 'student'
+              });
+            }
+          }, 1500);
+
+          // Auto-hide toast
+          setTimeout(() => setShowMudraToast(false), 7000);
         });
 
         sock.on('class_ended_broadcast', handleEndSessionFromTeacher);
@@ -407,10 +457,46 @@ const StudentLiveClass = () => {
 
         lastLandmarkTimeRef.current = Date.now();
         
-        hList.forEach((lms, idx) => {
-          const color = idx === 0 ? '#7C3AED' : '#10B981';
-          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color, lineWidth: 3 });
-          drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
+        hList.forEach((lms, handIdx) => {
+          // 1. Draw Connectors (Base Layer)
+          const baseColor = handIdx === 0 ? '#7C3AED' : '#10B981';
+          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: baseColor, lineWidth: 3 });
+
+          // 2. Draw Landmarks (Correction Layer)
+          const deviations = fingerDeviationsRef.current;
+          
+          if (deviations) {
+            // Finger-to-Landmark Index Mapping
+            const fingerMap = {
+              thumb: [1, 2, 3, 4],
+              index: [5, 6, 7, 8],
+              middle: [9, 10, 11, 12],
+              ring: [13, 14, 15, 16],
+              pinky: [17, 18, 19, 20]
+            };
+
+            // Draw individual joints with correction colors
+            lms.forEach((lm, lmIdx) => {
+              let jointColor = '#ffffff'; // Default: white
+
+              // Check which finger this landmark belongs to
+              for (const [fingerName, indices] of Object.entries(fingerMap)) {
+                if (indices.includes(lmIdx)) {
+                  jointColor = deviations[fingerName] || '#ffffff';
+                  break;
+                }
+              }
+
+              drawLandmarks(ctx, [lm], { 
+                color: jointColor, 
+                lineWidth: 1, 
+                radius: lmIdx === 0 ? 4 : 3 // Larger wrist
+              });
+            });
+          } else {
+            // fallback to default white if no deviations data
+            drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
+          }
         });
       } else {
         landmarksRef.current = null;
@@ -437,11 +523,15 @@ const StudentLiveClass = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 320, height: 240, facingMode: 'user' },
-        audio: true  // FIX G: audio was missing — student audio never sent to teacher
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true; // Local preview is always muted to prevent feedback
         await videoRef.current.play();
       }
       setWebcamActive(true);
@@ -570,7 +660,8 @@ const StudentLiveClass = () => {
       return;
     }
 
-    const targetMudra = classDataRef.current?.targetMudra?.toLowerCase();
+    // FIX: USE REF FOR INSTANT SYNC
+    const targetMudra = targetMudraRef.current?.toLowerCase() || classDataRef.current?.targetMudra?.toLowerCase();
     
     // Check if target is a double mudra (Samyuta)
     const DOUBLE_MUDRAS = ['anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 'sivalinga', 'svastika', 'utsanga', 'varaha'];
@@ -640,6 +731,15 @@ const StudentLiveClass = () => {
       if (!res.ok) throw new Error(`Server Error: ${res.status}`);
       const data = await res.json();
 
+      // Update Visual Correction Joint Colors
+      if (data.finger_colors) {
+          setFingerDeviations(data.finger_colors);
+          fingerDeviationsRef.current = data.finger_colors;
+      } else {
+          setFingerDeviations(null);
+          fingerDeviationsRef.current = null;
+      }
+
       let detectedName = data.matchedMudra || data.name || '';
       const score = data.score || data.accuracy || 0;
 
@@ -698,8 +798,8 @@ const StudentLiveClass = () => {
         setBestScore(score);
       }
 
-      if (socket && socket.connected) {
-        socket.emit('student_performance_update', {
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('student_performance_update', {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
@@ -714,7 +814,15 @@ const StudentLiveClass = () => {
       const now = Date.now();
       if (now - lastVoiceRef.current > 2000 && consecutiveRef.current.count >= STABILITY_THRESHOLD) {
         lastVoiceRef.current = now;
-        announce?.fromResult(data);
+        const feedbackMsg = announce?.fromResult(data);
+        
+        if (feedbackMsg && socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit('proxy_voice_instruction', {
+                classId: classId,
+                text: feedbackMsg,
+                senderRole: 'student'
+            });
+        }
       }
     } catch (err) {
       console.error('Detection error:', err);
@@ -991,6 +1099,23 @@ const StudentLiveClass = () => {
               className="absolute inset-0 w-full h-full pointer-events-none z-10"
               width={1280} height={720} />
 
+            {/* MUDRA CHANGE TOAST OVERLAY */}
+            {showMudraToast && (
+              <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none animate-in fade-in zoom-in duration-500">
+                <div className="px-8 py-6 rounded-[32px] backdrop-blur-2xl shadow-2xl border border-white/40 flex flex-col items-center gap-2 text-center"
+                  style={{ background: 'rgba(124, 58, 237, 0.9)', boxShadow: '0 25px 50px -12px rgba(124, 58, 237, 0.5)' }}>
+                  <span className="text-[10px] font-black uppercase tracking-[5px] text-violet-200">Next Mudra</span>
+                  <h2 className="text-4xl font-black text-white py-1">
+                    {lang === 'ta' ? toastData.nameta : toastData.name}
+                  </h2>
+                  <div className="h-[1px] w-20 bg-white/30 my-2" />
+                  <p className="text-sm font-medium text-violet-50 max-w-[280px] leading-relaxed italic">
+                    {lang === 'ta' ? toastData.meaningta : toastData.meaning}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {detectedMudra && (
               <div className="absolute top-5 left-1/2 -translate-x-1/2 px-5 py-2 rounded-full text-xs font-black uppercase tracking-[3px] backdrop-blur-md shadow-lg"
                 style={{
@@ -1092,6 +1217,7 @@ const StudentLiveClass = () => {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
+                muted={false}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
               {!teacherConnected && (
