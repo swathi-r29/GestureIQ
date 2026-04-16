@@ -1445,7 +1445,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 # However, if another mudra flawlessly matches (e.g. Pataka = 98%) while the target is barely passing (66%), DO NOT lock.
                 if target_key:
                     target_geom_acc = geom_scores.get(target_key, 0)
-                    if target_geom_acc >= 60 and (best_geom_acc - target_geom_acc < 25):
+                    # [PHASE 18] Tighten Target Lock: reduce gap from 25% to 15%
+                    if target_geom_acc >= 70 and (best_geom_acc - target_geom_acc < 15):
                         stable_name = target_key
                         smooth_conf = max(smooth_conf, target_geom_acc * 0.88)
                         is_stable   = True
@@ -1527,11 +1528,19 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
 
         # --- STRICT VALIDATION LAYERS ---
         # 1. Identity Gate: If ML is sure it's the WRONG mudra, kill accuracy immediately.
+        # [PHASE 18] Added Confidence Fraction Check: target_conf must be > raw_conf * 0.5
+        target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
+        target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
+        
         is_wrong_identity = (target_key and stable_name.lower().strip() != target_key and smooth_conf > 45)
+        
+        # New Gate: Even if it's not a clear "Wrong Identity" yet, if the target is too weak compared to the top guess, it's noise.
+        is_too_weak = (target_key and stable_name.lower().strip() != target_key and target_conf < (smooth_conf * 0.5))
+        
         is_wrong_mudra = False
         actual_mudra = ""
         
-        if is_wrong_identity:
+        if is_wrong_identity or is_too_weak:
             is_wrong_mudra = True
             actual_mudra = stable_name
             total_accuracy = 0.0
@@ -1542,7 +1551,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 print(f"[STRICT-CONFLICT] Blocked Similarity: Target={target_key}, Detected={stable_name}")
                 wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()}. Fold your ring and pinky fingers tighter for {target_key.capitalize()}."
             else:
-                print(f"[STRICT] Wrong Identity: ML={stable_name}, Target={target_key}. Killing accuracy.")
+                reason = "Identity mismatch" if is_wrong_identity else "Low target confidence"
+                print(f"[STRICT] {reason}: ML={stable_name}, Target={target_key}({target_conf:.1f}%). Killing accuracy.")
                 wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
             
             corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
@@ -1551,8 +1561,10 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             # Boost accuracy slightly if it's the correct mudra and geometry is good
             total_accuracy = min(100.0, total_accuracy + 10)
 
-        # 2. Layer 7 Noise Filter: Hard floor at 65%
-        if total_accuracy < 65.0:
+        # 2. Layer 7 Noise Filter: Hard floor at 75% for "Learn" mode
+        if target_key and total_accuracy < 75.0:
+            total_accuracy = 0.0
+        elif total_accuracy < 65.0:
             total_accuracy = 0.0
 
         # --- STATE RESET & ASYMMETRIC SMOOTHING (GLOBAL REGISTRY) ---
@@ -2485,15 +2497,16 @@ def detect_double_landmarks():
 
             else:
                 # ML disagrees — let geometry provide a rescue path
-                if geo_score >= 50:
+                # [PHASE 18] Tighten Rescue: increase min geo_score from 50 to 65
+                if geo_score >= 65:
                     # Geometry strongly suggests the right mudra; rescue the detection.
                     # Blend: 75% Geometry + 25% AI (to respect the ML's uncertainty)
                     raw_accuracy = round(geo_score * 0.75 + conf * 0.25, 1)
                     corrections  = []   # suppress "wrong mudra" noise for strong rescues
                     print(f"[detect_double] Geo-Rescue: geo={geo_score:.1f}% AI={conf:.1f}% -> acc={raw_accuracy:.1f}%")
-                elif geo_score >= 50:
-                    # Geometry is partial — give limited credit
-                    raw_accuracy = round(geo_score * 0.50, 1)
+                elif geo_score >= 55:
+                    # Geometry is partial — give limited credit (hard capped)
+                    raw_accuracy = round(geo_score * 0.40, 1)
                 else:
                     raw_accuracy = 0.0
                     corrections.insert(

@@ -468,7 +468,9 @@ export default function Learn() {
                 const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
                 if (detectedName) graceRef.current = 0; else graceRef.current++;
 
-                if (effectiveName && effectiveName === consecutiveRef.current.name) {
+                // [PHASE 18] Added Accuracy check to stability reset
+                const isAccurate = accuracy >= ACCURACY_THRESHOLD;
+                if (effectiveName && effectiveName === consecutiveRef.current.name && isAccurate) {
                     consecutiveRef.current.count++;
                 } else {
                     consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
@@ -566,7 +568,8 @@ export default function Learn() {
                 }
 
                 // ── HOLD + SAVE ───────────────────────────────────────────────
-                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg;
+                // [PHASE 18] STRICT SUCCESS TRIGGER: Require detected Name to match Folder
+                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudra.folder);
                 const isGoodFrame = isCorrect;
 
                 const now = Date.now();
@@ -579,12 +582,12 @@ export default function Learn() {
                 } else {
                     lowAccuracyFramesRef.current++;
                     
-                    if (wrongMsg) {
-                        // Wrong mudra — drain instantly
+                    if (wrongMsg || accuracy < ACCURACY_THRESHOLD) {
+                        // [PHASE 18] Wrong mudra or low accuracy — drain instantly
                         holdAccumulatorRef.current = 0;
                         lowAccuracyFramesRef.current = 0;
                     } else if (lowAccuracyFramesRef.current > 10) {
-                        // Only drain if we've been inconsistent for > 10 frames (~2 seconds at 200ms)
+                        // Maintain fallback for consistency drops
                         const isPartialGood = data.detected && !wrongMsg && accuracy >= 62;
                         holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.3 : 1.5));
                     }
@@ -749,7 +752,7 @@ export default function Learn() {
         ? `You are showing ${detected.actualMudra?.capitalize?.() || detected.actualMudra} instead of ${selectedMudra?.name}`
         : corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
     const isAdjusting = detected._isAdjusting;
-    const isCorrect = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0;
+    const isCorrect = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0 && (detected.name === selectedMudra?.folder);
 
     const fingerGuideText = selectedMudra
         ? (MUDRA_CONFIG[selectedMudra.folder]?.fingers || selectedMudra.fingers || '')
