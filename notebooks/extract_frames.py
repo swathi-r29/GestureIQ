@@ -1,14 +1,15 @@
 import cv2
 import os
 
-videos_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_videos"
-output_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
+#videos_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_videos"
+#output_folder = "D:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
+
+#os.makedirs(output_folder, exist_ok=True)
+
+videos_folder = "../dataset/bharatanatyam_mudras/raw_videos"
+output_folder = "../dataset/bharatanatyam_mudras/raw_frames"
 
 os.makedirs(output_folder, exist_ok=True)
-
-#videos_folder = "../dataset/bharatanatyam_mudras/raw_videos"
-#output_folder = "../dataset/bharatanatyam_mudras/raw_frames"
-
 
 
 # Loop through all videos

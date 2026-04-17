@@ -115,7 +115,8 @@ export default function Learn() {
     const [show3D, setShow3D] = useState(true);
     const [isFrozen, setIsFrozen] = useState(false);
     const [frozenFrame, setFrozenFrame] = useState(null);
-    const [isMuted, setIsMuted] = useState(false); // 500ms detection mute during swap
+    const [isMuted, setIsMuted] = useState(false); // UI State (stays for CSS/UI if needed)
+    const isMutedRef = useRef(false);             // Logic State (prevents stale closures)
 
     const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
     const activeModulesRef = useRef(activeModules);
@@ -136,6 +137,7 @@ export default function Learn() {
     const streamRef = useRef(null);
     const handsRef = useRef(null);
     const landmarksRef = useRef(null);
+    const landmarksMetaRef = useRef({ handedness: 'Right', score: 1.0 }); // Task 1: Store meta separately
     const isDetectingRef = useRef(false);
     const requestRef = useRef(null);
     const recoveryRef = useRef(null);
@@ -147,6 +149,8 @@ export default function Learn() {
     const successLockRef = useRef(false);   // [PHASE 10] Mastered UI lock
     const saveMutexRef = useRef(false);     // [PHASE 12] Atomic mutex for success trigger
     const detectedRef = useRef(null);      // Task 4: For canvas drawing access
+    const isProcessingRef = useRef(false); // Pro-Tip: Prevents frame stacking
+    const fpsRef = useRef(0);
 
     const voiceEnabledRef = useRef(false);
     const lastWrongVoiceRef = useRef({ text: '', time: 0 });
@@ -193,40 +197,49 @@ export default function Learn() {
         }
     }, [stage, selectedMudra]);
 
+    // ── MASTER DETECTION LOOP (Task 2) ───────────────────────────────────────
+    // Consolidates MediaPipe Setup, Video Sync, and Frame Processing
     useEffect(() => {
         if (!cameraOn) return;
 
-        handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        handsRef.current.setOptions({
+        // 1. Initialize MediaPipe Hands
+        const hands = new Hands({ 
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` 
+        });
+
+        hands.setOptions({
             maxNumHands: selectedType === 'Double' ? 2 : 1,
-            modelComplexity: 0,
+            modelComplexity: 0, // 0 for speed, 1 for accuracy
             minDetectionConfidence: 0.3,
             minTrackingConfidence: 0.3
         });
-        handsRef.current.onResults((results) => {
+
+        hands.onResults((results) => {
+            // Frame Processed -> Unlock next frame
+            isProcessingRef.current = false;
             lastResultTimeRef.current = Date.now();
+
             const canvas = canvasRef.current;
             const video = videoRef.current;
             if (!canvas || !video) return;
+
             const ctx = canvas.getContext('2d');
             canvas.width = video.clientWidth;
             canvas.height = video.clientHeight;
+
             ctx.save();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.scale(-1, 1);
             ctx.translate(-canvas.width, 0);
             
-            // GATEKEEPER: Only draw and process landmarks if AI module is ON
             if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
                 const lmsList = results.multiHandLandmarks;
                 const handsList = results.multiHandedness || [];
 
-                // For visualization, draw all detected hands
                 lmsList.forEach((lms, idx) => {
                     drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
                     drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
                     
-                    // ── Task 4: Heatmap Guru Overlay (Red Glow) ──
                     if (detectedRef.current?.problematic_joints) {
                         const joints = detectedRef.current.problematic_joints;
                         const JOINT_MAP = {
@@ -243,12 +256,9 @@ export default function Learn() {
                                 const pt = lms[idx];
                                 const screenX = pt.x * canvas.width;
                                 const screenY = pt.y * canvas.height;
-                                
-                                // Create radial gradient for "Heat" effect (Pro-Tip)
                                 const gradient = ctx.createRadialGradient(screenX, screenY, 5, screenX, screenY, 40);
-                                gradient.addColorStop(0, 'rgba(239, 68, 68, 0.7)'); // Red-500
+                                gradient.addColorStop(0, 'rgba(239, 68, 68, 0.7)');
                                 gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
-                                
                                 ctx.beginPath();
                                 ctx.fillStyle = gradient;
                                 ctx.arc(screenX, screenY, 40, 0, Math.PI * 2);
@@ -259,28 +269,22 @@ export default function Learn() {
                 });
 
                 if (selectedType === 'Double') {
-                    // Collect both hands if available
                     let left = null, right = null;
                     handsList.forEach((h, i) => {
                         if (h.label === 'Left') left = lmsList[i];
                         else right = lmsList[i];
                     });
-                    // Fallback to second hand if orientation is unclear
                     if (!left && lmsList.length > 1) left = lmsList[1];
                     if (!right && lmsList.length > 1) right = lmsList[0];
 
-                    landmarksRef.current = {
-                        type: 'Double',
-                        left: left,
-                        right: right,
-                        count: lmsList.length
-                    };
+                    landmarksRef.current = { left, right }; // Fixed for HandVisualiser
                 } else {
-                    // Single hand mode
                     const lms = lmsList[0];
-                    const hand = handsList[0]?.label || 'Right';
-                    const sc = handsList[0]?.score || 1.0;
-                    landmarksRef.current = { type: 'Single', landmarks: lms, handedness: hand, score: sc };
+                    const label = handsList[0]?.label || 'Right';
+                    const score = handsList[0]?.score || 1.0;
+                    
+                    landmarksRef.current = lms; // Raw array for HandVisualiser
+                    landmarksMetaRef.current = { handedness: label, score };
                 }
             } else {
                 landmarksRef.current = null;
@@ -288,34 +292,57 @@ export default function Learn() {
             ctx.restore();
         });
 
-        recoveryRef.current = setInterval(() => {
-            if (cameraOn && Date.now() - lastResultTimeRef.current > 3000)
-                lastResultTimeRef.current = Date.now();
-        }, 1000);
+        handsRef.current = hands;
 
-        return () => {
-            if (recoveryRef.current) clearInterval(recoveryRef.current);
-            if (handsRef.current) { handsRef.current.close(); handsRef.current = null; }
-        };
-    }, [cameraOn]);
+        // 2. Video Stream Sync
+        if (streamRef.current && videoRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+            videoRef.current.play().catch(() => {});
+        }
 
-    useEffect(() => {
+        // 3. High-Performance requestAnimationFrame Loop
         let active = true;
         const processFrame = async () => {
-            if (active && cameraOn && videoRef.current?.readyState >= 2 && handsRef.current)
-                await handsRef.current.send({ image: videoRef.current }).catch(() => { });
-            if (active && cameraOn) requestRef.current = requestAnimationFrame(processFrame);
+            if (!active || !cameraOn) return;
+
+            if (videoRef.current?.readyState >= 2 && handsRef.current && !isProcessingRef.current) {
+                isProcessingRef.current = true; // Lock
+                await handsRef.current.send({ image: videoRef.current }).catch(() => {
+                    isProcessingRef.current = false; // Release lock on error
+                });
+            }
+            
+            requestRef.current = requestAnimationFrame(processFrame);
         };
-        if (cameraOn) requestRef.current = requestAnimationFrame(processFrame);
+        requestRef.current = requestAnimationFrame(processFrame);
+
+        // 4. Recovery Monitor
+        const recoveryId = setInterval(() => {
+            if (cameraOn && Date.now() - lastResultTimeRef.current > 4000) {
+                console.warn('[Detection] Loop hung, forcing result clear');
+                lastResultTimeRef.current = Date.now();
+                isProcessingRef.current = false;
+            }
+        }, 2000);
+
+        // Cleanup
         return () => {
             active = false;
+            clearInterval(recoveryId);
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
+            if (handsRef.current) {
+                handsRef.current.close();
+                handsRef.current = null;
+                console.log('[Learn] Hands resources released.');
+            }
         };
-    }, [cameraOn]);
-
+    }, [cameraOn, selectedType]);
+ 
     const startWebcam = useCallback(async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: 640, height: 480, facingMode: 'user' } 
+            });
             streamRef.current = stream;
             setCameraOn(true);
         } catch (error) {
@@ -331,13 +358,6 @@ export default function Learn() {
         setCameraOn(false);
         landmarksRef.current = null;
     }, []);
-
-    useEffect(() => {
-        if (cameraOn && streamRef.current && videoRef.current) {
-            videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(() => { });
-        }
-    }, [cameraOn]);
 
     const captureFrame = useCallback(() => {
         const video = videoRef.current, canvas = canvasRef.current;
@@ -372,8 +392,12 @@ export default function Learn() {
             if (isDetectingRef.current) return;
 
             // GATEKEEPER: If teacher disabled the module OR we are in "mute" window, skip
-            if (!activeModulesRef.current.mudra || isMuted) {
-                setDetected({ name: isMuted ? 'Positioning...' : 'AI Paused', confidence: 0, detected: false });
+            if (!activeModulesRef.current.mudra || isMutedRef.current) {
+                setDetected({ 
+                    name: isMutedRef.current ? 'Positioning...' : 'AI Paused', 
+                    confidence: 0, 
+                    detected: false 
+                });
                 setHoldProgress(0);
                 return;
             }
@@ -386,8 +410,8 @@ export default function Learn() {
                 // ── NO HAND ───────────────────────────────────────────────────
                 const hasHand = dataObj && (
                   selectedType === 'Double'
-                    ? (dataObj.left && dataObj.right)   // BOTH hands required
-                    : dataObj.landmarks
+                    ? (dataObj.left && dataObj.right)
+                    : (Array.isArray(dataObj) && dataObj.length === 21)
                 );
                   if (!hasHand) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
@@ -420,11 +444,6 @@ export default function Learn() {
                 let body = {};
 
                 if (selectedType === 'Double') {
-                    if (dataObj.type !== 'Double' || !dataObj.left || !dataObj.right) {
-                        setDetected({ name: 'Show both hands', confidence: 0, detected: false });
-                        isDetectingRef.current = false;
-                        return;
-                    }
                     endpoint = `/api/detect_double_landmarks`;
                     body = {
                         left_landmarks: Array.from(dataObj.left).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
@@ -432,17 +451,14 @@ export default function Learn() {
                         targetMudra: selectedMudra.folder,
                     };
                 } else {
-                    if (dataObj.type !== 'Single') {
-                        isDetectingRef.current = false;
-                        return;
-                    }
-                    const lmArray = Array.from(dataObj.landmarks).map(lm => ({
+                    const meta = landmarksMetaRef.current;
+                    const lmArray = Array.from(dataObj).map(lm => ({
                         x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
                     }));
                     body = {
                         landmarks: lmArray,
-                        handedness: dataObj.handedness || 'Right',
-                        presenceScore: dataObj.score || 1.0,
+                        handedness: meta.handedness || 'Right',
+                        presenceScore: meta.score || 1.0,
                         targetMudra: selectedMudra.folder,
                     };
                 }
@@ -478,7 +494,12 @@ export default function Learn() {
 
                 const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
 
-                const isWrongMudraMsg = (c) => typeof c === 'string' && (c.toLowerCase().startsWith('wrong mudra') || c.toLowerCase().includes('instead of'));
+                const isWrongMudraMsg = (c) => typeof c === 'string' && (
+                    c.toLowerCase().startsWith('wrong mudra') || 
+                    c.toLowerCase().includes('instead of') ||
+                    c.toLowerCase().startsWith('veto') ||
+                    c.toLowerCase().includes('wrong position')
+                );
                 const wrongMsg = corrections.find(c => isWrongMudraMsg(c));
                 const fingerCorr = corrections.filter(c => typeof c === 'string' && !isWrongMudraMsg(c));
 
@@ -503,7 +524,7 @@ export default function Learn() {
                     // ── FIX: isAdjusting checks raw wrongMsg, not the filtered display list ──
                     // If backend sent a wrongMsg, suppress "Adjusting…" and show the alert instead
                     // ── RELAXED ADJUSTING LOGIC: Show accuracy immediately if detection is live ──
-                    _isAdjusting: !locallyStable && !isStableAPI && accuracy === 0 && !wrongMsg,
+                    _isAdjusting: !locallyStable && !isStableAPI && accuracy < 10 && !wrongMsg,
                     _isMoving: !isStableAPI && data.status === 'Stabilizing...',
                     problematic_joints: problematicJoints,
                 };
@@ -709,7 +730,10 @@ export default function Learn() {
         }
     };
 
-    const enterPractice = (mudra) => {
+    const enterPractice = async (mudra) => {
+        // [PHASE 18] CRITICAL: Unlock audio on exactly this click event
+        unlock(); 
+        
         setSelectedMudra(mudra);
         setSessionComplete(false);
         setDetected({ name: '', confidence: 0, detected: false });
@@ -726,15 +750,27 @@ export default function Learn() {
         attemptsRef.current = 0;
         lowAccuracyFramesRef.current = 0;
         
-        // ── ATOMIC RESET & MUTE ──
+        // ── ATOMIC RESET & MUTE (Task 5) ──
+        isMutedRef.current = true;
         setIsMuted(true);
-        setTimeout(() => setIsMuted(false), 500);
-        axios.post('/api/reset_registry').catch(() => {}); // Flush backend smoothing
+        
+        // Synchronous History Flush: Ensure registry is wiped BEFORE detection starts
+        try {
+            await axios.post('/api/clear_history');
+            console.log('[Learn] Registry flushed successfully.');
+        } catch (e) {
+            console.error('[Learn] Flush failed:', e);
+        }
 
+        setIsMuted(false);
+        isMutedRef.current = false;
         setStage(STAGES.PRACTICE);
     };
 
     const nextMudra = () => {
+        // [PHASE 18] Audio Unlock
+        unlock();
+        
         const levelMudras = getLevelMudras(selectedLevel);
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         setIsFrozen(false);
@@ -919,7 +955,7 @@ export default function Learn() {
                                 lastWrongVoiceRef.current = { text: '', time: 0 };
                                 lastCorrVoiceRef.current = { text: '', time: 0 };
                             }} compact />
-                            <button onClick={test}
+                            <button onClick={() => { unlock(); test(); }}
                                 className="px-3 py-1.5 rounded text-[9px] tracking-widest uppercase border transition-all"
                                 style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                                 Test Voice
@@ -1032,7 +1068,7 @@ export default function Learn() {
                                         {fingerGuideText}
                                     </p>
                                     {voiceEnabled && (
-                                        <button onClick={() => announce.start(selectedMudra.folder)}
+                                        <button onClick={() => { unlock(); announce.start(selectedMudra.folder); }}
                                             className="mt-3 text-[9px] tracking-[3px] uppercase font-bold px-3 py-1.5 rounded border transition-all"
                                             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
                                             🔊 Repeat Instructions
@@ -1118,7 +1154,16 @@ export default function Learn() {
 
                         {/* RIGHT: Camera ───────────────────────────────── */}
                         <div className="flex flex-col">
-                            <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner" style={{ borderColor: 'var(--border)', height: '520px' }}>
+                            <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner transition-all duration-500" 
+                                 style={{ 
+                                     borderColor: (wrongMudraMsg && accuracy === 0) ? '#ef4444' : 'var(--border)', 
+                                     height: '520px',
+                                     boxShadow: (wrongMudraMsg && accuracy === 0) ? '0 0 25px rgba(239, 68, 68, 0.4)' : 'none'
+                                 }}>
+                                 {/* Task B: Red Pulsing Border for Structural Veto */}
+                                 {(wrongMudraMsg && accuracy === 0) && (
+                                     <div className="absolute inset-0 z-10 pointer-events-none animate-pulse border-4 border-red-500/50 mix-blend-screen" />
+                                 )}
                                 <canvas ref={canvasRef} className="hidden" />
                                 {cameraOn ? (
                                     <>

@@ -435,7 +435,102 @@ CORRECTION_THRESHOLDS = {
 }
 
 # Mudras that are geometrically similar but must be strictly distinguished
-STRICT_CONFLICT_PAIRS = [('ardhapataka', 'kartarimukha'), ('pataka', 'ardhachandra')]
+STRICT_CONFLICT_PAIRS = [
+    ('ardhapataka', 'kartarimukha'), 
+    ('pataka', 'ardhachandra'),
+    ('suchi', 'chandrakala'),
+    ('sarpashira', 'chandrakala'),
+    ('tripataka', 'ardhapataka'),
+    ('suchi', 'shikhara')
+]
+
+# Master Fingerprint Matrix (Physical Truth Table)
+# Format: [Thumb, Index, Middle, Ring, Pinky]
+# States: 1=UP, 0=DOWN, 2=CURVED/HOODED
+MUDRA_FINGERPRINTS = {
+    "pataka":      [1, 1, 1, 1, 1],
+    "tripataka":   [1, 1, 1, 0, 1],
+    "ardhapataka": [1, 1, 1, 0, 0],
+    "suchi":       [0, 1, 0, 0, 0],
+    "chandrakala": [1, 1, 0, 0, 0],
+    "sarpashira":  [0, 2, 2, 2, 2],  # All 4 curved, thumb tucked
+    "shikhara":    [1, 0, 0, 0, 0],
+    "mushti":      [0, 0, 0, 0, 0],
+    "ardhachandra":[1, 1, 1, 1, 1],
+    "trishula":    [0, 1, 1, 1, 0],
+    "mukula":      [0, 0, 0, 0, 0],
+}
+
+def get_finger_state(angle):
+    if angle > 160: return 1   # Fully Straight
+    if angle < 90:  return 0   # Fully Curled
+    return 2                   # Hooded/Curved
+
+def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
+    """
+    The Master Guard: Returns (is_valid, error_msg)
+    Acts as the Physical Truth Layer.
+    """
+    mudra = ml_prediction.lower().strip()
+    if mudra not in MUDRA_FINGERPRINTS:
+        return True, ""
+        
+    expected = MUDRA_FINGERPRINTS[mudra]
+    actual = [
+        get_finger_state(current_angles.get('thumb', 0)),
+        get_finger_state(current_angles.get('index', 0)),
+        get_finger_state(current_angles.get('middle', 0)),
+        get_finger_state(current_angles.get('ring', 0)),
+        get_finger_state(current_angles.get('pinky', 0))
+    ]
+    
+    # 1. State Consistency Vetoes
+    finger_names = ["thumb", "index", "middle", "ring", "pinky"]
+    for i, state in enumerate(expected):
+        if actual[i] != state:
+            # Special relaxed check for State 2 (Curved can sometimes be seen as Straight)
+            if state == 2 and actual[i] == 1: continue 
+            
+            # Veto
+            return False, f"Wrong mudra — Your {finger_names[i]} finger is in the wrong position for {ml_prediction.capitalize()}."
+
+    # 2. Specific Heuristic Overrides
+    
+    # Suchi must have Index fully UP
+    if mudra == "suchi" and actual[1] != 1:
+        return False, "Wrong mudra — Your index finger must be fully extended for Suchi."
+        
+    # Chandrakala MUST have Index UP and Middle DOWN
+    if mudra == "chandrakala":
+        if actual[1] != 1 or actual[2] != 0:
+            return False, "Wrong mudra — For Chandrakala, index must be up and middle must be curled."
+        
+        # --- DIGITAL GURU HEURISTIC (Chandrakala vs Sarpashirsha) ---
+        # Chandrakala thumb MUST be extended. Sarpashirsha thumb is pressed.
+        gap = dist_lm(lm_wrapper, 4, 5, palm_size)
+        if gap < 0.35: # Tucked thumb (Small gap)
+            return False, "Wrong mudra — Your thumb must be extended far from your index for Chandrakala."
+
+    if mudra == "sarpashira":
+        # Sarpashirsha thumb MUST be tucked/pressed.
+        gap = dist_lm(lm_wrapper, 4, 5, palm_size)
+        if gap > 0.45: # Extended thumb (Wide gap)
+            return False, "Wrong mudra — Keep your thumb tucked tightly against your index for Sarpashirsha."
+            
+    # 3. Normalized Thumb Gap for Pataka vs Ardhachandra
+    if mudra == "pataka" or mudra == "ardhachandra":
+        # Using normalized distance (relative to palm_size) for scale-invariance
+        gap = dist_lm(lm_wrapper, 4, 5, palm_size)
+        
+        # --- Relative Distance Scaling (Natural Teacher Layer) ---
+        if gap > 0.4: # Wide thumb
+            if mudra == "pataka":
+                return False, "Wrong mudra — Your thumb is too wide. This looks like Ardhachandra."
+        elif gap < 0.2: # Tucked thumb
+            if mudra == "ardhachandra":
+                return False, "Wrong mudra — Your thumb must be wider for Ardhachandra."
+
+    return True, ""
 
 STRAIGHT_FINGER_MUDRAS = {
     "pataka", "tripataka", "ardhachandra", "trishula", "arala", "sarpashira"
@@ -1507,6 +1602,13 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             if pinky_angle < 110: # Curled pinky
                 print(f"[CONFLICT] Tripataka -> Ardhapataka (Pinky: {pinky_angle:.1f})")
                 stable_name = "ardhapataka"
+        
+        # Sarpashira vs Chandrakala (Middle finger curl)
+        elif stable_name == "sarpashira":
+            middle_angle = finger_angles.get("middle", 180)
+            if middle_angle < 110: # Curled middle
+                print(f"[CONFLICT] Sarpashira -> Chandrakala (Middle: {middle_angle:.1f})")
+                stable_name = "chandrakala"
 
         # --- Task 3: Physiological Hard-Gates ---
         accuracy_cap = 100.0
@@ -1520,46 +1622,48 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 accuracy_cap = 40.0
                 corrections.insert(0, f"Tuck your {', '.join(bad_fingers)} fingers tighter into your palm.")
 
-        corrections, art_accuracy, current_finger_colors, problematic_joints = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
-        total_accuracy = min(art_accuracy, accuracy_cap)
-
-        # --- INITIALIZE TOTAL ACCURACY ---
-        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
-
-        # --- STRICT VALIDATION LAYERS ---
-        # 1. Identity Gate: If ML is sure it's the WRONG mudra, kill accuracy immediately.
-        # [PHASE 18] Added Confidence Fraction Check: target_conf must be > raw_conf * 0.5
+        # --- DYNAMIC FEEDBACK PRIORITY (Natural Teacher Layer) ---
+        is_phys_valid, struct_error = verify_mudra_identity(stable_name, finger_angles, lm_wrapper, palm_size)
+        
+        # Identity Gate 1: Structural Veto
+        if not is_phys_valid:
+            print(f"[VETO] {stable_name} failed structure: {struct_error}")
+            accuracy_cap = 0.0
+            art_accuracy = 0.0
+            corrections = [struct_error]
+            problematic_joints = []
+            current_finger_colors = {k: "red" for k in finger_angles.keys()} # Highlight all for "Stop"
+        else:
+            # Identity check passed, fetch joint-level refinements
+            corrections, art_accuracy, current_finger_colors, problematic_joints = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
+        
+        # Identity Gate 2: ML Model Mismatch (Natural Teacher Logic)
         target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
         target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
         
         is_wrong_identity = (target_key and stable_name.lower().strip() != target_key and smooth_conf > 45)
-        
-        # New Gate: Even if it's not a clear "Wrong Identity" yet, if the target is too weak compared to the top guess, it's noise.
         is_too_weak = (target_key and stable_name.lower().strip() != target_key and target_conf < (smooth_conf * 0.5))
         
-        is_wrong_mudra = False
-        actual_mudra = ""
-        
         if is_wrong_identity or is_too_weak:
-            is_wrong_mudra = True
-            actual_mudra = stable_name
-            total_accuracy = 0.0
+            # --- Natural Teacher Layer: Absolute Priority ---
+            # If the wrong mudra is detected, ONLY say "You are showing X. Please switch to Y."
+            actual_label = stable_name.capitalize()
+            target_label = target_key.capitalize()
+            wrong_msg = f"Wrong mudra — you are showing {actual_label}. Please switch to {target_label}."
             
-            # Check for known conflict pairs where geometric similarity might cause confusion
-            current_pair = (target_key, stable_name.lower().strip())
-            if current_pair in STRICT_CONFLICT_PAIRS:
-                print(f"[STRICT-CONFLICT] Blocked Similarity: Target={target_key}, Detected={stable_name}")
-                wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()}. Fold your ring and pinky fingers tighter for {target_key.capitalize()}."
-            else:
-                reason = "Identity mismatch" if is_wrong_identity else "Low target confidence"
-                print(f"[STRICT] {reason}: ML={stable_name}, Target={target_key}({target_conf:.1f}%). Killing accuracy.")
-                wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
+            corrections = [wrong_msg]
+            art_accuracy = 0.0
+            accuracy_cap = 0.0
+            problematic_joints = []
+            current_finger_colors = {k: "red" for k in finger_angles.keys()}
+
+        # Final accuracy calculation
+        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
+        total_accuracy = min(total_accuracy, accuracy_cap)
             
-            corrections = [c for c in corrections if not c.startswith("Wrong mudra")]
-            corrections.insert(0, wrong_msg)
-        elif target_key and stable_name.lower().strip() == target_key:
-            # Boost accuracy slightly if it's the correct mudra and geometry is good
-            total_accuracy = min(100.0, total_accuracy + 10)
+        # Final accuracy calculation
+        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
+        total_accuracy = min(total_accuracy, accuracy_cap)
 
         # 2. Layer 7 Noise Filter: Hard floor at 75% for "Learn" mode
         if target_key and total_accuracy < 75.0:
@@ -1712,12 +1816,13 @@ def generate_frames():
         frame_counter += 1
         frame          = cv2.flip(frame, 1)
         
-        # ── Task 4: cvzone Background Removal ──
-        # SelfieSegmentation.removeBG(img, (R,G,B)) or img
-        try:
-            frame = segmentor_cvzone.removeBG(frame, (0, 0, 0), threshold=0.1)
-        except Exception as e:
-            print(f"[cvzone] Segmentation failed: {e}")
+        # ── Performance Accelerator: BG Removal (Disabled for 30 FPS) ──
+        # SelfieSegmentation is expensive; keeping it off ensures smooth landmark processing.
+        # try:
+        #     if frame_counter % 5 == 0:
+        #         frame = segmentor_cvzone.removeBG(frame, (0, 0, 0), threshold=0.1)
+        # except Exception as e:
+        #     print(f"[cvzone] Segmentation failed: {e}")
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -1797,6 +1902,42 @@ def debug_memory():
         "top_leaks": report
     })
 
+@app.route('/api/get_voice', methods=['POST'])
+def get_voice():
+    """Natural Teacher Layer: Generates human-like voice using gTTS."""
+    try:
+        from gtts import gTTS
+        import base64
+        import io
+        
+        data = request.get_json(force=True)
+        text = data.get('text', '')
+        lang = data.get('lang', 'en')
+        
+        if not text:
+            return jsonify({"error": "No text provided"}), 400
+            
+        print(f"[VOICE] Generating: '{text}' ({lang})")
+        tts = gTTS(text=text, lang=lang)
+        
+        # Save to memory instead of disk
+        mp3_fp = io.BytesIO()
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        
+        # Encode to Base64
+        b64_string = base64.b64encode(mp3_fp.read()).decode('utf-8')
+        
+        return jsonify({
+            "status": "success",
+            "audio": b64_string
+        })
+        
+    except Exception as e:
+        print(f"[VOICE] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/clear_history', methods=['POST'])
 @app.route('/api/reset_registry', methods=['POST'])
 def reset_registry():
     """
@@ -1953,18 +2094,16 @@ def get_landmarks_route():
         "is_stable":      bool(current_mudra.get("is_stable", False)),
     })
 
-@app.route('/api/session_report', methods=['POST'])
-def save_session_report():
-    data = request.get_json(force=True)
+def perform_heavy_save(data):
+    """Heavy lift of processing and caching session reports in the background."""
     student_id = data.get('studentId', 'anonymous')
-    
     r = {
         "studentId": student_id,
         "classId":   data.get('classId', ''),
         "mudraName": data.get('mudraName', ''),
-        "detectedName": data.get('detectedName', ''), # Reverse Conflict Map logic
+        "detectedName": data.get('detectedName', ''), 
         "aiScore":   data.get('aiScore', 0),
-        "joints":    data.get('problematicJoints', []), # Task 4
+        "joints":    data.get('problematicJoints', []), 
         "timeTaken": data.get('timeTaken', 0),
         "timestamp": data.get('timestamp', datetime.utcnow().isoformat() + 'Z'),
         "feedback":  "Excellent" if data.get('aiScore', 0) >= 75 else "Needs Practice",
@@ -1978,8 +2117,23 @@ def save_session_report():
     session_reports[student_id].append(r)
     if len(session_reports[student_id]) > MAX_SESSION_REPORTS_PER_USER:
         session_reports[student_id].pop(0)
-        
-    return jsonify(r)
+    print(f"[ASYNC] Report saved successfully for {student_id}")
+
+@app.route('/api/save_report', methods=['POST'])
+@app.route('/api/session_report', methods=['POST'])
+def save_session_report():
+    """
+    Saves the user's performance report.
+    Returns to UI immediately while processing in background.
+    """
+    try:
+        data = request.get_json(force=True)
+        import threading
+        thread = threading.Thread(target=perform_heavy_save, args=(data,))
+        thread.start()
+        return jsonify({"status": "Success", "message": "Saving in background..."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/session_summary/<student_id>')
 def get_session_summary(student_id):

@@ -223,7 +223,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         return () => window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
     }, [language]);
 
-    const _doSpeak = useCallback((message, priority = PRIO.LOW, opts = {}) => {
+    const _doSpeak = useCallback(async (message, priority = PRIO.LOW, opts = {}) => {
         if (!unlockedRef.current || !message) return;
         const now = Date.now();
         
@@ -234,25 +234,34 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         globalVoiceCooldownRef.current = now;
         lastFeedbackRef.current = message;
 
-        // Only cancel if it's NOT a high-priority narrative (Layer 12 Speed Fix)
-        if (priority < PRIO.ULTRA) {
-            window.speechSynthesis.cancel();
-        }
-        const lang = langRef.current;
-        const utt = new SpeechSynthesisUtterance(message);
-        utt.lang = langCode(lang);
-        utt.rate = 0.9;
-        
-        const voice = getBestVoice(lang);
-        if (voice) utt.voice = voice;
+        // --- Natural Teacher Layer: Backend Voice Bridge ---
+        try {
+            const response = await fetch('/api/get_voice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: message, lang: langRef.current })
+            });
+            const data = await response.json();
+            
+            if (data.audio) {
+                // Play the base64 audio
+                const audio = new Audio("data:audio/mp3;base64," + data.audio);
+                audio.play();
 
-        utt.onstart = () => { isSpeakingRef.current = true; currentPrioRef.current = priority; };
-        utt.onend = () => {
-            isSpeakingRef.current = false;
-            currentPrioRef.current = 0;
-            if (opts.onEnd) opts.onEnd();
-        };
-        window.speechSynthesis.speak(utt);
+                audio.onplay = () => { isSpeakingRef.current = true; currentPrioRef.current = priority; };
+                audio.onended = () => {
+                    isSpeakingRef.current = false;
+                    currentPrioRef.current = 0;
+                    if (opts.onEnd) opts.onEnd();
+                };
+            }
+        } catch (err) {
+            console.error("[VOICE] Backend synthesis failed, falling back to browser:", err);
+            // Minimal fallback
+            const utt = new SpeechSynthesisUtterance(message);
+            utt.lang = langCode(langRef.current);
+            window.speechSynthesis.speak(utt);
+        }
     }, []);
 
     const speak = useCallback((text, { priority = PRIO.LOW, minInterval = 4000, mustRepeat = 0 } = {}) => {
