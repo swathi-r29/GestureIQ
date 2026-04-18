@@ -210,9 +210,13 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     const WRONG_MUDRA_GATE = 3;
 
     // NEW: State Awareness Refs for Sync Fix
-    const lastStatusRef = useRef('');
-    const lastScoreRef = useRef(0);
-    const lastMudraRef = useRef('');
+    const lastStatusRef   = useRef('');
+    const lastScoreRef    = useRef(0);
+    const lastMudraRef    = useRef('');
+    const isFetchingRef   = useRef(false);  // Lock: prevents concurrent gTTS requests
+    const fetchControllerRef = useRef(null); // ABORT: cancels outdated gTTS requests
+    const activeAudioRef  = useRef(null);   // Tracks the currently playing Audio object
+    const pendingSpeechRef = useRef(null);
 
     useEffect(() => {
         langRef.current = language;
@@ -220,47 +224,114 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         window.speechSynthesis.getVoices();
         const handleVoices = () => window.speechSynthesis.getVoices();
         window.speechSynthesis.addEventListener('voiceschanged', handleVoices);
-        return () => window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
+
+        // GLOBAL UNLOCK: Any click on the window enables audio context for this session
+        const forceUnlock = () => { unlockedRef.current = true; };
+        window.addEventListener('click', forceUnlock, { once: true });
+        window.addEventListener('touchstart', forceUnlock, { once: true });
+
+        return () => {
+            window.speechSynthesis.removeEventListener('voiceschanged', handleVoices);
+            window.removeEventListener('click', forceUnlock);
+            window.removeEventListener('touchstart', forceUnlock);
+        };
     }, [language]);
 
-    const _doSpeak = useCallback(async (message, priority = PRIO.LOW, opts = {}) => {
+    const _doSpeak = useCallback(async (message, priority = PRIO.MEDIUM, opts = {}) => {
         if (!unlockedRef.current || !message) return;
+
+        // --- IDEMPOTENCY & PRIORITY CHECK (Speech Integrity Fix) ---
+        // If we are currently speaking, we only interrupt for HIGHER priority messages (Task 12)
+        if (isSpeakingRef.current || isFetchingRef.current) {
+            // If the new request is lower priority, discard it
+            if (priority < currentPrioRef.current) return;
+            
+            // If equal priority (and not urgent), queue it instead of killing current
+            if (priority === currentPrioRef.current && priority < PRIO.HIGH) {
+                pendingSpeechRef.current = { message, priority, opts };
+                return;
+            }
+            // If it's a higher priority or same-urgent, it falls through to interrupt
+        }
+
         const now = Date.now();
-        
-        // Use a stricter cooldown for low-priority messages
         const cooldown = priority >= PRIO.HIGH ? 1000 : 2500;
         if (now - globalVoiceCooldownRef.current < cooldown && message === lastFeedbackRef.current) return;
-        
+
         globalVoiceCooldownRef.current = now;
         lastFeedbackRef.current = message;
+        isFetchingRef.current = true; // LOCK
+
+        // --- Interrupt only if priority warrants it (Interruption Logic) ---
+        if (fetchControllerRef.current) {
+            fetchControllerRef.current.abort();
+            fetchControllerRef.current = null;
+        }
+
+        if (activeAudioRef.current) {
+            try { 
+                activeAudioRef.current.pause(); 
+                activeAudioRef.current.currentTime = 0;
+                activeAudioRef.current.src = ''; 
+                activeAudioRef.current.load(); 
+            } catch (_) {}
+            activeAudioRef.current = null;
+        }
+        window.speechSynthesis.cancel();
+
+        const controller = new AbortController();
+        fetchControllerRef.current = controller;
+        isFetchingRef.current = true;
 
         // --- Natural Teacher Layer: Backend Voice Bridge ---
         try {
             const response = await fetch('/api/get_voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: message, lang: langRef.current })
+                body: JSON.stringify({ text: message, lang: langRef.current }),
+                signal: controller.signal
             });
             const data = await response.json();
-            
-            if (data.audio) {
-                // Play the base64 audio
-                const audio = new Audio("data:audio/mp3;base64," + data.audio);
-                audio.play();
 
-                audio.onplay = () => { isSpeakingRef.current = true; currentPrioRef.current = priority; };
-                audio.onended = () => {
-                    isSpeakingRef.current = false;
-                    currentPrioRef.current = 0;
-                    if (opts.onEnd) opts.onEnd();
+            if (data.audio) {
+                const audio = new Audio("data:audio/mp3;base64," + data.audio);
+                activeAudioRef.current = audio;
+
+                audio.onplay  = () => { 
+                    isSpeakingRef.current = true;  
+                    currentPrioRef.current = priority; 
                 };
+                audio.onended = () => {
+                    isSpeakingRef.current  = false;
+                    currentPrioRef.current = 0;
+                    activeAudioRef.current = null;
+                    if (opts.onEnd) opts.onEnd();
+
+                    // --- CHECK QUEUE (Queue Logic) ---
+                    if (pendingSpeechRef.current) {
+                        const next = pendingSpeechRef.current;
+                        pendingSpeechRef.current = null;
+                        // Brief pause for natural breath (200ms)
+                        setTimeout(() => _doSpeak(next.message, next.priority, next.opts), 200);
+                    }
+                };
+                audio.play().catch(e => {
+                    if (e.name !== 'AbortError') console.error("[VOICE] Play error:", e);
+                });
             }
         } catch (err) {
-            console.error("[VOICE] Backend synthesis failed, falling back to browser:", err);
-            // Minimal fallback
+            // IF ABORTED: The request was intentionally cancelled by a newer instruction.
+            // DO NOT fall back to legacy speech, as that causes overlaps.
+            if (err.name === 'AbortError') return;
+
+            console.error("[VOICE] Backend synthesis failed:", err);
+            window.speechSynthesis.cancel();
             const utt = new SpeechSynthesisUtterance(message);
             utt.lang = langCode(langRef.current);
             window.speechSynthesis.speak(utt);
+        } finally {
+            isFetchingRef.current = false;
+            fetchControllerRef.current = null;
         }
     }, []);
 
@@ -289,6 +360,17 @@ export function useVoiceGuide({ language = 'en' } = {}) {
 
     const unlock = useCallback(() => {
         unlockedRef.current = true; // Immediate unlock on user interaction
+        
+        // --- WebRTC Audio Unblocker ---
+        // Resume AudioContext if it exists (some browsers require this to wake up WebRTC audio)
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+                const ctx = new AudioCtx();
+                if (ctx.state === 'suspended') ctx.resume();
+            }
+        } catch (_) {}
+
         const dummy = new SpeechSynthesisUtterance(' ');
         dummy.volume = 0;
         window.speechSynthesis.speak(dummy);
@@ -360,14 +442,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             _doSpeak(msg, priority, opts);
             return msg;
         },
-        fromResult: (data) => {
+        fromResult: (data, targetMudra = null) => {
             if (!data) return null;
             const lang = langRef.current;
             const now = Date.now();
             
             const currentStatus = data.status || 'Incorrect';
             const currentScore = data.score || 0;
-            const currentMudra = data.matchedMudra || 'No Hand';
+            const currentMudra = data.name || data.matchedMudra || 'No Hand';
 
             const isStatusTransition = currentStatus !== lastStatusRef.current;
             const isMudraTransition = currentMudra !== lastMudraRef.current;
@@ -405,24 +487,26 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 if (translated !== lastCorrectionRef.current || now - lastCorrectionTimeRef.current > 5000) {
                     lastCorrectionRef.current = translated;
                     lastCorrectionTimeRef.current = now;
-                    _doSpeak(translated, PRIO.MEDIUM);
+                    // _doSpeak(translated, PRIO.MEDIUM); // SILENCED: fold your fingers like that...
                     return translated;
                 }
                 return null;
             }
 
             if (data.is_stable && currentMudra !== 'No Hand' && currentMudra !== 'Joining...') {
+                // DIFFERENTIAL GATE: If user is on the correct track, don't say "Showing [Target]"
+                // This prevents the redundant loop for correct performance.
+                const isCorrectTrack = targetMudra && currentMudra.toLowerCase().trim() === targetMudra.toLowerCase().trim();
+                if (isCorrectTrack) return null;
+
                 if (isMudraTransition || now - lastCorrectionTimeRef.current > 7000) {
                     lastCorrectionTimeRef.current = now;
-                    const mat = currentMudra;
-                    const msgs = { 
-                        en: `Showing ${mat}. Try adjusting your fingers.`, 
-                        ta: `நீங்கள் ${getMudraName(lang, mat)} காட்டுகிறீர்கள். விரல்களை சரிசெய்யவும்.`, 
-                        hi: `आप ${getMudraName(lang, mat)} दिखा रहे हैं। अपनी उंगलियों को ठीक करें।` 
-                    };
-                    const msg = msgs[lang] || msgs.en;
-                    _doSpeak(msg, PRIO.MEDIUM);
-                    return msg;
+                    const detName = currentMudra;
+                    let voiceMsg = lang === 'ta'
+                                    ? `காட்டுவது ${getMudraName(lang, detName)}.`
+                                    : `Showing ${detName}.`;
+                    _doSpeak(voiceMsg, PRIO.MEDIUM);
+                    return voiceMsg;
                 }
             }
             return null;
@@ -430,7 +514,23 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         resetWrongGate: () => { wrongMudraCountRef.current = 0; }
     }), [getInstruction, _doSpeak, speak]);
 
-    return { speak, stop: () => window.speechSynthesis.cancel(), test, unlock, announce, getInstruction };
+    return { 
+        speak, 
+        stop: () => {
+            window.speechSynthesis.cancel();
+            if (activeAudioRef.current) {
+                try {
+                    activeAudioRef.current.pause();
+                    activeAudioRef.current.src = '';
+                } catch (_) {}
+                activeAudioRef.current = null;
+            }
+            isSpeakingRef.current = false;
+            currentPrioRef.current = 0;
+            pendingSpeechRef.current = null;
+        }, 
+        test, unlock, announce, getInstruction 
+    };
 }
 
 export function LanguageSelector({ lang, setLang, onChange }) {

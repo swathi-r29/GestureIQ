@@ -79,9 +79,16 @@ const StudentVideo = ({ stream, name }) => {
       ref={videoRef}
       autoPlay
       playsInline
-      muted={false} // --- FIX: ENABLE STUDENT AUDIO MONITORING ---
-      className="w-full h-full object-cover"
+      muted={false} 
+      className="w-full h-full object-cover bg-zinc-950"
       style={{ transform: 'scaleX(-1)' }}
+      onLoadedMetadata={() => {
+        console.log('[WebRTC Teacher] Monitor metadata loaded, unmuting audio for:', name);
+        if (videoRef.current) {
+          videoRef.current.muted = false;
+          videoRef.current.play().catch(e => console.warn('[WebRTC Teacher] Play failed for monitor:', name, e));
+        }
+      }}
     />
   );
 };
@@ -195,6 +202,18 @@ const StaffConductClass = () => {
           noiseSuppression: true
         }
       });
+      
+      // --- AUDIO AUDIT: Verify Mic Capture ---
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        console.log(`[WebRTC Teacher] Using Mic: ${audioTracks[0].label} (${audioTracks[0].readyState})`);
+        if (audioTracks[0].readyState === 'ended') {
+          console.error('[WebRTC Teacher] Mic track is in "ended" state! Audio will be silent.');
+        }
+      } else {
+        console.error('[WebRTC Teacher] No audio track found in the captured stream!');
+      }
+
       localStreamRef.current = stream;
       streamReadyRef.current = true;
 
@@ -645,6 +664,9 @@ const StaffConductClass = () => {
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsMicOn(audioTrack.enabled);
+        console.log(`[WebRTC Teacher] Mic is now: ${audioTrack.enabled ? 'ON' : 'OFF'}`);
+      } else {
+        console.error('[WebRTC Teacher] No audio track found to toggle!');
       }
     }
   };

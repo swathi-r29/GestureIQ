@@ -162,37 +162,34 @@ const StudentLiveClass = () => {
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peerConnectionRef.current = pc;
 
-    pc.ontrack = (event) => {
-      // FIX D: stale-PC guard
-      if (peerConnectionRef.current !== pc) return;
-      console.log('[WebRTC Student] Got remote track:', event.track.kind);
-      
-      if (remoteVideoRef.current) {
-        // Use the first stream provided, or the one already assigned
-        let stream = event.streams[0] || remoteVideoRef.current.srcObject;
+      pc.ontrack = (event) => {
+        if (peerConnectionRef.current !== pc) return;
         
-        if (!stream || !(stream instanceof MediaStream)) {
-          stream = new MediaStream();
-        }
+        const audioTracks = event.streams[0]?.getAudioTracks() || [];
+        console.log(`[WebRTC Student] Got remote track: ${event.track.kind}. Total audio tracks from teacher: ${audioTracks.length}`);
         
-        // Ensure track is in stream
-        if (!stream.getTracks().includes(event.track)) {
-          stream.addTrack(event.track);
-        }
-        
-        // Re-assign to trigger layout/audio updates
-        if (remoteVideoRef.current.srcObject !== stream) {
-          remoteVideoRef.current.srcObject = stream;
-        }
+        if (remoteVideoRef.current) {
+          let stream = event.streams[0] || remoteVideoRef.current.srcObject;
+          if (!stream || !(stream instanceof MediaStream)) stream = new MediaStream();
+          if (!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
+          
+          if (remoteVideoRef.current.srcObject !== stream) {
+            remoteVideoRef.current.srcObject = stream;
+          }
 
-        // --- NEW: EXPLICIT UNMUTE FOR TEACHER AUDIO ---
-        remoteVideoRef.current.muted = false;
-        
-        // Force play
-        remoteVideoRef.current.play().catch(e => console.warn('[WebRTC Student] Teacher stream play failed:', e));
-        setTeacherConnected(true);
-      }
-    };
+          // EXPLICIT AUTO-UNMUTE FOR HUMAN VOICE
+          remoteVideoRef.current.muted = false;
+          remoteVideoRef.current.onloadedmetadata = () => {
+              console.log('[WebRTC Student] Teacher feed metadata loaded, unmuting human voice.');
+              if (remoteVideoRef.current) {
+                  remoteVideoRef.current.muted = false;
+                  remoteVideoRef.current.play().catch(e => console.warn('[WebRTC Student] Teacher feed play failed:', e));
+              }
+          };
+          
+          setTeacherConnected(true);
+        }
+      };
 
     pc.onicecandidate = (event) => {
       if (peerConnectionRef.current !== pc) return;
@@ -318,6 +315,16 @@ const StudentLiveClass = () => {
         // FIX: SYNC MUDRA CHANGE TOAST AND VOICE (Teacher selection)
         sock.on('mudra_changed', (data) => {
           console.log('[Socket] Teacher changed mudra:', data.newMudra);
+          
+          // --- GURU SYNC: CLEAR GHOST SESSIONS (Task: Sync Student logic) ---
+          landmarksRef.current = null;      // Clear ghost skeleton
+          setDetectedMudra('');             // Reset UI state
+          setAiScore(0);
+          isDetectingRef.current = false;   // SAFETY RESET: Clear processing lock
+          lastResultTimeRef.current = Date.now();
+          consecutiveRef.current = { name: null, count: 0 }; // Clear stability counter
+          graceRef.current = 0;
+
           setTargetMudra(data.newMudra);
           targetMudraRef.current = data.newMudra;
           setToastData({
@@ -528,6 +535,19 @@ const StudentLiveClass = () => {
           noiseSuppression: true
         }
       });
+
+      // --- AUDIO AUDIT: Verify Mic Capture ---
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        console.log(`[WebRTC Student] Using Mic: ${audioTracks[0].label} (${audioTracks[0].readyState})`);
+        if (audioTracks[0].readyState === 'ended') {
+          console.error('[WebRTC Student] Mic track is "ended". Audio will be silent.');
+        }
+      } else {
+        console.warn('[WebRTC Student] No audio track found!');
+      }
+
+      unlock(); // UNBLOCK AUDIO CONTEXT ON CAPTURE
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;

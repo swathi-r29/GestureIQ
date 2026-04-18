@@ -36,8 +36,8 @@
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
-    "vite": "^6.0.0",
-    "vite-plugin-pwa": "^0.21.1"
+    "vite": "6.0.7",
+    "vite-plugin-pwa": "0.21.1"
   },
   "overrides": {
     "serialize-javascript": "^7.0.3"

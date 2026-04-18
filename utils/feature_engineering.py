@@ -77,9 +77,10 @@ def extract_features(landmarks, label="Right"):
     for i, t in enumerate(tips):
         features.append(float(pts[t, 1] - pts[mcp[i], 1]))
 
-    # - 5 Tip-to-Wrist Z-depth differences (helps with "Hooded" vs "Flat" hands)
-    for t in tips:
-        features.append(float(pts[t, 2])) # Z-coord relative to wrist (pts[0] is 0,0,0)
+    # - 1 Thumb Spread (Thumb tip to Index tip distance — critical for Pataka/Ardhachandra/Chandrakala)
+    features.append(float(np.linalg.norm(pts[4] - pts[8])))  # thumb-index spread
 
-    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 3 (gaps) + 5 (curls) + 1 (spread) + 5 (depths) = 87
+    # Total: 63 (coords) + 5 (angles) + 5 (distances) + 3 (gaps) + 5 (curls) + 1 (spread) = 82
+    # CRITICAL: This must always return exactly 82 features to match the trained model.
+    # DO NOT add new features without retraining the model.
     return features

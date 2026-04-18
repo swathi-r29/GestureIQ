@@ -280,7 +280,7 @@ export default function Detect() {
       const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
       const res = await fetch(`/api/detect_landmarks`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(800),
+        body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) throw new Error('Flask error');
       const json = await res.json();
@@ -355,6 +355,7 @@ export default function Detect() {
     }
 
 
+    if (inFlightRef.current) return;
     setHandPresent(true);
     setDoubleMsg('Analyzing both hands…');
     inFlightRef.current = true;
@@ -381,7 +382,7 @@ export default function Detect() {
 
         const res = await fetch(`/api/detect_double_landmarks`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload), signal: AbortSignal.timeout(1200),
+            body: JSON.stringify(payload), signal: AbortSignal.timeout(3000),
         });
         if (!res.ok) throw new Error('Flask error');
         const json = await res.json();
@@ -466,7 +467,7 @@ export default function Detect() {
     };
     rafRef.current = requestAnimationFrame(loop);
     const detect = mode === 'single' ? runSingleDetection : runDoubleDetection;
-    intervalRef.current = setInterval(detect, 100); // High-frequency streaming for "instant" feel
+    intervalRef.current = setInterval(detect, 200); // Sustainable frequency for remote/ngrok stability
     return () => { cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
   }, [cameraOn, mode, runSingleDetection, runDoubleDetection]);
 

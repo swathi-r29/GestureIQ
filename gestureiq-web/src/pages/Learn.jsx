@@ -100,6 +100,7 @@ export default function Learn() {
     const [selectedType, setSelectedType] = useState(null); // 'Single' or 'Double'
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [selectedMudra, setSelectedMudra] = useState(null);
+    const selectedMudraRef = useRef(null); // Always-current ref to avoid stale closures
     const [progress, setProgress] = useState([]);
     const [bestScores, setBestScores] = useState({});
     const [cameraOn, setCameraOn] = useState(false);
@@ -153,6 +154,7 @@ export default function Learn() {
     const fpsRef = useRef(0);
 
     const voiceEnabledRef = useRef(false);
+    const hasAnnouncedSuccessRef = useRef(false); // Success Gate: only say "Hold it" once
     const lastWrongVoiceRef = useRef({ text: '', time: 0 });
     const lastCorrVoiceRef = useRef({ text: '', time: 0 });
     const lastOkVoiceRef = useRef(0);
@@ -160,6 +162,7 @@ export default function Learn() {
     const stableCorrFramesRef = useRef(0);
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
+    useEffect(() => { selectedMudraRef.current = selectedMudra; }, [selectedMudra]);
 
     const PRACTICE_STEPS = [
         { title: 'Study the Position', desc: 'Look at the reference image carefully. Read the finger instructions below.' },
@@ -197,102 +200,124 @@ export default function Learn() {
         }
     }, [stage, selectedMudra]);
 
-    // ── MASTER DETECTION LOOP (Task 2) ───────────────────────────────────────
-    // Consolidates MediaPipe Setup, Video Sync, and Frame Processing
+    // ── MASTER DETECTION LOOP ──────────────────────────────────────────────────
+    // Hands is created ONCE as a singleton. Only the RAF loop respects cameraOn.
+    // Destroying and recreating Hands on every camera toggle caused the WebGL
+    // context crash-restart loop ("ADJUSTING..." forever).
+    const handsInstanceRef = useRef(null); // True singleton across renders
+
     useEffect(() => {
-        if (!cameraOn) return;
+        // 1. Build (or update options on) the singleton Hands object
+        const needsRebuild = !handsInstanceRef.current ||
+            (selectedType === 'Double' ? 2 : 1) !==
+            (handsInstanceRef.current._maxNumHands ?? null);
 
-        // 1. Initialize MediaPipe Hands
-        const hands = new Hands({ 
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` 
-        });
-
-        hands.setOptions({
-            maxNumHands: selectedType === 'Double' ? 2 : 1,
-            modelComplexity: 0, // 0 for speed, 1 for accuracy
-            minDetectionConfidence: 0.3,
-            minTrackingConfidence: 0.3
-        });
-
-        hands.onResults((results) => {
-            // Frame Processed -> Unlock next frame
-            isProcessingRef.current = false;
-            lastResultTimeRef.current = Date.now();
-
-            const canvas = canvasRef.current;
-            const video = videoRef.current;
-            if (!canvas || !video) return;
-
-            const ctx = canvas.getContext('2d');
-            canvas.width = video.clientWidth;
-            canvas.height = video.clientHeight;
-
-            ctx.save();
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-            
-            if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
-                const lmsList = results.multiHandLandmarks;
-                const handsList = results.multiHandedness || [];
-
-                lmsList.forEach((lms, idx) => {
-                    drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
-                    drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
-                    
-                    if (detectedRef.current?.problematic_joints) {
-                        const joints = detectedRef.current.problematic_joints;
-                        const JOINT_MAP = {
-                            thumb_mcp: 2, thumb_ip: 3, thumb_tip: 4,
-                            index_mcp: 5, index_pip: 6, index_dip: 7, index_tip: 8,
-                            middle_mcp: 9, middle_pip: 10, middle_dip: 11, middle_tip: 12,
-                            ring_mcp: 13, ring_pip: 14, ring_dip: 15, ring_tip: 16,
-                            pinky_mcp: 17, pinky_pip: 18, pinky_dip: 19, pinky_tip: 20
-                        };
-
-                        joints.forEach(j => {
-                            const idx = JOINT_MAP[j.joint] || JOINT_MAP[j.joint.replace('_mcp','_pip')];
-                            if (idx !== undefined && lms[idx]) {
-                                const pt = lms[idx];
-                                const screenX = pt.x * canvas.width;
-                                const screenY = pt.y * canvas.height;
-                                const gradient = ctx.createRadialGradient(screenX, screenY, 5, screenX, screenY, 40);
-                                gradient.addColorStop(0, 'rgba(239, 68, 68, 0.7)');
-                                gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
-                                ctx.beginPath();
-                                ctx.fillStyle = gradient;
-                                ctx.arc(screenX, screenY, 40, 0, Math.PI * 2);
-                                ctx.fill();
-                            }
-                        });
-                    }
-                });
-
-                if (selectedType === 'Double') {
-                    let left = null, right = null;
-                    handsList.forEach((h, i) => {
-                        if (h.label === 'Left') left = lmsList[i];
-                        else right = lmsList[i];
-                    });
-                    if (!left && lmsList.length > 1) left = lmsList[1];
-                    if (!right && lmsList.length > 1) right = lmsList[0];
-
-                    landmarksRef.current = { left, right }; // Fixed for HandVisualiser
-                } else {
-                    const lms = lmsList[0];
-                    const label = handsList[0]?.label || 'Right';
-                    const score = handsList[0]?.score || 1.0;
-                    
-                    landmarksRef.current = lms; // Raw array for HandVisualiser
-                    landmarksMetaRef.current = { handedness: label, score };
-                }
-            } else {
-                landmarksRef.current = null;
+        if (needsRebuild) {
+            // Close the old one cleanly if it exists
+            if (handsInstanceRef.current) {
+                try { handsInstanceRef.current.close(); } catch (_) {}
+                handsInstanceRef.current = null;
+                console.log('[Learn] Hands rebuilt for type:', selectedType);
             }
-            ctx.restore();
-        });
 
-        handsRef.current = hands;
+            const hands = new Hands({
+                locateFile: (file) =>
+                    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+            });
+
+            const maxHands = selectedType === 'Double' ? 2 : 1;
+            hands.setOptions({
+                maxNumHands: maxHands,
+                modelComplexity: 0,
+                minDetectionConfidence: 0.3,
+                minTrackingConfidence: 0.3,
+            });
+            hands._maxNumHands = maxHands; // Tag for change detection
+
+            hands.onResults((results) => {
+                isProcessingRef.current = false;
+                lastResultTimeRef.current = Date.now();
+
+                const canvas = canvasRef.current;
+                const video  = videoRef.current;
+                if (!canvas || !video) return;
+
+                const ctx          = canvas.getContext('2d');
+                canvas.width       = video.clientWidth;
+                canvas.height      = video.clientHeight;
+
+                ctx.save();
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.scale(-1, 1);
+                ctx.translate(-canvas.width, 0);
+
+                if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
+                    const lmsList   = results.multiHandLandmarks;
+                    const handsList = results.multiHandedness || [];
+
+                    lmsList.forEach((lms, idx) => {
+                        drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: '#f59e0b', lineWidth: 4 });
+                        drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+
+                        if (detectedRef.current?.problematic_joints) {
+                            const joints = detectedRef.current.problematic_joints;
+                            const JOINT_MAP = {
+                                thumb_mcp: 2, thumb_ip: 3, thumb_tip: 4,
+                                index_mcp: 5, index_pip: 6, index_dip: 7, index_tip: 8,
+                                middle_mcp: 9, middle_pip: 10, middle_dip: 11, middle_tip: 12,
+                                ring_mcp: 13, ring_pip: 14, ring_dip: 15, ring_tip: 16,
+                                pinky_mcp: 17, pinky_pip: 18, pinky_dip: 19, pinky_tip: 20,
+                            };
+                            joints.forEach(j => {
+                                const jIdx = JOINT_MAP[j.joint] ||
+                                    JOINT_MAP[j.joint.replace('_mcp', '_pip')];
+                                if (jIdx !== undefined && lms[jIdx]) {
+                                    const pt      = lms[jIdx];
+                                    const screenX = pt.x * canvas.width;
+                                    const screenY = pt.y * canvas.height;
+                                    const gradient = ctx.createRadialGradient(
+                                        screenX, screenY, 5, screenX, screenY, 40
+                                    );
+                                    gradient.addColorStop(0, 'rgba(239, 68, 68, 0.7)');
+                                    gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
+                                    ctx.beginPath();
+                                    ctx.fillStyle = gradient;
+                                    ctx.arc(screenX, screenY, 40, 0, Math.PI * 2);
+                                    ctx.fill();
+                                }
+                            });
+                        }
+                    });
+
+                    if (selectedType === 'Double') {
+                        let left = null, right = null;
+                        handsList.forEach((h, i) => {
+                            if (h.label === 'Left')  left  = lmsList[i];
+                            else                     right = lmsList[i];
+                        });
+                        if (!left  && lmsList.length > 1) left  = lmsList[1];
+                        if (!right && lmsList.length > 1) right = lmsList[0];
+
+                        landmarksRef.current = { left, right };
+                    } else {
+                        const lms   = lmsList[0];
+                        const label = handsList[0]?.label || 'Right';
+                        const score = handsList[0]?.score || 1.0;
+
+                        landmarksRef.current      = lms;
+                        landmarksMetaRef.current  = { handedness: label, score };
+                    }
+                } else {
+                    landmarksRef.current = null;
+                }
+                ctx.restore();
+            });
+
+            handsInstanceRef.current = hands;
+            handsRef.current         = hands; // Keep handsRef in sync
+        }
+
+        if (!cameraOn) return; // Don't start the RAF loop if camera is off
 
         // 2. Video Stream Sync
         if (streamRef.current && videoRef.current) {
@@ -305,38 +330,49 @@ export default function Learn() {
         const processFrame = async () => {
             if (!active || !cameraOn) return;
 
-            if (videoRef.current?.readyState >= 2 && handsRef.current && !isProcessingRef.current) {
-                isProcessingRef.current = true; // Lock
-                await handsRef.current.send({ image: videoRef.current }).catch(() => {
-                    isProcessingRef.current = false; // Release lock on error
-                });
+            if (
+                videoRef.current?.readyState >= 2 &&
+                handsInstanceRef.current &&
+                !isProcessingRef.current
+            ) {
+                isProcessingRef.current = true;
+                await handsInstanceRef.current
+                    .send({ image: videoRef.current })
+                    .catch(() => { isProcessingRef.current = false; });
             }
-            
+
             requestRef.current = requestAnimationFrame(processFrame);
         };
         requestRef.current = requestAnimationFrame(processFrame);
 
-        // 4. Recovery Monitor
+        // 4. Recovery Monitor (watchdog)
         const recoveryId = setInterval(() => {
             if (cameraOn && Date.now() - lastResultTimeRef.current > 4000) {
-                console.warn('[Detection] Loop hung, forcing result clear');
+                console.warn('[Detection] Loop hung, forcing lock clear');
                 lastResultTimeRef.current = Date.now();
-                isProcessingRef.current = false;
+                isProcessingRef.current   = false;
             }
         }, 2000);
 
-        // Cleanup
+        // Cleanup: stop RAF + watchdog, but do NOT close Hands (singleton survives)
         return () => {
             active = false;
             clearInterval(recoveryId);
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
-            if (handsRef.current) {
-                handsRef.current.close();
-                handsRef.current = null;
-                console.log('[Learn] Hands resources released.');
-            }
+            // Singleton stays alive — console.log removed to reduce noise
         };
     }, [cameraOn, selectedType]);
+
+    // Page-exit cleanup: close the singleton Hands when the component fully unmounts
+    useEffect(() => {
+        return () => {
+            if (handsInstanceRef.current) {
+                try { handsInstanceRef.current.close(); } catch (_) {}
+                handsInstanceRef.current = null;
+                console.log('[Learn] Hands resources released (unmount).');
+            }
+        };
+    }, []);
  
     const startWebcam = useCallback(async () => {
         try {
@@ -411,7 +447,7 @@ export default function Learn() {
                 const hasHand = dataObj && (
                   selectedType === 'Double'
                     ? (dataObj.left && dataObj.right)
-                    : (Array.isArray(dataObj) && dataObj.length === 21)
+                    : (dataObj.length === 21)  // NormalizedLandmarkList is NOT a native Array — don't use Array.isArray
                 );
                   if (!hasHand) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
@@ -467,7 +503,7 @@ export default function Learn() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
-                    signal: AbortSignal.timeout(1500),
+                    signal: AbortSignal.timeout(3000),
                 });
 
                 const data = await res.json();
@@ -549,40 +585,46 @@ export default function Learn() {
 
                     // 1. SUCCESS STATE: User is holding the pose
                     if (currentHoldPct > 10 && !sessionComplete) {
-                        if (now - lastOkVoiceRef.current > 8000) {
-                            lastOkVoiceRef.current = now;
+                        // SUCCESS GATE: Only announce "Hold it" the first time perfection is reached
+                        if (!hasAnnouncedSuccessRef.current) {
+                            hasAnnouncedSuccessRef.current = true;
                             const msg = lang === 'ta' 
                                 ? 'அப்படியே பிடியுங்கள்! நீங்கள் செய்துவிட்டீர்கள்!' 
-                                : 'Hold for a second, you did it!';
-                            announce.raw(msg, 4); // Priority 4 (Ultra) to prevent interruptions
+                                : 'Perfect! Hold it right there, you did it!';
+                            announce.raw(msg, 4); // Priority 4 (Ultra)
+                        } else if (now - lastOkVoiceRef.current > 12000) {
+                            // Subtle "Still holding" reminder if they hold for a very long time
+                            lastOkVoiceRef.current = now;
+                            const msg = lang === 'ta' ? 'அப்படியே பிடியுங்கள்!' : 'Keep holding!';
+                            announce.raw(msg, 2);
                         }
                     }
-                    // 2. WRONG MUDRA STATE (Guard with holdProgress === 0)
+                    // 2. WRONG MUDRA STATE (Guard: only if not already in success hold)
                     else if (wrongMsg && holdAccumulatorRef.current === 0) {
                         const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
                         if (stableWrongMsg) {
                             const prev = lastWrongVoiceRef.current;
-                            if (stableWrongMsg !== prev.text || (now - prev.time) > 5000) {
+                            if (stableWrongMsg !== prev.text || (now - prev.time) > 7000) { // Increased interval
                                 lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
                                 const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
                                 const detName = detMatch ? detMatch[1] : detectedName;
                                 
                                 let voiceMsg = lang === 'ta'
-                                    ? `தவறான முத்திரை. நீங்கள் ${getMudraName(lang, detName)} காட்டுகிறீர்கள்.`
-                                    : `Wrong mudra. You are showing ${detName}.`;
+                                    ? `தவறான முத்திரை. காட்டுவது ${getMudraName(lang, detName)}.`
+                                    : `Wrong mudra. Showing ${detName}.`;
                                 announce.raw(voiceMsg, 3);
                             }
                         }
                     } 
-                    // 3. FINGER CORRECTIONS (Guard with holdProgress === 0)
-                    else if (fingerCorr.length > 0 && holdAccumulatorRef.current === 0) {
+                    // 3. FINGER CORRECTIONS (Guard: Guru is SILENT if accuracy > 85%)
+                    else if (fingerCorr.length > 0 && holdAccumulatorRef.current === 0 && accuracy < 85) {
                         stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
-                        if (stableCorrFramesRef.current >= 2) {
+                        if (stableCorrFramesRef.current >= 3) { // Increased frame check for stability
                             const currentCorr = fingerCorr[0];
                             const prev = lastCorrVoiceRef.current;
-                            if (currentCorr !== prev.text || (now - prev.time) > 4500) {
+                            if (currentCorr !== prev.text || (now - prev.time) > 6000) { // Increased interval
                                 lastCorrVoiceRef.current = { text: currentCorr, time: now };
-                                announce.raw(translate(lang, currentCorr), 2);
+                                // announce.raw(translate(lang, currentCorr), 2); // SILENCED: fold your hands like that...
                             }
                         }
                     } 
@@ -590,7 +632,7 @@ export default function Learn() {
 
                 // ── HOLD + SAVE ───────────────────────────────────────────────
                 // [PHASE 18] STRICT SUCCESS TRIGGER: Require detected Name to match Folder
-                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudra.folder);
+                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudraRef.current?.folder);
                 const isGoodFrame = isCorrect;
 
                 const now = Date.now();
@@ -640,7 +682,7 @@ export default function Learn() {
                         masteredRef.current = true;
                         saveInProgressRef.current = true;
                         successLockRef.current = true; // Lock UI at 100%
-                        handleMudraMastered(selectedMudra.folder, accuracy);
+                        handleMudraMastered(selectedMudraRef.current?.folder, accuracy);
                     }, 1500); 
                 }
 
@@ -750,9 +792,14 @@ export default function Learn() {
         attemptsRef.current = 0;
         lowAccuracyFramesRef.current = 0;
         
-        // ── ATOMIC RESET & MUTE (Task 5) ──
+        // ── ATOMIC RESET & MUTE (Ghost Session Fix) ──
         isMutedRef.current = true;
         setIsMuted(true);
+        hasAnnouncedSuccessRef.current = false; // Reset Success Gate
+        landmarksRef.current = null;             // Clear ghost skeleton
+        setDetected(prev => ({ ...prev, name: '', confidence: 0 })); // Reset detection display
+        isProcessingRef.current = false;         // SAFETY RESET: Clear any stale frame locks (Task 5)
+        lastResultTimeRef.current = Date.now(); // Reset watchdog timer
         
         // Synchronous History Flush: Ensure registry is wiped BEFORE detection starts
         try {
@@ -761,6 +808,12 @@ export default function Learn() {
         } catch (e) {
             console.error('[Learn] Flush failed:', e);
         }
+
+        // HARD RESET: Give hardware and Flask time to settle (Task 5)
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Re-unlock voice just in case browser re-locked on route/state change
+        if (unlock) unlock();
 
         setIsMuted(false);
         isMutedRef.current = false;

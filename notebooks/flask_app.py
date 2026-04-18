@@ -128,9 +128,14 @@ FRONTEND_TO_MODEL = {
     'khatava':    'katva',
     'angali':     'anjali',
     'shivalinga': 'sivalinga',
-    'kopotha':    'kapotha',
+    'kopotha':    'kopotha', # Syncing with possible model spelling
     'keelaka':    'kilaka',
 }
+
+def clean_mudra_name(n):
+    if not n: return ""
+    return str(n).lower().strip().replace('_right', '').replace('_left', '').replace(' ', '')
+
 
 # MediaPipe for double hand detection
 hands_double = mp_hands.Hands(
@@ -453,18 +458,33 @@ MUDRA_FINGERPRINTS = {
     "ardhapataka": [1, 1, 1, 0, 0],
     "suchi":       [0, 1, 0, 0, 0],
     "chandrakala": [1, 1, 0, 0, 0],
-    "sarpashira":  [0, 2, 2, 2, 2],  # All 4 curved, thumb tucked
+    "sarpashira":  [0, 2, 2, 2, 2],
     "shikhara":    [1, 0, 0, 0, 0],
     "mushti":      [0, 0, 0, 0, 0],
     "ardhachandra":[1, 1, 1, 1, 1],
     "trishula":    [0, 1, 1, 1, 0],
     "mukula":      [0, 0, 0, 0, 0],
+    "tamrachuda":  [1, 0, 0, 0, 1],
+    "kartarimukha": [0, 1, 1, 0, 0],
+    "mayura":      [0, 1, 1, 2, 1],
+    "arala":       [1, 2, 1, 1, 1],
+    "kapittha":    [2, 2, 0, 0, 0],
+    "katakamukha": [2, 2, 2, 1, 1],
+    "shukatunda":  [0, 1, 1, 0, 1],
+    "kangula":     [1, 1, 1, 0, 1],
+    "alapadma":    [2, 2, 2, 2, 2],
+    "hamsasya":    [2, 2, 0, 0, 0],
+    "bhramara":    [2, 2, 2, 1, 1],
 }
 
-def get_finger_state(angle):
-    if angle > 160: return 1   # Fully Straight
-    if angle < 90:  return 0   # Fully Curled
-    return 2                   # Hooded/Curved
+def get_finger_state(angle, is_thumb=False):
+    # Adaptive threshold: Thumb is naturally more curved even when "straight"
+    straight_limit = 130 if is_thumb else 150
+    curled_limit   = 100 if is_thumb else 90
+    
+    if angle > straight_limit: return 1   # Fully Straight
+    if angle < curled_limit:   return 0   # Fully Curled
+    return 2                            # Hooded/Curved
 
 def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
     """
@@ -476,8 +496,9 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
         return True, ""
         
     expected = MUDRA_FINGERPRINTS[mudra]
+    finger_names = ["thumb", "index", "middle", "ring", "pinky"]
     actual = [
-        get_finger_state(current_angles.get('thumb', 0)),
+        get_finger_state(current_angles.get('thumb', 0), True),
         get_finger_state(current_angles.get('index', 0)),
         get_finger_state(current_angles.get('middle', 0)),
         get_finger_state(current_angles.get('ring', 0)),
@@ -488,8 +509,11 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
     finger_names = ["thumb", "index", "middle", "ring", "pinky"]
     for i, state in enumerate(expected):
         if actual[i] != state:
-            # Special relaxed check for State 2 (Curved can sometimes be seen as Straight)
+            # Special relaxed check for State 2 (Curved can sometimes be seen as Straight OR Curled)
             if state == 2 and actual[i] == 1: continue 
+            if state == 0 and actual[i] == 2:
+                if i == 0: continue # Relaxed thumb: Curved = Curled
+                if mudra == "ardhapataka" and i in (3, 4): continue # Relaxed pinky/ring for Ardhapataka
             
             # Veto
             return False, f"Wrong mudra — Your {finger_names[i]} finger is in the wrong position for {ml_prediction.capitalize()}."
@@ -1220,7 +1244,8 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
         else: finger_colors[joint] = "red"
 
     feedback_msgs = [d[1] for d in deviations]
-    return feedback_msgs, float("{:.1f}".format(total_error)), finger_colors, problematic_joints
+    art_accuracy = max(0.0, 100.0 - (total_error / 10.0))  # Convert error to 0-100% score
+    return feedback_msgs, float("{:.1f}".format(art_accuracy)), finger_colors, problematic_joints
 
 # =============================================================================
 # LANDMARK SERIALIZER
@@ -1340,7 +1365,12 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         return {'detected': False, 'name': '', 'confidence': 0, 'accuracy': 0, 'corrections': [], 'hold_progress': 0, 'hold_state': 'idle'}
     
     # ── MUDRA ISOLATION (Phase 12) ────────────────────────────────────
-    target_key = target_mudra.lower().strip() if target_mudra else ""
+    # [PHASE 18] Strict Name Normalization
+    target_key = clean_mudra_name(target_mudra)
+    # Apply frontend-to-model mapping
+    if target_key in FRONTEND_TO_MODEL:
+        target_key = FRONTEND_TO_MODEL[target_key]
+    
     if not hasattr(run_madm, 'last_target'):
         run_madm.last_target = ''
     
@@ -1392,7 +1422,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
 
         # TARGET-PRIORITY HYBRID LOGIC
         geom_acc   = 0
-        target_key = target_mudra.lower().strip() if target_mudra else ""
+        # target_key already sanitized at function entry
         if target_key and target_key in MUDRA_REFERENCE_ANGLES:
             _, geom_acc, _, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             if target_key == "hamsasya":
@@ -1403,6 +1433,26 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         top_idx    = int(np.argmax(ema_p))
         top_name   = str(model.classes_[top_idx])
         stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p, min_frames_override=min_frames)
+
+        # ── HARD ALAPADMA STRUCTURAL VETO (post-stability) ───────────────────
+        # Must run BEFORE HYBRID logic, regardless of EMA confidence level.
+        # Alapadma requires ALL 5 fingers extended AND spread wide.
+        # If ring/pinky are folded (<110°) OR fingertips aren't spread, veto.
+        if stable_name == "alapadma":
+            _ring_v  = finger_angles.get("ring",  180)
+            _pinky_v = finger_angles.get("pinky", 180)
+            _spread  = dist_lm(lm_wrapper, 8, 20, palm_size)  # index-tip to pinky-tip
+            if _ring_v < 110 or _pinky_v < 110 or _spread < 0.40:
+                print(f"[HARD-VETO-ALP] ring={_ring_v:.0f}° pinky={_pinky_v:.0f}° spread={_spread:.2f} → rejected")
+                # Fall back to next-best ML class that isn't alapadma
+                _sorted = np.argsort(ema_p)[::-1]
+                for _i in _sorted:
+                    _cname = str(model.classes_[_i])
+                    if _cname != "alapadma":
+                        stable_name = _cname
+                        smooth_conf = float(ema_p[_i] * 100)
+                        is_stable   = False
+                        break
 
         # Dynamic confidence floor
         conf_floor = 35 if (target_mudra or geom_acc > 50) else 25
@@ -1416,7 +1466,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 current_finger_colors = None
 
             # Wrong mudra check — use stable_name after EMA
-            is_wrong = (target_key and stable_name.lower().strip() != eval_name and
+            clean_stable = clean_mudra_name(stable_name)
+            is_wrong = (target_key and clean_stable != target_key and
                         (smooth_conf > 30 or raw_conf > 30))
             if is_wrong:
                 wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
@@ -1462,9 +1513,14 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                     best_geom_acc  = acc
                     best_geom_name = m_name
 
-            # If ML is weak (conf < 70) and Geoscore is strong (acc > 85), prefer the Geometric match
-            if not target_key and best_geom_acc > 85 and (smooth_conf < 70 or best_geom_name != stable_name):
-                print(f"[GEOM-SWEEP] Overriding ML={stable_name}({smooth_conf:.1f}%) with GEOM={best_geom_name}({best_geom_acc:.1f}%)")
+            # GEOM-SWEEP override: only when ML is very weak AND geom winner is clearly
+            # superior to the ML candiate's own geometry score. Prevents alapadma from
+            # always winning (it has loose constraints → scores 100% for any open hand).
+            ml_geom_for_stable = geom_scores.get(stable_name, 0)
+            geom_lead = best_geom_acc - ml_geom_for_stable
+            if (not target_key and best_geom_acc > 95 and smooth_conf < 40 and
+                    geom_lead > 20 and best_geom_name != stable_name):
+                print(f"[GEOM-SWEEP] Overriding ML={stable_name}({smooth_conf:.1f}%) with GEOM={best_geom_name}({best_geom_acc:.1f}%, lead={geom_lead:.0f}%)")
                 stable_name = best_geom_name
                 smooth_conf = max(smooth_conf, best_geom_acc * 0.90)
                 is_stable   = True
@@ -1523,13 +1579,32 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                         is_stable       = True
                         signature_force = True
 
+                # --- ALAPADMA STRUCTURAL VETO ---
+                # Alapadma requires ALL 5 fingers extended and spread.
+                # If ring or pinky is folded (< 110°), it is anatomically impossible.
+                # This prevents the open-hand bias from overriding mudras like
+                # kartarimukha, suchi, chandrakala, mushti, shikhara.
+                if best_geom_name == "alapadma":
+                    ring_ang  = finger_angles.get("ring",  180)
+                    pinky_ang = finger_angles.get("pinky", 180)
+                    spread    = dist_lm(lm_wrapper, 8, 20, palm_size)  # index-tip to pinky-tip
+                    if ring_ang < 110 or pinky_ang < 110 or spread < 0.45:
+                        # Strip alapadma from geom_scores so the next best wins
+                        geom_scores["alapadma"] = 0
+                        best_geom_acc  = max((v for k, v in geom_scores.items() if k != "alapadma"), default=0)
+                        best_geom_name = max((k for k in geom_scores if k != "alapadma"), key=lambda k: geom_scores[k], default=stable_name)
+                        print(f"[VETO-ALAPADMA] ring={ring_ang:.0f}° pinky={pinky_ang:.0f}° spread={spread:.2f} → vetoed, next best: {best_geom_name}({best_geom_acc:.0f}%)")
+
                 if not signature_force:
                     is_fist_mudra = best_geom_name in ["mushti", "shikhara"]
                     ml_is_open    = stable_name in ["pataka", "hamsapaksha", "sarpashira",
                                                     "ardhapataka", "chandrakala"]
-                    if (best_geom_acc > 78 and smooth_conf < 40) or \
-                       (best_geom_acc > 87 and best_geom_name != stable_name) or \
-                       (is_fist_mudra and ml_is_open and best_geom_acc > 80):
+                    # Raised threshold: only override ML when geom winner has a clear LEAD
+                    # over the ML candidate's own geom score (prevents open-hand bias)
+                    ml_geom_score = geom_scores.get(stable_name, 0)
+                    geom_lead     = best_geom_acc - ml_geom_score
+                    if ((best_geom_acc > 95 and smooth_conf < 35 and geom_lead > 25) or
+                            (is_fist_mudra and ml_is_open and best_geom_acc > 80)):
                         stable_name = best_geom_name
                         smooth_conf = max(smooth_conf, best_geom_acc * 0.88)
                         is_stable   = True
@@ -1611,7 +1686,25 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 stable_name = "chandrakala"
 
         # --- Task 3: Physiological Hard-Gates ---
+        # --- TARGET PRIORITY GATE (Fix for Suchi/Tamrachuda bias) ---
+        # If the ML model is confused but the physical fingerprint matches the target perfectly,
+        # we override the prediction to favor the student's current goal.
+        if target_key and stable_name != target_key:
+            is_target_phys_valid, _ = verify_mudra_identity(target_key, finger_angles, lm_wrapper, palm_size)
+            if is_target_phys_valid:
+                target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
+                target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
+                
+                # If target is reasonably strong physically AND model acknowledges it slightly (>15% confidence)
+                # OR if it's a perfect physical match while the other has NO fingerprint override
+                if target_conf > 15.0 or (stable_name not in MUDRA_FINGERPRINTS):
+                    print(f"[PRIORITY] Overriding {stable_name} with {target_key} due to physical match.")
+                    stable_name = target_key
+                    smooth_conf = max(smooth_conf, target_conf)
+
         accuracy_cap = 100.0
+        corrections = []  # Initialize before any gate that may insert into it
+        suchi_pre_correction = None
         if stable_name == "suchi":
             # Mandate tight curls for Middle, Ring, Pinky
             bad_fingers = []
@@ -1620,7 +1713,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                     bad_fingers.append(f.split("_")[0])
             if bad_fingers:
                 accuracy_cap = 40.0
-                corrections.insert(0, f"Tuck your {', '.join(bad_fingers)} fingers tighter into your palm.")
+                suchi_pre_correction = f"Tuck your {', '.join(bad_fingers)} fingers tighter into your palm."
 
         # --- DYNAMIC FEEDBACK PRIORITY (Natural Teacher Layer) ---
         is_phys_valid, struct_error = verify_mudra_identity(stable_name, finger_angles, lm_wrapper, palm_size)
@@ -1636,15 +1729,34 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         else:
             # Identity check passed, fetch joint-level refinements
             corrections, art_accuracy, current_finger_colors, problematic_joints = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
+            # Apply the pre-computed Suchi gate correction if it was set
+            if suchi_pre_correction:
+                corrections.insert(0, suchi_pre_correction)
         
         # Identity Gate 2: ML Model Mismatch (Natural Teacher Logic)
         target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
         target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
         
-        is_wrong_identity = (target_key and stable_name.lower().strip() != target_key and smooth_conf > 45)
-        is_too_weak = (target_key and stable_name.lower().strip() != target_key and target_conf < (smooth_conf * 0.5))
+        clean_stable = clean_mudra_name(stable_name)
+        is_wrong_identity = (target_key and clean_stable != target_key and smooth_conf > 45)
+        is_too_weak = (target_key and clean_stable != target_key and target_conf < (smooth_conf * 0.5))
         
         if is_wrong_identity or is_too_weak:
+            # [PHASE 19] Relaxed Identity Gate: If ML is very confident, don't zero out completely
+            if smooth_conf > 72:
+                # Soft Warning: Keep detection but show Adjustment
+                status = "Adjusting..."
+                final_msg = f"Wrong mudra — showing {stable_name.capitalize()} instead of {target_key.capitalize()}" if (target_key and clean_stable != target_key) else (wrong_msg if wrong_msg else "Adjust your form slightly")
+                
+                return {
+                    "detected": True, "name": stable_name,
+                    "confidence": round(smooth_conf, 1),
+                    "accuracy":   round(smooth_conf * 0.7, 1), # Partial credit
+                    "corrections": [final_msg],
+                    "status": status, "is_stable": True,
+                    "feedback": final_msg  # Frontend needs this for voice logic
+                }
+
             # --- Natural Teacher Layer: Absolute Priority ---
             # If the wrong mudra is detected, ONLY say "You are showing X. Please switch to Y."
             actual_label = stable_name.capitalize()
@@ -1660,15 +1772,13 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         # Final accuracy calculation
         total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
         total_accuracy = min(total_accuracy, accuracy_cap)
-            
-        # Final accuracy calculation
-        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
-        total_accuracy = min(total_accuracy, accuracy_cap)
 
-        # 2. Layer 7 Noise Filter: Hard floor at 75% for "Learn" mode
-        if target_key and total_accuracy < 75.0:
+        # Soft noise gate: only zero out truly random noise below 30%
+        # NOTE: The frontend's ACCURACY_THRESHOLD (75%) already gates the success trigger.
+        # We do NOT need a 75% floor here — it only hides feedback from the user.
+        if target_key and total_accuracy < 30.0:
             total_accuracy = 0.0
-        elif total_accuracy < 65.0:
+        elif total_accuracy < 20.0:
             total_accuracy = 0.0
 
         # --- STATE RESET & ASYMMETRIC SMOOTHING (GLOBAL REGISTRY) ---
@@ -1696,11 +1806,12 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         st["prev_display"] = st["smooth_acc"]
         total_accuracy = float(round(st["smooth_acc"], 1))
 
-        # Layer 7 Noise Filter: Hard floor at 40% (allows earlier feedback)
-        if total_accuracy < 40.0:
+        # Post-smoothing noise gate
+        if total_accuracy < 25.0:
             total_accuracy = 0.0
 
-        print(f"[DEBUG] Final Accuracy: {total_accuracy:.1f} (Geom: {art_accuracy:.1f}, ML: {smooth_conf:.1f})")
+        raw_geom_pct = max(0.0, 100.0 - (art_accuracy / 10.0)) if art_accuracy > 0 else 0.0
+        print(f"[DEBUG] Final Accuracy: {total_accuracy:.1f} | ML Conf: {smooth_conf:.1f}% | Geom Score: {raw_geom_pct:.1f}%")
 
         # [PHASE 13] RESULT FALLBACK (Single Hand Update)
         target_key = target_mudra.lower().strip()
@@ -1736,10 +1847,14 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             "Try Again — adjust your hand position."
         )
 
-        # Flicker filter
-        detection_history.append(stable_name)
-        if len(detection_history) == 3 and len(set(detection_history)) == 1:
-            last_stable_name = stable_name
+        # --- DIFFERENTIATION GATE: Silence on Success ---
+        # If the user is showing the correct mudra with high accuracy (>85%), 
+        # we clear all corrections to ensure "Silence on Success".
+        if target_key and stable_name.lower().strip() == target_key.lower().strip() and total_accuracy > 85.0:
+            print(f"[GATE] Silence on Success for {target_key} (Acc: {total_accuracy}%)")
+            corrections = []
+            # Optionally add a success message that the frontend can use for display without voice
+            feedback = "Perfect! Hold it right there."
 
         final_name = last_stable_name if last_stable_name else stable_name
 
@@ -1755,8 +1870,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             "landmarks":         lm_to_json(lm_list),
             "hold_progress":     hold_progress,
             "hold_state":        "evaluating" if held else ("holding" if hold_progress > 20 else "idle"),
-            "isWrongMudra":      is_wrong_mudra,
-            "actualMudra":       actual_mudra,
+            "isWrongMudra":      is_wrong_identity or is_too_weak,
+            "actualMudra":       stable_name,
             # Extra field so frontend can show both detected and target names clearly
             "detected_mudra_name": stable_name,
             "target_mudra_name":   target_key,
@@ -1945,17 +2060,25 @@ def reset_registry():
     to ensure fresh detection for a new mudra.
     """
     global SMOOTHING_REGISTRY, last_good_data
-    SMOOTHING_REGISTRY["single"] = {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""}
-    SMOOTHING_REGISTRY["double"] = {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""}
+    # Use standard initialization to avoid key errors in run_madm
+    SMOOTHING_REGISTRY = {
+        "single": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""},
+        "double": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""}
+    }
     last_good_data.clear()
     
     # Reset other stability buffers
-    global ema_probs, ema_landmarks, stable_mudra, stable_count
+    global ema_probs, ema_landmarks, stable_mudra, stable_count, last_stable_name
     ema_probs = None
     ema_landmarks = None
     stable_mudra = ""
     stable_count = 0
+    last_stable_name = ""
     
+    # We could also clear deques here if they were global, but they are localized to run_madm.
+    # The smooth_acc reset is the most critical part for accuracy jumping issues.
+    
+    print("[RESET] Smoothing registry and stability buffers cleared for new session.")
     return jsonify({"status": "reset", "message": "Smoothing registry flushed"})
 
 @app.route('/video_feed')
@@ -2590,7 +2713,7 @@ def detect_double_landmarks():
         body       = request.get_json(force=True)
         left_lms   = body.get('left_landmarks',  [])
         right_lms  = body.get('right_landmarks', [])
-        target     = body.get('targetMudra', '').lower().strip()
+        target     = clean_mudra_name(body.get('targetMudra', ''))
 
         # Normalise frontend names to model class names
         target = FRONTEND_TO_MODEL.get(target, target)
@@ -2645,7 +2768,8 @@ def detect_double_landmarks():
         geo_score = compute_double_geometric_score(target, right_lms, left_lms) if target else 0.0
 
         if target:
-            if name == target:
+            clean_ml_name = clean_mudra_name(name)
+            if clean_ml_name == target:
                 # ML agrees: blend ML (60 %) + geometry (40 %) [Ref 4]
                 raw_accuracy = round(min(conf * 0.60 + geo_score * 0.40, 100.0), 1)
 

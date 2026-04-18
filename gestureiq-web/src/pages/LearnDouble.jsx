@@ -674,15 +674,15 @@ export default function LearnDouble() {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
                             
                             let voiceMsg = lang === 'ta'
-                                ? `தவறான வடிவம். ஒருமுறை சரிபார்க்கவும்.`
-                                : lang === 'hi'
-                                    ? `गलत मुद्रा। अपनी उंगलियों को ठीक करें।`
-                                    : `Wrong formation. Please check your hand positions.`;
+                                ? `தவறான வடிவம். காட்டுவது ${getMudraName(lang, detectedName)}.`
+                                : `Wrong mudra. Showing ${detectedName}.`;
 
+                            /* SILENCED: fold your fingers like that...
                             if (fingerCorr.length > 0) {
                                 voiceMsg += ` ${translate(lang, fingerCorr[0])}`;
                                 lastCorrVoiceRef.current = { text: fingerCorr[0], time: now };
                             }
+                            */
                             announce.raw(voiceMsg, 3);
                         }
                     } else if (fingerCorr.length > 0) {
@@ -695,7 +695,7 @@ export default function LearnDouble() {
                             
                             if (currentCorr !== prev.text || (now - prev.time) > 4000) {
                                 lastCorrVoiceRef.current = { text: currentCorr, time: now };
-                                announce.raw(translate(lang, currentCorr), 2);
+                                // announce.raw(translate(lang, currentCorr), 2); // SILENCED: fold your fingers like that...
                             }
                         }
                     } else if (locallyStable && data.detected && accuracy >= 72) {
