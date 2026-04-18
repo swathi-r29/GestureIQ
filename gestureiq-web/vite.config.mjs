@@ -41,8 +41,9 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true, 
       cors: true,
       hmr: {
-        clientPort: 443,
         host: hmrHost,
+        protocol: hmrHost === 'localhost' ? 'ws' : 'wss',
+        clientPort: hmrHost === 'localhost' ? 5173 : 443,
       },
       headers: {
         'ngrok-skip-browser-warning': 'true',

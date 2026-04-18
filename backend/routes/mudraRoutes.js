@@ -13,15 +13,38 @@ router.get('/', auth, async (req, res) => {
 
         const handType = type.toLowerCase() === 'single' ? 'single' : 'double';
         
-        const mudras = await MudraContent.find({ handType })
-            .select('mudraName')
-            .sort({ mudraName: 1 });
+        let formatted = [];
+        const { isLocalMode, readLocalData } = require('../utils/dbFallback');
 
-        // Map to { name, folder } format expected by frontend
-        const formatted = mudras.map(m => ({
-            name: m.mudraName.charAt(0).toUpperCase() + m.mudraName.slice(1),
-            folder: m.mudraName.toLowerCase()
-        }));
+        if (isLocalMode()) {
+            console.log(`[MudraRoute] Service unreachable, falling back to local JSON for ${handType} mudras`);
+            const data = readLocalData('mudras');
+            // Check if it's a map (db_check_result format)
+            if (typeof data === 'object' && !Array.isArray(data)) {
+                formatted = Object.keys(data)
+                    .filter(key => data[key].handType === handType)
+                    .map(key => ({
+                        name: key.charAt(0).toUpperCase() + key.slice(1),
+                        folder: key.toLowerCase()
+                    }));
+            } else {
+                formatted = data
+                    .filter(m => m.handType === handType)
+                    .map(m => ({
+                        name: m.mudraName.charAt(0).toUpperCase() + m.mudraName.slice(1),
+                        folder: m.mudraName.toLowerCase()
+                    }));
+            }
+        } else {
+            const mudras = await MudraContent.find({ handType })
+                .select('mudraName')
+                .sort({ mudraName: 1 });
+
+            formatted = mudras.map(m => ({
+                name: m.mudraName.charAt(0).toUpperCase() + m.mudraName.slice(1),
+                folder: m.mudraName.toLowerCase()
+            }));
+        }
 
         res.json(formatted);
     } catch (err) {

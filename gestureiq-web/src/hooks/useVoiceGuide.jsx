@@ -291,6 +291,11 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 body: JSON.stringify({ text: message, lang: langRef.current }),
                 signal: controller.signal
             });
+            
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}`);
+            }
+
             const data = await response.json();
 
             if (data.audio) {

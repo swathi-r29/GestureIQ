@@ -86,6 +86,7 @@ const connectDB = async () => {
         console.log('✅ MongoDB Connected');
     } catch (err) {
         console.error('❌ MongoDB Connection Error:', err.message);
+        console.warn('⚡ RESILIENCE MODE: The backend will serve data from local JSON files.');
     }
 };
 
@@ -200,7 +201,16 @@ io.on('connection', (socket) => {
         
         // Fetch full details for the toast/voice
         try {
-            const mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${target}$`, 'i') } });
+            let mudra;
+            const { isLocalMode, getLocalMudra } = require('./utils/dbFallback');
+            
+            if (isLocalMode()) {
+                console.log(`[Socket] Resilience Mode: Fetching ${target} from local JSON`);
+                mudra = getLocalMudra(target);
+            } else {
+                mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${target}$`, 'i') } });
+            }
+
             io.to(classId).emit('mudra_changed', {
                 newMudra: target,
                 name: mudra?.mudraName || target,
@@ -226,7 +236,15 @@ io.on('connection', (socket) => {
         
         if (targetMudra) {
             try {
-                const mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${targetMudra}$`, 'i') } });
+                let mudra;
+                const { isLocalMode, getLocalMudra } = require('./utils/dbFallback');
+                
+                if (isLocalMode()) {
+                    mudra = getLocalMudra(targetMudra);
+                } else {
+                    mudra = await MudraContent.findOne({ mudraName: { $regex: new RegExp(`^${targetMudra}$`, 'i') } });
+                }
+
                 io.to(classId).emit('mudra_changed', {
                     newMudra: targetMudra,
                     name: mudra?.mudraName || targetMudra,

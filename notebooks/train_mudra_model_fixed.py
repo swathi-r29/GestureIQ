@@ -23,13 +23,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
 # ── Paths ─────────────────────────────────────────────────────────────────
-DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
-OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-MODEL_PATH  = "../models/mudra_model.pkl"
+#DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
+#OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+#MODEL_PATH  = "../models/mudra_model.pkl"
 
-#DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
-#OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-#MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
+DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
+OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
 # ── Balance settings ──────────────────────────────────────────────────────
 MIN_SAMPLES = 50 # drop mudras with fewer samples (vyaghra=30, palli=25 → removed)
 MAX_SAMPLES = 700   # cap overrepresented mudras (katakamukha 1572 → 700)
@@ -107,16 +107,16 @@ def extract_all_landmarks():
             if f.lower().endswith(('.jpg', '.jpeg', '.png')):
                 tasks.append((os.path.join(mudra_path, f), mudra_name))
 
-    print(f"[extract] {len(tasks)} images → multiprocessing with {cpu_count()} cores")
+    print(f"[extract] {len(tasks)} images -> multiprocessing with {cpu_count()} cores")
     all_rows = []
     with Pool(processes=cpu_count()) as pool:
         for i, rows in enumerate(pool.imap_unordered(process_image_both_hands, tasks)):
             all_rows.extend(rows)
             if i % 200 == 0:
-                print(f"  {i}/{len(tasks)} images … {len(all_rows)} rows so far")
+                print(f"  {i}/{len(tasks)} images ... {len(all_rows)} rows so far")
 
     header = ['mudra_name'] + [f'{c}{i}' for i in range(21) for c in ('x','y','z')] + ['hand_label']
-    print(f"[extract] Saving {len(all_rows)} rows → {OUTPUT_CSV}")
+    print(f"[extract] Saving {len(all_rows)} rows -> {OUTPUT_CSV}")
     with open(OUTPUT_CSV, 'w', newline='') as f:
         csv.writer(f).writerow(header)
         csv.writer(f).writerows(all_rows)
@@ -227,5 +227,5 @@ if __name__ == '__main__':
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, 'wb') as f:
         pickle.dump(model, f)
-    print(f"\n✅ Model saved → {MODEL_PATH}")
+    print(f"\nModel saved -> {MODEL_PATH}")
     print("Restart Flask to load the new model.")

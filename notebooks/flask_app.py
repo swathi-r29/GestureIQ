@@ -48,7 +48,11 @@ if os.path.exists(mudra_model_path):
     try:
         with open(mudra_model_path, "rb") as f:
             model = pickle.load(f)
-        print(f"[INFO] Mudra model loaded from {mudra_model_path}")
+        feat_count = getattr(model, 'n_features_in_', 'unknown')
+        print(f"[INFO] Mudra model loaded from: {os.path.abspath(mudra_model_path)}")
+        print(f"[INFO] Model expects {feat_count} features.")
+        if feat_count != 82:
+            print(f"[CRITICAL] Model mismatch! Found {feat_count}, expected 82. Code sync required or re-train.")
     except Exception as e:
         print(f"[ERROR] Failed to load mudra model: {e}")
 else:
@@ -479,8 +483,8 @@ MUDRA_FINGERPRINTS = {
 
 def get_finger_state(angle, is_thumb=False):
     # Adaptive threshold: Thumb is naturally more curved even when "straight"
-    straight_limit = 130 if is_thumb else 150
-    curled_limit   = 100 if is_thumb else 90
+    straight_limit = 120 if is_thumb else 125
+    curled_limit   = 100 if is_thumb else 115
     
     if angle > straight_limit: return 1   # Fully Straight
     if angle < curled_limit:   return 0   # Fully Curled
@@ -513,7 +517,10 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
             if state == 2 and actual[i] == 1: continue 
             if state == 0 and actual[i] == 2:
                 if i == 0: continue # Relaxed thumb: Curved = Curled
-                if mudra == "ardhapataka" and i in (3, 4): continue # Relaxed pinky/ring for Ardhapataka
+                # [FIXED] Removed relaxed pinky/ring check for Ardhapataka to allow strict differentiation from Tripataka
+            
+            # [FIXED] Relaxed pinky for Mayura to prevent False Vetoes from minor tilts
+            if mudra == "mayura" and i == 4 and actual[i] == 2: continue
             
             # Veto
             return False, f"Wrong mudra — Your {finger_names[i]} finger is in the wrong position for {ml_prediction.capitalize()}."
@@ -539,7 +546,8 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
     if mudra == "suchi":
         index_tip_y = lm_wrapper[8].y
         middle_mcp_y = lm_wrapper[9].y
-        if actual[1] != 1 or index_tip_y > middle_mcp_y:
+        # [CALIBRATED] Added 0.10 buffer (increased from 0.05) for extreme hand tilts toward camera
+        if actual[1] != 1 or index_tip_y > (middle_mcp_y + 0.10):
             return False, "Wrong mudra — Your index finger must be pointing upwards for Suchi."
         
     # Chandrakala MUST have Index UP and Middle DOWN
@@ -584,11 +592,12 @@ SKIP_CORRECTION_FINGERS = {
     "shikhara":     {"index", "middle", "ring", "pinky"},
     "kapittha":     {"middle", "ring", "pinky"},
     "tamrachuda":   {"index", "middle", "ring"},
-    "suchi":        {"thumb"},
+    "suchi":        {"thumb", "middle", "ring", "pinky"},
     "shukatunda":   {"thumb", "ring"},
     "trishula":     {"thumb", "pinky"},
     "chandrakala":  {"middle", "ring", "pinky"},
     "pataka":       set(),
+    "mayura":       {"index", "middle", "pinky"},
     "ardhachandra": {"thumb"},
     "tripataka":    {"thumb"},
     "ardhapataka":  {"thumb"},
@@ -609,7 +618,9 @@ SKIP_CORRECTION_FINGERS = {
 def dist_lm(lm, i, j, palm_size=1.0):
     p1 = [lm[i].x, lm[i].y, lm[i].z]
     p2 = [lm[j].x, lm[j].y, lm[j].z]
-    return get_distance(p1, p2) / max(palm_size, 1e-6)
+    # [FIXED] Robust palm scaling fallback to prevent flickering
+    safe_palm = palm_size if palm_size > 0.01 else 1.0
+    return get_distance(p1, p2) / safe_palm
 
 def get_finger_angles_dict(landmarks):
     # landmarks[0] is wrist
@@ -1083,7 +1094,8 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                     deviations.append((180, f"Curl your {f} finger FULLY inward for Kartarimukha"))
 
         elif mudra_key == "mayura":
-            if dist_lm(lm, 4, 16, palm_size) > 0.38:
+            # [CALIBRATED] Loosened from 0.50 to 0.55 for final "Elastic" vibe
+            if dist_lm(lm, 4, 16, palm_size) > 0.55:
                 total_error += 100
                 deviations.append((100, "Bring your thumb tip to touch your ring fingertip"))
             for f in ["index", "middle", "pinky"]:
@@ -1120,10 +1132,11 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
                 deviations.append((40, "Open your fingers slightly — not a tight fist for Kapittha"))
 
         elif mudra_key == "suchi":
-            if current_angles.get("thumb", 110) > 140:
+            # [CALIBRATED] Loosened thresholds from 140/125 to 155/145 to allow naturally relaxed thumb
+            if current_angles.get("thumb", 110) > 155:
                 total_error += 600
                 deviations.append((600, "Tuck your thumb inward — do not extend it for Suchi"))
-            elif current_angles.get("thumb", 110) > 125:
+            elif current_angles.get("thumb", 110) > 145:
                 total_error += 200
                 deviations.append((200, "Tuck your thumb tighter against your hand"))
 
@@ -1424,14 +1437,38 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         smooth_lm    = [LM(smoothed_arr[i, 0], smoothed_arr[i, 1], smoothed_arr[i, 2])
                         for i in range(21)]
 
-        features = extract_features(smooth_lm, label=label)
-        if len(features) != 82:
-            print(f"[ERROR] Feature size mismatch: Expected 82, got {len(features)}")
-            return {"detected": False, "feedback": "Feature error"}
+        best_raw_probs = None
+        best_raw_conf  = -1.0
+        best_raw_name  = ""
+        best_hand_label = "Right"
 
-        raw_probs  = model.predict_proba([features])[0]
-        raw_conf   = float(max(raw_probs)) * 100
-        print(f"[DEBUG] ML Predicted: {model.classes_[np.argmax(raw_probs)]} ({raw_conf:.1f}%)")
+        # [DEEP STABILIZATION] Try both handedness orientations and pick the most confident one
+        # This aligns Learn mode logic with Detect mode logic for absolute robustness.
+        for hand_label in ('Right', 'Left'):
+            try:
+                feats = extract_features(smooth_lm, label=hand_label)
+                if len(feats) != 82: continue
+                
+                probs = model.predict_proba([feats])[0]
+                top_i = int(np.argmax(probs))
+                conf  = float(probs[top_i]) * 100.0
+                
+                if conf > best_raw_conf:
+                    best_raw_conf  = conf
+                    best_raw_name  = str(model.classes_[top_i])
+                    best_raw_probs = probs
+                    best_hand_label = hand_label
+            except Exception as e:
+                print(f"[DEBUG] run_madm orientation error ({hand_label}): {e}")
+                continue
+        
+        if best_raw_probs is None:
+            return {"detected": False, "feedback": "Prediction error"}
+
+        raw_probs = best_raw_probs
+        raw_conf  = best_raw_conf
+        raw_name  = best_raw_name
+        print(f"[DEBUG] ML Predicted: {raw_name} ({raw_conf:.1f}%) [Orientation: {best_hand_label}]")
 
         raw_angles    = get_finger_angles_dict(smooth_lm)
         angle_buffer.append(raw_angles)
@@ -1453,485 +1490,61 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p, min_frames_override=min_frames)
 
         # ── HARD ALAPADMA STRUCTURAL VETO (post-stability) ───────────────────
-        # Must run BEFORE HYBRID logic, regardless of EMA confidence level.
-        # Alapadma requires ALL 5 fingers extended AND spread wide.
-        # If ring/pinky are folded (<110°) OR fingertips aren't spread, veto.
         if stable_name == "alapadma":
             _ring_v  = finger_angles.get("ring",  180)
             _pinky_v = finger_angles.get("pinky", 180)
-            _spread  = dist_lm(lm_wrapper, 8, 20, palm_size)  # index-tip to pinky-tip
+            _spread  = dist_lm(lm_wrapper, 8, 20, palm_size)
             if _ring_v < 110 or _pinky_v < 110 or _spread < 0.40:
-                print(f"[HARD-VETO-ALP] ring={_ring_v:.0f}° pinky={_pinky_v:.0f}° spread={_spread:.2f} → rejected")
-                # Fall back to next-best ML class that isn't alapadma
                 _sorted = np.argsort(ema_p)[::-1]
                 for _i in _sorted:
-                    _cname = str(model.classes_[_i])
-                    if _cname != "alapadma":
-                        stable_name = _cname
+                    if str(model.classes_[_i]) != "alapadma":
+                        stable_name = str(model.classes_[_i])
                         smooth_conf = float(ema_p[_i] * 100)
                         is_stable   = False
                         break
 
-        # Dynamic confidence floor
-        conf_floor = 35 if (target_mudra or geom_acc > 50) else 25
-
-        if raw_conf < conf_floor:
-            eval_name = target_key if target_key else stable_name
-            active_corrections, display_acc = [], 0.0
-            if eval_name in MUDRA_REFERENCE_ANGLES:
-                active_corrections, display_acc, current_finger_colors, problematic_joints = get_corrections(eval_name, finger_angles, lm_wrapper, palm_size)
-            else:
-                current_finger_colors = None
-
-            # Wrong mudra check — use stable_name after EMA
-            clean_stable = clean_mudra_name(stable_name)
-            is_wrong = (target_key and clean_stable != target_key and
-                        (smooth_conf > 30 or raw_conf > 30))
-            if is_wrong:
-                wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_key.capitalize()}"
-                active_corrections = [c for c in active_corrections if not c.startswith("Wrong mudra")]
-                active_corrections.insert(0, wrong_msg)
-                display_acc = 0.0
-
-            return {
-                "detected":    True,
-                "name":        stable_name if not target_key else target_key,
-                "confidence":  round(raw_conf, 1),
-                "status":      "Refining Pose",
-                "accuracy":    round(display_acc, 1),
-                "corrections": active_corrections if active_corrections else ["Hold steady", "Focus on finger alignment"],
-                "meaning":     MUDRA_MEANINGS.get(target_key or stable_name, ""),
-                "is_stable":   False,
-                "landmarks":   lm_to_json(lm_list),
-                "hold_progress": 0,
-                "hold_state":  "idle",
-                "finger_colors": current_finger_colors,
-            }
-
-        print(f"[INFO] Mudra: {stable_name}, Conf: {smooth_conf:.2f}")
-
-        # HYBRID PRIORITY (Conflict Resolution)
-        is_conflict = (target_key and stable_name != target_key and smooth_conf > 50)
-
-        if target_key and geom_acc > 92 and not is_conflict:
-            if stable_name != target_key:
-                print(f"[HYBRID] Force: ML={stable_name}({smooth_conf:.1f}%) -> {target_key}({geom_acc:.1f}%)")
-            stable_name = target_key
-            smooth_conf = max(smooth_conf, geom_acc)
-            is_stable   = True
-        else:
-            # BROAD GEOMETRIC SWEEP (For Free Practice Accuracy)
-            best_geom_acc  = 0
-            best_geom_name = ""
-            geom_scores    = {}
-            
-            if target_key:
-                # [TARGET ISOLATION] Skip the sweep. Only calculate for the target.
-                _, acc, _, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
-                geom_scores[target_key] = acc
-                best_geom_acc = acc
-                best_geom_name = target_key
-            else:
-                for m_name in MUDRA_REFERENCE_ANGLES.keys():
-                    _, acc, _, _ = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
-                    geom_scores[m_name] = acc
-                    if acc > best_geom_acc:
-                        best_geom_acc  = acc
-                        best_geom_name = m_name
-
-            # GEOM-SWEEP override: only when ML is very weak AND geom winner is clearly
-            # superior to the ML candiate's own geometry score. Prevents alapadma from
-            # always winning (it has loose constraints → scores 100% for any open hand).
-            ml_geom_for_stable = geom_scores.get(stable_name, 0)
-            geom_lead = best_geom_acc - ml_geom_for_stable
-            if (not target_key and best_geom_acc > 95 and smooth_conf < 40 and
-                    geom_lead > 20 and best_geom_name != stable_name):
-                print(f"[GEOM-SWEEP] Overriding ML={stable_name}({smooth_conf:.1f}%) with GEOM={best_geom_name}({best_geom_acc:.1f}%, lead={geom_lead:.0f}%)")
-                stable_name = best_geom_name
-                smooth_conf = max(smooth_conf, best_geom_acc * 0.90)
-                is_stable   = True
-
-            elif smooth_conf < 60:
-                print(f"DEBUG: ML={stable_name}({smooth_conf:.1f}%) | GeomBest={best_geom_name}({best_geom_acc:.1f}%)")
-                ring_angle = finger_angles.get("ring", 175)
-
-                if stable_name == "pataka" and ring_angle < 110:
-                    tri_score = geom_scores.get("tripataka",   0)
-                    ard_score = geom_scores.get("ardhapataka", 0)
-                    kng_score = geom_scores.get("kangula",     0)
-                    best_alt_name, best_alt = max(
-                        [("tripataka", tri_score), ("ardhapataka", ard_score), ("kangula", kng_score)],
-                        key=lambda x: x[1]
-                    )
-                    if best_alt > 45:
-                        stable_name = best_alt_name
-                        smooth_conf = max(smooth_conf, best_alt * 0.85)
-                        is_stable   = True
-
-                elif stable_name == "tripataka" and ring_angle > 150:
-                    pat_score = geom_scores.get("pataka", 0)
-                    if pat_score > 45:
-                        stable_name = "pataka"
-                        smooth_conf = max(smooth_conf, pat_score * 0.85)
-                        is_stable   = True
-
-                is_curled_3 = (finger_angles.get("middle", 180) < 110 and
-                               finger_angles.get("ring",   180) < 110 and
-                               finger_angles.get("pinky",  180) < 110)
-                index_dist      = dist_lm(lm_wrapper, 8, 0, palm_size)
-                thumb_dist      = dist_lm(lm_wrapper, 4, 0, palm_size)
-                
-                # Absolute Fist Check (Loosened to 2.8 for inclusive detection in double-hand mudras)
-                total_fist_dist = sum([dist_lm(lm_wrapper, t, 0, palm_size) for t in [8, 12, 16, 20]])
-                is_fist_shape   = total_fist_dist < 2.8 
-                
-                signature_force = False
-
-                if is_fist_shape and not target_key:
-                    stable_name     = "mushti"
-                    smooth_conf     = 95.0
-                    is_stable       = True
-                    signature_force = True
-                
-                elif is_curled_3 and index_dist > 0.45:
-                    if thumb_dist > 0.45:
-                        stable_name     = "chandrakala"
-                        smooth_conf     = max(smooth_conf, 92.0)
-                        is_stable       = True
-                        signature_force = True
-                    else:
-                        stable_name     = "suchi"
-                        smooth_conf     = max(smooth_conf, 92.0)
-                        is_stable       = True
-                        signature_force = True
-
-                # --- ALAPADMA STRUCTURAL VETO ---
-                # Alapadma requires ALL 5 fingers extended and spread.
-                # If ring or pinky is folded (< 110°), it is anatomically impossible.
-                # This prevents the open-hand bias from overriding mudras like
-                # kartarimukha, suchi, chandrakala, mushti, shikhara.
-                if best_geom_name == "alapadma":
-                    ring_ang  = finger_angles.get("ring",  180)
-                    pinky_ang = finger_angles.get("pinky", 180)
-                    spread    = dist_lm(lm_wrapper, 8, 20, palm_size)  # index-tip to pinky-tip
-                    if ring_ang < 110 or pinky_ang < 110 or spread < 0.45:
-                        # Strip alapadma from geom_scores so the next best wins
-                        geom_scores["alapadma"] = 0
-                        best_geom_acc  = max((v for k, v in geom_scores.items() if k != "alapadma"), default=0)
-                        best_geom_name = max((k for k in geom_scores if k != "alapadma"), key=lambda k: geom_scores[k], default=stable_name)
-                        print(f"[VETO-ALAPADMA] ring={ring_ang:.0f}° pinky={pinky_ang:.0f}° spread={spread:.2f} → vetoed, next best: {best_geom_name}({best_geom_acc:.0f}%)")
-
-                if not signature_force:
-                    is_fist_mudra = best_geom_name in ["mushti", "shikhara"]
-                    ml_is_open    = stable_name in ["pataka", "hamsapaksha", "sarpashira",
-                                                    "ardhapataka", "chandrakala"]
-                    # Raised threshold: only override ML when geom winner has a clear LEAD
-                    # over the ML candidate's own geom score (prevents open-hand bias)
-                    ml_geom_score = geom_scores.get(stable_name, 0)
-                    geom_lead     = best_geom_acc - ml_geom_score
-                    if ((best_geom_acc > 95 and smooth_conf < 35 and geom_lead > 25) or
-                            (is_fist_mudra and ml_is_open and best_geom_acc > 80)):
-                        stable_name = best_geom_name
-                        smooth_conf = max(smooth_conf, best_geom_acc * 0.88)
-                        is_stable   = True
-
-                # --- TARGET LOCK CHECK ---
-                # If we are in Learn mode (target_key is set) and the user is attempting the target mudra 
-                # (target geometric accuracy is decent >= 60%), force the prediction to the target mudra.
-                # However, if another mudra flawlessly matches (e.g. Pataka = 98%) while the target is barely passing (66%), DO NOT lock.
-                if target_key:
-                    target_geom_acc = geom_scores.get(target_key, 0)
-                    # [PHASE 18] Tighten Target Lock: reduce gap from 25% to 15%
-                    if target_geom_acc >= 70 and (best_geom_acc - target_geom_acc < 15):
-                        stable_name = target_key
-                        smooth_conf = max(smooth_conf, target_geom_acc * 0.88)
-                        is_stable   = True
-
-        if raw_conf < 20 and smooth_conf < 25:
-            return {
-                "detected": False, "feedback": "Show your hand more clearly",
-                "name": stable_name, "confidence": round(smooth_conf, 1),
-                "accuracy": 0, "corrections": [], "meaning": "",
-                "is_stable": False, "landmarks": lm_to_json(lm_list),
-                "hold_progress": 0, "hold_state": "idle",
-            }
-
-        eval_mudra = target_key if target_key else stable_name
-        
-        # --- Task 1: Velocity Gating (Stability Engine) ---
-        wrist = lm_list[0]
-        WRIST_HISTORY.append((wrist.x, wrist.y))
-        is_moving = False
-        if len(WRIST_HISTORY) == WRIST_HISTORY.maxlen:
-            old_w = WRIST_HISTORY[0]
-            velocity = math.sqrt((wrist.x - old_w[0])**2 + (wrist.y - old_w[1])**2)
-            if velocity > 0.045: # Threshold for "Stillness"
-                is_moving = True
-
-        if is_moving:
-            return {
-                "detected":    True,
-                "name":        stable_name,
-                "confidence":  round(smooth_conf, 1),
-                "status":      "Stabilizing...",
-                "accuracy":    0.0,
-                "corrections": ["Hold your hand still for detection"],
-                "meaning":     MUDRA_MEANINGS.get(stable_name, ""),
-                "is_stable":   False,
-                "landmarks":   lm_to_json(lm_list),
-            }
-
-        # --- Task 2: Structural Conflict Grouping (Look-Alike Resolution) ---
-        # Pataka vs Ardhachandra (Thumb position)
-        if stable_name == "pataka":
-            # Check Thumb Tip (4) distance from Index MCP (5)
-            thumb_gap = dist_lm(lm_wrapper, 4, 5, palm_size)
-            if thumb_gap > 0.38: # Wide thumb
-                print(f"[CONFLICT] Pataka -> Ardhachandra (Gap: {thumb_gap:.2f})")
-                stable_name = "ardhachandra"
-        
-        # Suchi vs Chandrakala (Thumb extension)
-        elif stable_name == "suchi":
-            thumb_angle = finger_angles.get("thumb", 180)
-            if thumb_angle > 150: # Extended thumb
-                print(f"[CONFLICT] Suchi -> Chandrakala (Thumb: {thumb_angle:.1f})")
-                stable_name = "chandrakala"
-
-        # Tripataka vs Ardhapataka (Pinky vs Ring curl)
-        elif stable_name == "tripataka":
-            pinky_angle = finger_angles.get("pinky", 180)
-            if pinky_angle < 110: # Curled pinky
-                print(f"[CONFLICT] Tripataka -> Ardhapataka (Pinky: {pinky_angle:.1f})")
-                stable_name = "ardhapataka"
-        
-        # Sarpashira vs Chandrakala (Middle finger curl)
-        elif stable_name == "sarpashira":
-            middle_angle = finger_angles.get("middle", 180)
-            if middle_angle < 110: # Curled middle
-                print(f"[CONFLICT] Sarpashira -> Chandrakala (Middle: {middle_angle:.1f})")
-                stable_name = "chandrakala"
-
-        # --- Task 3: Physiological Hard-Gates ---
-        # --- TARGET PRIORITY GATE (Fix for Suchi/Tamrachuda bias) ---
-        # If the ML model is confused but the physical fingerprint matches the target perfectly,
-        # we override the prediction to favor the student's current goal.
-        if target_key and stable_name != target_key:
-            is_target_phys_valid, _ = verify_mudra_identity(target_key, finger_angles, lm_wrapper, palm_size)
-            if is_target_phys_valid:
-                target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
-                target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
-                
-                # If target is reasonably strong physically AND model acknowledges it slightly (>15% confidence)
-                # OR if it's a perfect physical match while the other has NO fingerprint override
-                if target_conf > 15.0 or (stable_name not in MUDRA_FINGERPRINTS):
-                    print(f"[PRIORITY] Overriding {stable_name} with {target_key} due to physical match.")
-                    stable_name = target_key
-                    smooth_conf = max(smooth_conf, target_conf)
-
-        accuracy_cap = 100.0
-        corrections = []  # Initialize before any gate that may insert into it
-        suchi_pre_correction = None
-        if stable_name == "suchi":
-            # Mandate tight curls for Middle, Ring, Pinky
-            bad_fingers = []
-            for f in ["middle_pip", "ring_pip", "pinky_pip"]:
-                if finger_angles.get(f, 180) > 100:
-                    bad_fingers.append(f.split("_")[0])
-            if bad_fingers:
-                accuracy_cap = 40.0
-                suchi_pre_correction = f"Tuck your {', '.join(bad_fingers)} fingers tighter into your palm."
-
-        # --- DYNAMIC FEEDBACK PRIORITY (Natural Teacher Layer) ---
-        is_phys_valid, struct_error = verify_mudra_identity(stable_name, finger_angles, lm_wrapper, palm_size)
-        
-        # Identity Gate 1: Structural Veto
-        if not is_phys_valid:
-            print(f"[VETO] {stable_name} failed structure: {struct_error}")
-            accuracy_cap = 0.0
-            art_accuracy = 0.0
-            corrections = [struct_error]
-            problematic_joints = []
-            current_finger_colors = {k: "red" for k in finger_angles.keys()} # Highlight all for "Stop"
-        else:
-            # Identity check passed, fetch joint-level refinements
-            corrections, art_accuracy, current_finger_colors, problematic_joints = get_corrections(eval_mudra, finger_angles, lm_wrapper, palm_size)
-            # Apply the pre-computed Suchi gate correction if it was set
-            if suchi_pre_correction:
-                corrections.insert(0, suchi_pre_correction)
-        
-        # Identity Gate 2: ML Model Mismatch (Natural Teacher Logic)
-        target_idx = list(model.classes_).index(target_key) if (target_key and target_key in list(model.classes_)) else -1
-        target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
+        # [PHASE 18] Strict Accuracy & Wrong Mudra Validation
+        display_acc = 0.0
+        active_corrections = []
+        current_finger_colors = None
         
         clean_stable = clean_mudra_name(stable_name)
-        is_wrong_identity = (target_key and clean_stable != target_key and (smooth_conf > 25 or raw_conf > 20))
-        is_too_weak      = (target_key and clean_stable != target_key and target_conf < (smooth_conf * 0.5))
-        
-        if is_wrong_identity or is_too_weak:
-            # [PHASE 19] Relaxed Identity Gate: If ML is very confident, don't zero out completely
-            if smooth_conf > 72:
-                # [TARGET ISOLATION] Even with high confidence, if it's the wrong mudra name, 
-                # we MUST zero out if it's a hard gate evaluation.
-                actual_label = stable_name.capitalize()
-                target_label = target_key.capitalize()
-                final_msg = f"Wrong Mudra: You are showing {actual_label} instead of {target_label}."
-                
-                return {
-                    "detected": True, "name": stable_name,
-                    "confidence": round(smooth_conf, 1),
-                    "accuracy":   0.0, # HARD GATE: NO PARTIAL CREDIT FOR WRONG IDENTITY
-                    "corrections": [final_msg],
-                    "status": "Wrong Mudra", "is_stable": True,
-                    "feedback": final_msg
-                }
+        is_wrong = (target_key and clean_stable != target_key and (smooth_conf > 30 or raw_conf > 30))
 
-            # --- Natural Teacher Layer: Absolute Priority ---
-            # If the wrong mudra is detected, ONLY say "You are showing X. Please switch to Y."
-            actual_label = stable_name.capitalize()
-            target_label = target_key.capitalize()
-            wrong_msg = f"Wrong Mudra: You are showing {actual_label} instead of {target_label}."
+        if is_wrong:
+            wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_mudra.capitalize()}"
+            display_acc = 0.0
+            if target_key in MUDRA_REFERENCE_ANGLES:
+                active_corrections, _, current_finger_colors, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
+            active_corrections = [c for c in active_corrections if not c.startswith("Wrong mudra")]
+            active_corrections.insert(0, wrong_msg)
+        elif target_key:
+            if target_key in MUDRA_REFERENCE_ANGLES:
+                active_corrections, geom_acc, current_finger_colors, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             
-            corrections = [wrong_msg]
-            art_accuracy = 0.0
-            accuracy_cap = 0.0
-            total_accuracy = 0.0 # Force zero accuracy on hard mismatch
-            problematic_joints = []
-            current_finger_colors = {k: "red" for k in finger_angles.keys()}
-
-        # Final accuracy calculation
-        total_accuracy = (float(smooth_conf) * 0.4) + (float(art_accuracy) * 0.6)
-        total_accuracy = min(total_accuracy, accuracy_cap)
-
-        # Soft noise gate: only zero out truly random noise below 30%
-        # NOTE: The frontend's ACCURACY_THRESHOLD (75%) already gates the success trigger.
-        # We do NOT need a 75% floor here — it only hides feedback from the user.
-        if target_key and total_accuracy < 30.0:
-            total_accuracy = 0.0
-        elif total_accuracy < 20.0:
-            total_accuracy = 0.0
-
-        # --- STATE RESET & ASYMMETRIC SMOOTHING (GLOBAL REGISTRY) ---
-        st = SMOOTHING_REGISTRY["single"]
-        curr_target = target_mudra.lower().strip()
-        
-        # Reset if target changes
-        if curr_target != st["last_target"]:
-            st["smooth_acc"]   = 0.0  # ATOMIC RESET: Start from zero for new mudra
-            st["prev_display"] = 0.0
-            st["last_target"]  = curr_target
-
-        # Asymmetric Rise (Instant Feedback)
-        if total_accuracy > st["smooth_acc"]:
-            st["smooth_acc"] = total_accuracy
+            if clean_stable == target_key:
+                display_acc = (smooth_conf * 0.7) + (geom_acc * 0.3)
+            else:
+                display_acc = geom_acc
         else:
-            # Smooth Fall (Stability)
-            alpha_smooth = 0.4
-            st["smooth_acc"] = (st["smooth_acc"] * (1.0 - alpha_smooth)) + (total_accuracy * alpha_smooth)
-        
-        # Guard against rapid drops
-        if st["smooth_acc"] < st["prev_display"]:
-            st["smooth_acc"] = float(max(st["smooth_acc"], st["prev_display"] - 3.0))
-        
-        st["prev_display"] = st["smooth_acc"]
-        total_accuracy = float(round(st["smooth_acc"], 1))
+            if stable_name in MUDRA_REFERENCE_ANGLES:
+                active_corrections, geom_acc, current_finger_colors, _ = get_corrections(stable_name, finger_angles, lm_wrapper, palm_size)
+            display_acc = (smooth_conf * 0.7) + (geom_acc * 0.3)
 
-        # Post-smoothing noise gate
-        if total_accuracy < 25.0:
-            total_accuracy = 0.0
-
-        raw_geom_pct = max(0.0, 100.0 - (art_accuracy / 10.0)) if art_accuracy > 0 else 0.0
-        print(f"[DEBUG] Final Accuracy: {total_accuracy:.1f} | ML Conf: {smooth_conf:.1f}% | Geom Score: {raw_geom_pct:.1f}%")
-
-        # [PHASE 13] RESULT FALLBACK (Single Hand Update)
-        target_key = target_mudra.lower().strip()
-        
-        # 1. Update Cache
-        if total_accuracy >= 95.0 and target_key in JOINED_MUDRAS:
-            last_good_data[target_key] = {
-                'detected': True, 'name': stable_name, 'accuracy': total_accuracy,
-                'is_stable': True, 'corrections': []
-            }
-            # Maintain cache size (Task 1: Memory Management)
-            if len(last_good_data) > MAX_GOOD_DATA_CACHE:
-                oldest_key = next(iter(last_good_data))
-                last_good_data.pop(oldest_key)
-        
-        # 2. Serve Fallback if Noisy
-        if total_accuracy < 25.0 and target_key in JOINED_MUDRAS and target_key in last_good_data:
-            # We briefly serve the cached result to bridge a blink
-            cached = last_good_data[target_key]
-            return jsonify(cached)
-
-        # Auto-save trigger at 75%+ (emitted via socket)
-        is_good_frame = (smooth_conf >= 60 and total_accuracy >= 65)
-        if is_good_frame:
-            held, hold_progress = is_hand_held(lm_list, current_accuracy=total_accuracy)
-        else:
-            hold_frame_buffer.clear()
-            held, hold_progress = False, 0
-
-        feedback = (
-            "Correct! Great form."                   if total_accuracy >= 75 else
-            "Almost there — small adjustments needed" if total_accuracy >= 50 else
-            "Try Again — adjust your hand position."
-        )
-
-        # --- DIFFERENTIATION GATE: Silence on Success ---
-        # If the user is showing the correct mudra with high accuracy (>85%), 
-        # we clear all corrections to ensure "Silence on Success".
-        if target_key and stable_name.lower().strip() == target_key.lower().strip() and total_accuracy > 85.0:
-            print(f"[GATE] Silence on Success for {target_key} (Acc: {total_accuracy}%)")
-            corrections = []
-            # Optionally add a success message that the frontend can use for display without voice
-            feedback = "Perfect! Hold it right there."
-
-        final_name = last_stable_name if last_stable_name else stable_name
-
-        result = {
-            "detected":          True,
-            "name":              final_name,
-            "confidence":        round(smooth_conf, 1),
-            "accuracy":          total_accuracy,
-            "corrections":       corrections,
-            "feedback":          feedback,
-            "meaning":           MUDRA_MEANINGS.get(stable_name, ""),
-            "is_stable":         is_stable,
-            "landmarks":         lm_to_json(lm_list),
-            "hold_progress":     hold_progress,
-            "hold_state":        "evaluating" if held else ("holding" if hold_progress > 20 else "idle"),
-            "isWrongMudra":      is_wrong_identity or is_too_weak,
-            "actualMudra":       stable_name,
-            # Extra field so frontend can show both detected and target names clearly
-            "detected_mudra_name": stable_name,
-            "target_mudra_name":   target_key,
-            "finger_colors":       current_finger_colors,
-            "problematic_joints":  problematic_joints, # Task 4: Red List
+        return {
+            "detected":    True,
+            "name":        stable_name if not target_key else target_key,
+            "confidence":  round(raw_conf, 1),
+            "status":      "Correct" if display_acc >= 75 else "Stabilizing..." if (display_acc < 75 and display_acc > 0) else "Refining Form",
+            "accuracy":    round(display_acc, 1),
+            "corrections": active_corrections if active_corrections else ["Match the position carefully"],
+            "meaning":     MUDRA_MEANINGS.get(target_key or stable_name, ""),
+            "is_stable":   display_acc >= 75,
+            "landmarks":   lm_to_json(lm_list),
+            "hold_progress": 0,
+            "hold_state":  "idle",
+            "finger_colors": current_finger_colors,
         }
-
-        current_mudra.update({
-            "name":          stable_name,
-            "confidence":    round(smooth_conf, 1),
-            "detected":      True,
-            "accuracy":      total_accuracy,
-            "corrections":   corrections,
-            "is_stable":     is_stable,
-            "hold_state":    result["hold_state"],
-            "hold_progress": hold_progress,
-        })
-
-        if held and is_stable:
-            last_auto_evaluation.update(result)
-            socketio.emit("auto_evaluation", result)
-
-        # Auto-save socket event when score >= 75
-        if total_accuracy >= 75 and is_stable and target_key:
-            socketio.emit("score_achieved", {
-                "mudra":    target_key,
-                "score":    total_accuracy,
-                "feedback": feedback,
-            })
-
-        return result
 
     except Exception as e:
         print(f"[run_madm] Error: {e}")
@@ -2382,30 +1995,42 @@ def predict_mudra():
     """
     Stateless mudra prediction for the Detect page.
     Tries Right-hand and Left-hand feature extraction, returns the best match.
-    Does NOT modify any global state (no EMA, no stable_mudra, nothing).
+    Supports target validation to prevent 'Always Correct' issues.
     """
     try:
         body = request.get_json(force=True)
         if not body or 'landmarks' not in body:
-            return jsonify({"name": "", "confidence": 0.0, "top3": []}), 400
+            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": []}), 400
 
         raw_lms = body['landmarks']
+        target  = body.get('targetMudra', '').lower().strip()
+        # Normalise target name
+        target = FRONTEND_TO_MODEL.get(target, target)
+
         if len(raw_lms) != 21:
-            return jsonify({"name": "", "confidence": 0.0, "top3": []}), 400
+            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": []}), 400
 
         # Build LM objects from JSON
         lm_list = [LM(float(p['x']), float(p['y']), float(p['z'])) for p in raw_lms]
-
+        lm_wrapper = LMWrapper(lm_list)
+        
+        # Calculate palm_size for geometric rules
+        p_w = [lm_list[0].x, lm_list[0].y, lm_list[0].z]
+        p_m = [lm_list[9].x, lm_list[9].y, lm_list[9].z]
+        palm_size = get_distance(p_w, p_m) or 1.0
 
         best_name  = ""
         best_conf  = 0.0
         best_probs = None
+        best_label = "Right"
 
-                # Try both handedness options; pick the one the model is more confident about.
-        # This compensates for the browser CSS mirror flip that inverts Left/Right labels.
+        # Try both handedness options; pick the one the model is more confident about.
         for hand_label in ('Right', 'Left'):
             try:
                 feats = extract_features(lm_list, label=hand_label)
+                if len(feats) != 82:
+                    print(f"[predict_mudra] Feature size mismatch: {len(feats)}")
+                    continue
                 probs = model.predict_proba([feats])[0]
                 top_i = int(np.argmax(probs))
                 conf  = float(probs[top_i]) * 100.0
@@ -2413,36 +2038,74 @@ def predict_mudra():
                     best_conf  = conf
                     best_name  = str(model.classes_[top_i])
                     best_probs = probs
+                    best_label = hand_label
             except Exception as e:
                 print(f"[predict_mudra] {hand_label} error: {e}")
                 continue
 
-        # Build top-3 list for the Detect UI debug display
+        # Accuracy & Validation Logic
+        accuracy = 0.0
+        corrections = []
+        feedback = "Show your hand to the camera"
+
+        if best_probs is not None:
+            # Get joint angles for geometric verification
+            finger_angles = get_finger_angles_dict(lm_list)
+            
+            if target:
+                clean_best = clean_mudra_name(best_name)
+                # target is already cleaned/mapped above
+                
+                # Check if it's the wrong identity
+                if clean_best != target and best_conf > 30:
+                    accuracy = 0.0
+                    corrections = [f"Wrong Mudra: You are showing {best_name.capitalize()} instead of {target.capitalize()}."]
+                    feedback = "Try to form the target mudra correctly."
+                else:
+                    # Target matches or AI is confused (low confidence) -> rely on geometry
+                    ref_msgs, geom_acc, _, _ = get_corrections(target, finger_angles, lm_wrapper, palm_size)
+                    # [NORMALIZED] Blend: 70% AI Confidence / 30% Geometry
+                    blend_acc = (best_conf * 0.7) + (geom_acc * 0.3 if clean_best == target else 0)
+                    accuracy = round(blend_acc, 1)
+                    corrections = ref_msgs
+                    
+                    if accuracy >= 75:
+                        feedback = "Excellent! Perfect form."
+                    elif accuracy >= 50:
+                        feedback = "Almost there! Follow the corrections."
+                    else:
+                        feedback = "Adjust your fingers to match the target."
+            else:
+                # No target: just give raw model accuracy
+                accuracy = round(best_conf, 1)
+                feedback = f"Detected: {best_name.capitalize()}"
+
+        # Build top-3 list
         top3 = []
         if best_probs is not None:
             idxs = np.argsort(best_probs)[::-1][:3]
             top3 = [
-                {
-                    "name": str(model.classes_[i]),
-                    "conf": round(float(best_probs[i]) * 100.0, 1),
-                }
+                {"name": str(model.classes_[i]), "conf": round(float(best_probs[i]) * 100.0, 1)}
                 for i in idxs
             ]
-        
 
-
-        print(f"[predict_mudra] {best_name} ({best_conf:.1f}%)  top3={[t['name'] for t in top3]}")
+        print(f"[predict_mudra] target={target} best={best_name} acc={accuracy}% conf={best_conf:.1f}%")
 
         return jsonify({
-            "name":       best_name,
-            "confidence": round(best_conf, 1),
-            "top3":       top3,
+            "name":         best_name,
+            "confidence":   round(best_conf, 1),
+            "accuracy":     accuracy,
+            "corrections":  corrections,
+            "feedback":     feedback,
+            "top3":         top3,
+            "detected":     best_conf > 30,
+            "handedness":   best_label
         })
 
     except Exception as e:
         print(f"[predict_mudra] Error: {e}")
         import traceback; traceback.print_exc()
-        return jsonify({"name": "", "confidence": 0.0, "top3": []}), 500
+        return jsonify({"name": "", "confidence": 0.0, "accuracy": 0, "corrections": [f"Error: {str(e)}"]}), 500
 # =============================================================================
 # ENTRY POINT
 # =============================================================================
@@ -2468,6 +2131,9 @@ def evaluate_session():
         for hand_label in ('Right', 'Left'):
             try:
                 feats = extract_features(lm_list, label=hand_label)
+                if len(feats) != 82:
+                    print(f"[detect_any] Feature size mismatch: {len(feats)}")
+                    continue
                 probs = model.predict_proba([feats])[0]
                 all_probs.append(probs)
             except Exception as e:
@@ -2519,8 +2185,8 @@ def evaluate_session():
             p_m = [lm_list[9].x, lm_list[9].y, lm_list[9].z]
             palm_size = get_distance(p_w, p_m) or 1.0
             _, geom_acc, finger_colors, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
-            # Blend ML score (60%) + geometry (40%) for single-target mode
-            score_pct = round((score_pct * 0.6) + (geom_acc * 0.4), 1)
+            # [NORMALIZED] Blend: 70% AI Confidence / 30% Geometry
+            score_pct = round((score_pct * 0.7) + (geom_acc * 0.3), 1)
             if best_name != target_key and geom_acc > score_pct:
                 best_name = target_key
         else:
@@ -2799,15 +2465,15 @@ def detect_double_landmarks():
         if target:
             clean_ml_name = clean_mudra_name(name)
             if clean_ml_name == target:
-                # ML agrees: blend ML (60 %) + geometry (40 %) [Ref 4]
-                raw_accuracy = round(min(conf * 0.60 + geo_score * 0.40, 100.0), 1)
+                # [NORMALIZED] ML agrees: blend AI (70 %) + geometry (30 %) [Ref 4]
+                raw_accuracy = round(min(conf * 0.70 + geo_score * 0.30, 100.0), 1)
 
             else:
                 # ML disagrees — let geometry provide a rescue path
                 # [PHASE 18] Tighten Rescue: increase min geo_score from 50 to 65
                 if geo_score >= 65:
                     # Geometry strongly suggests the right mudra; rescue the detection.
-                    # Blend: 75% Geometry + 25% AI (to respect the ML's uncertainty)
+                    # [NORMALIZED] Blend: 75% Geometry + 25% AI (Weighted toward geometry for rescue)
                     raw_accuracy = round(geo_score * 0.75 + conf * 0.25, 1)
                     corrections  = []   # suppress "wrong mudra" noise for strong rescues
                     print(f"[detect_double] Geo-Rescue: geo={geo_score:.1f}% AI={conf:.1f}% -> acc={raw_accuracy:.1f}%")
@@ -2823,11 +2489,10 @@ def detect_double_landmarks():
         else:
             raw_accuracy = conf
 
-        # ── Low-confidence safety gate (lowered 45 → 28) ─────────────────
-        # Below 28 % ML confidence, rely on geometry alone
+        # [NORMALIZED] Below 28 % ML confidence, rely on geometry alone
         if conf < 28:
             if target and geo_score >= 58:
-                raw_accuracy = round(geo_score * 0.65, 1)
+                raw_accuracy = round(geo_score * 0.70, 1)
                 corrections  = []
             else:
                 raw_accuracy = 0.0
