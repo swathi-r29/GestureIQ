@@ -436,7 +436,7 @@ MUDRA_REFERENCE_ANGLES = {
 }
 
 CORRECTION_THRESHOLDS = {
-    "thumb": 45, "index": 42, "middle": 42, "ring": 42, "pinky": 42,
+    "thumb": 55, "index": 55, "middle": 55, "ring": 55, "pinky": 55,
 }
 
 # Mudras that are geometrically similar but must be strictly distinguished
@@ -518,11 +518,29 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
             # Veto
             return False, f"Wrong mudra — Your {finger_names[i]} finger is in the wrong position for {ml_prediction.capitalize()}."
 
-    # 2. Specific Heuristic Overrides
+    # 2. Specific Heuristic Overrides (Structural Integrity Layer)
     
-    # Suchi must have Index fully UP
-    if mudra == "suchi" and actual[1] != 1:
-        return False, "Wrong mudra — Your index finger must be fully extended for Suchi."
+    # Shikhara MUST have thumb tip vertically higher than index knuckle
+    if mudra == "shikhara":
+        thumb_tip_y = lm_wrapper[4].y
+        index_knuckle_y = lm_wrapper[5].y
+        # MediaPipe Y-axis is inverted: smaller Y means higher on screen
+        if thumb_tip_y > (index_knuckle_y - 0.02): # Tolerance for near-level
+            return False, "Wrong mudra — Your thumb must be raised and upright for Shikhara."
+
+    # Mushti MUST have thumb tucked (Not raised)
+    if mudra == "mushti":
+        thumb_tip_y = lm_wrapper[4].y
+        index_knuckle_y = lm_wrapper[5].y
+        if thumb_tip_y < index_knuckle_y:
+            return False, "Wrong mudra — For Mushti, your thumb should be tucked against your fingers."
+
+    # Suchi must have Index fully UP (Vertical Check)
+    if mudra == "suchi":
+        index_tip_y = lm_wrapper[8].y
+        middle_mcp_y = lm_wrapper[9].y
+        if actual[1] != 1 or index_tip_y > middle_mcp_y:
+            return False, "Wrong mudra — Your index finger must be pointing upwards for Suchi."
         
     # Chandrakala MUST have Index UP and Middle DOWN
     if mudra == "chandrakala":
@@ -1506,12 +1524,20 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             best_geom_acc  = 0
             best_geom_name = ""
             geom_scores    = {}
-            for m_name in MUDRA_REFERENCE_ANGLES.keys():
-                _, acc, _, _ = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
-                geom_scores[m_name] = acc
-                if acc > best_geom_acc:
-                    best_geom_acc  = acc
-                    best_geom_name = m_name
+            
+            if target_key:
+                # [TARGET ISOLATION] Skip the sweep. Only calculate for the target.
+                _, acc, _, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
+                geom_scores[target_key] = acc
+                best_geom_acc = acc
+                best_geom_name = target_key
+            else:
+                for m_name in MUDRA_REFERENCE_ANGLES.keys():
+                    _, acc, _, _ = get_corrections(m_name, finger_angles, lm_wrapper, palm_size)
+                    geom_scores[m_name] = acc
+                    if acc > best_geom_acc:
+                        best_geom_acc  = acc
+                        best_geom_name = m_name
 
             # GEOM-SWEEP override: only when ML is very weak AND geom winner is clearly
             # superior to the ML candiate's own geometry score. Prevents alapadma from
@@ -1738,34 +1764,37 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         target_conf = float(ema_p[target_idx]) * 100 if target_idx != -1 else 0.0
         
         clean_stable = clean_mudra_name(stable_name)
-        is_wrong_identity = (target_key and clean_stable != target_key and smooth_conf > 45)
-        is_too_weak = (target_key and clean_stable != target_key and target_conf < (smooth_conf * 0.5))
+        is_wrong_identity = (target_key and clean_stable != target_key and (smooth_conf > 25 or raw_conf > 20))
+        is_too_weak      = (target_key and clean_stable != target_key and target_conf < (smooth_conf * 0.5))
         
         if is_wrong_identity or is_too_weak:
             # [PHASE 19] Relaxed Identity Gate: If ML is very confident, don't zero out completely
             if smooth_conf > 72:
-                # Soft Warning: Keep detection but show Adjustment
-                status = "Adjusting..."
-                final_msg = f"Wrong mudra — showing {stable_name.capitalize()} instead of {target_key.capitalize()}" if (target_key and clean_stable != target_key) else (wrong_msg if wrong_msg else "Adjust your form slightly")
+                # [TARGET ISOLATION] Even with high confidence, if it's the wrong mudra name, 
+                # we MUST zero out if it's a hard gate evaluation.
+                actual_label = stable_name.capitalize()
+                target_label = target_key.capitalize()
+                final_msg = f"Wrong Mudra: You are showing {actual_label} instead of {target_label}."
                 
                 return {
                     "detected": True, "name": stable_name,
                     "confidence": round(smooth_conf, 1),
-                    "accuracy":   round(smooth_conf * 0.7, 1), # Partial credit
+                    "accuracy":   0.0, # HARD GATE: NO PARTIAL CREDIT FOR WRONG IDENTITY
                     "corrections": [final_msg],
-                    "status": status, "is_stable": True,
-                    "feedback": final_msg  # Frontend needs this for voice logic
+                    "status": "Wrong Mudra", "is_stable": True,
+                    "feedback": final_msg
                 }
 
             # --- Natural Teacher Layer: Absolute Priority ---
             # If the wrong mudra is detected, ONLY say "You are showing X. Please switch to Y."
             actual_label = stable_name.capitalize()
             target_label = target_key.capitalize()
-            wrong_msg = f"Wrong mudra — you are showing {actual_label}. Please switch to {target_label}."
+            wrong_msg = f"Wrong Mudra: You are showing {actual_label} instead of {target_label}."
             
             corrections = [wrong_msg]
             art_accuracy = 0.0
             accuracy_cap = 0.0
+            total_accuracy = 0.0 # Force zero accuracy on hard mismatch
             problematic_joints = []
             current_finger_colors = {k: "red" for k in finger_angles.keys()}
 
@@ -1787,8 +1816,8 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         
         # Reset if target changes
         if curr_target != st["last_target"]:
-            st["smooth_acc"]  = total_accuracy
-            st["prev_display"] = total_accuracy
+            st["smooth_acc"]   = 0.0  # ATOMIC RESET: Start from zero for new mudra
+            st["prev_display"] = 0.0
             st["last_target"]  = curr_target
 
         # Asymmetric Rise (Instant Feedback)
@@ -1796,7 +1825,7 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
             st["smooth_acc"] = total_accuracy
         else:
             # Smooth Fall (Stability)
-            alpha_smooth = 0.15
+            alpha_smooth = 0.4
             st["smooth_acc"] = (st["smooth_acc"] * (1.0 - alpha_smooth)) + (total_accuracy * alpha_smooth)
         
         # Guard against rapid drops
