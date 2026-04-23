@@ -7,6 +7,7 @@ const fs = require('fs');
 const LiveClass = require('../models/LiveClass');
 const ClassSession = require('../models/ClassSession');
 const Notification = require('../models/Notification');
+const Announcement = require('../models/Announcement');
 const User = require('../models/User');
 const staffAuth = require('../middleware/staffAuth');
 const { sendClassNotificationEmail } = require('../utils/mailer');
@@ -531,6 +532,145 @@ router.get('/profile', staffAuth, async (req, res) => {
         });
     } catch (err) {
         res.status(500).send('Server Error');
+    }
+});
+
+// --- ANNOUNCEMENTS ---
+// @route   GET /api/staff/announcements
+router.get('/announcements', staffAuth, async (req, res) => {
+    try {
+        const announcements = await Announcement.find({ staffId: req.user.id }).sort({ createdAt: -1 });
+        res.json(announcements);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   POST /api/staff/announcements
+router.post('/announcements', staffAuth, async (req, res) => {
+    try {
+        const { title, message, priority, target } = req.body;
+        const newAnnouncement = new Announcement({
+            staffId: req.user.id,
+            title,
+            message,
+            priority,
+            target
+        });
+        await newAnnouncement.save();
+
+        // Optional: Notify students
+        const staff = await User.findById(req.user.id);
+        const students = await User.find({ role: 'student', institution_name: staff.institution_name });
+        
+        Promise.all(students.map(async (student) => {
+            const notification = new Notification({
+                userId: student._id,
+                title: `New Announcement: ${title}`,
+                message: message.substring(0, 50) + '...',
+                type: 'general',
+                createdAt: new Date()
+            });
+            await notification.save();
+        })).catch(err => console.error('Error notifying students about announcement:', err));
+
+        res.json(newAnnouncement);
+    } catch (err) {
+        res.status(500).send('Failed to post announcement');
+    }
+});
+
+// @route   DELETE /api/staff/announcement/:id
+router.delete('/announcement/:id', staffAuth, async (req, res) => {
+    try {
+        await Announcement.findOneAndDelete({ _id: req.params.id, staffId: req.user.id });
+        res.json({ msg: 'Announcement deleted' });
+    } catch (err) {
+        res.status(500).send('Deletion Failed');
+    }
+});
+
+// --- ENROLLMENT MANAGEMENT ---
+
+// @route   GET /api/staff/enrollment/pending
+router.get('/enrollment/pending', staffAuth, async (req, res) => {
+    try {
+        const staff = await User.findById(req.user.id);
+        const pendingStudents = await User.find({
+            role: 'student',
+            instituteId: req.user.id,
+            status: 'pending'
+        }).select('-password').sort({ createdAt: -1 });
+        res.json(pendingStudents);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   GET /api/staff/enrollment/verified
+router.get('/enrollment/verified', staffAuth, async (req, res) => {
+    try {
+        const staff = await User.findById(req.user.id);
+        const verifiedStudents = await User.find({
+            role: 'student',
+            instituteId: req.user.id,
+            status: { $in: ['approved', 'active'] }
+        }).select('-password').sort({ createdAt: -1 });
+        res.json(verifiedStudents);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   POST /api/staff/enrollment/:studentId/approve
+router.post('/enrollment/:studentId/approve', staffAuth, async (req, res) => {
+    try {
+        const student = await User.findById(req.params.studentId);
+        if (!student) return res.status(404).json({ msg: 'Student not found' });
+        
+        // Security check: Ensure student belongs to this institute
+        if (student.instituteId?.toString() !== req.user.id) {
+            return res.status(403).json({ msg: 'Unauthorized approval' });
+        }
+
+        student.status = 'approved';
+        student.approvedAt = new Date();
+        await student.save();
+
+        // Notify student
+        const notification = new Notification({
+            userId: student._id,
+            title: 'Enrollment Approved',
+            message: 'Your enrollment has been approved. You can now access all features.',
+            type: 'general'
+        });
+        await notification.save();
+
+        res.json({ msg: 'Student approved successfully', student });
+    } catch (err) {
+        res.status(500).send('Approval Failed');
+    }
+});
+
+// @route   POST /api/staff/enrollment/:studentId/reject
+router.post('/enrollment/:studentId/reject', staffAuth, async (req, res) => {
+    try {
+        const { reason } = req.body;
+        const student = await User.findById(req.params.studentId);
+        if (!student) return res.status(404).json({ msg: 'Student not found' });
+
+        // Security check
+        if (student.instituteId?.toString() !== req.user.id) {
+            return res.status(403).json({ msg: 'Unauthorized rejection' });
+        }
+
+        student.status = 'rejected';
+        student.rejectionReason = reason || 'No specific reason provided';
+        await student.save();
+
+        res.json({ msg: 'Student rejected' });
+    } catch (err) {
+        res.status(500).send('Rejection Failed');
     }
 });
 

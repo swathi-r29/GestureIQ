@@ -16,8 +16,10 @@ import {
 const StaffReports = () => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedSession, setSelectedSession] = useState(null);
+  const [expandedDate, setExpandedDate] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const [selectedSession, setSelectedSession] = useState(null);
 
   useEffect(() => {
     fetchReports();
@@ -30,6 +32,11 @@ const StaffReports = () => {
         headers: { 'x-auth-token': token }
       });
       setSessions(res.data);
+      // Auto-expand the first date if available
+      if (res.data.length > 0) {
+        const latestDate = new Date(res.data[0].conductedAt).toISOString().split('T')[0];
+        setExpandedDate(latestDate);
+      }
     } catch (err) {
       console.error('Failed to fetch reports');
     } finally {
@@ -55,94 +62,168 @@ const StaffReports = () => {
     }
   };
 
-  const filteredSessions = sessions.filter(s => 
-    s.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredSessions = sessions.filter(s => {
+    const matchesSearch = s.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const sessionDate = new Date(s.conductedAt).toISOString().split('T')[0];
+    const matchesDate = filterDate ? sessionDate === filterDate : true;
+    return matchesSearch && matchesDate;
+  });
 
-  // Group by month
-  const grouped = filteredSessions.reduce((acc, session) => {
-    const date = new Date(session.conductedAt);
-    const key = `${date.toLocaleString('default', { month: 'long' })} ${date.getFullYear()}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(session);
+  // Group by date (YYYY-MM-DD)
+  const groupedByDate = filteredSessions.reduce((acc, session) => {
+    const dateKey = new Date(session.conductedAt).toISOString().split('T')[0];
+    if (!acc[dateKey]) acc[dateKey] = [];
+    acc[dateKey].push(session);
     return acc;
   }, {});
 
+  // Sort dates descending
+  const sortedDates = Object.keys(groupedByDate).sort((a, b) => new Date(b) - new Date(a));
+
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-6 space-y-8 animate-in fade-in duration-700">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>Session Reports</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Analyze student performance and download class metrics</p>
+          <h1 className="text-3xl font-black tracking-tight" style={{ color: 'var(--text)' }}>Session Reports</h1>
+          <p className="text-xs font-bold uppercase tracking-widest opacity-40" style={{ color: 'var(--text-muted)' }}>Analyze student performance and download class metrics</p>
         </div>
-        <div className="relative w-full md:w-64">
-          <Search className="absolute left-3 top-2.5 w-4 h-4 opacity-50" />
-          <input 
-            type="text"
-            placeholder="Search reports..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border text-sm"
-            style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 opacity-30" />
+            <input 
+              type="text"
+              placeholder="Search by title..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2.5 rounded-xl border text-sm focus:outline-none transition-all w-48 lg:w-64"
+              style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', color: 'var(--text)' }}
+            />
+          </div>
+          <div className="relative">
+            <Calendar className="absolute left-3 top-2.5 w-4 h-4 opacity-30" />
+            <input 
+              type="date"
+              value={filterDate}
+              onChange={(e) => {
+                  setFilterDate(e.target.value);
+                  if (e.target.value) setExpandedDate(e.target.value);
+              }}
+              className="pl-10 pr-4 py-2.5 rounded-xl border text-xs font-bold uppercase focus:outline-none transition-all w-40 lg:w-48"
+              style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', color: 'var(--text)' }}
+            />
+            {filterDate && (
+                <button 
+                    onClick={() => setFilterDate('')}
+                    className="absolute right-3 top-3 opacity-40 hover:opacity-100"
+                >
+                    <X size={14} />
+                </button>
+            )}
+          </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center py-12 animate-pulse" style={{ color: 'var(--text-muted)' }}>Loading reports...</div>
-      ) : Object.keys(grouped).length > 0 ? (
-        Object.entries(grouped).map(([month, items]) => (
-          <div key={month} className="space-y-4">
-            <h2 className="text-sm font-black uppercase tracking-widest px-2" style={{ color: 'var(--text-muted)' }}>{month}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {items.map((session) => (
-                <div key={session._id} className="p-6 rounded-2xl border transition-all hover:shadow-lg group" 
-                     style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+        <div className="flex items-center justify-center py-24">
+            <Activity className="w-8 h-8 animate-spin opacity-20" style={{ color: 'var(--accent)' }} />
+        </div>
+      ) : sortedDates.length > 0 ? (
+        <div className="space-y-4">
+          {sortedDates.map((dateKey) => {
+            const isExpanded = expandedDate === dateKey;
+            const reports = groupedByDate[dateKey];
+            const dateObj = new Date(dateKey);
+            const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
+
+            return (
+              <div key={dateKey} className="overflow-hidden transition-all duration-500 rounded-3xl border"
+                   style={{ borderColor: 'var(--border)', backgroundColor: isExpanded ? 'var(--bg-card2)' : 'var(--bg-card)' }}>
+                
+                {/* Date Header */}
+                <button 
+                  onClick={() => setExpandedDate(isExpanded ? null : dateKey)}
+                  className="w-full px-6 py-5 flex items-center justify-between group transition-all"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-2xl transition-all duration-300 ${isExpanded ? 'bg-accent text-white scale-110 shadow-lg shadow-accent/20' : 'bg-black/5 opacity-50'}`}>
                       <Calendar className="w-5 h-5" />
                     </div>
-                    <span className="text-[10px] font-bold" style={{ color: 'var(--text-muted)' }}>{new Date(session.conductedAt).toLocaleDateString()}</span>
-                  </div>
-                  
-                  <h3 className="font-bold mb-4 line-clamp-1" style={{ color: 'var(--text)' }}>{session.title}</h3>
-                  
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-3 rounded-xl bg-black/5">
-                      <p className="text-[10px] font-bold uppercase" style={{ color: 'var(--text-muted)' }}>Students</p>
-                      <p className="text-lg font-black" style={{ color: 'var(--text)' }}>{session.totalStudents}</p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-black/5">
-                      <p className="text-[10px] font-bold uppercase" style={{ color: 'var(--text-muted)' }}>Avg Score</p>
-                      <p className="text-lg font-black" style={{ color: 'var(--accent)' }}>{session.classAverage.toFixed(1)}%</p>
+                    <div className="text-left">
+                      <p className="text-sm font-black uppercase tracking-widest" style={{ color: isExpanded ? 'var(--accent)' : 'var(--text)' }}>
+                        {formattedDate}
+                      </p>
+                      <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+                        {reports.length} {reports.length === 1 ? 'Report' : 'Reports'} Available
+                      </p>
                     </div>
                   </div>
+                  <ChevronRight className={`w-5 h-5 transition-transform duration-300 ${isExpanded ? 'rotate-90 text-accent' : 'opacity-20'}`} />
+                </button>
 
-                  <div className="flex border-t pt-4 space-x-2" style={{ borderColor: 'var(--border)' }}>
-                    <button 
-                      onClick={() => setSelectedSession(session)}
-                      className="flex-1 py-2 text-xs font-bold rounded-lg border transition-all hover:bg-black/5"
-                      style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-                    >
-                      View Details
-                    </button>
-                    <button 
-                      onClick={() => downloadPDF(session._id)}
-                      className="p-2 rounded-lg border transition-all hover:bg-blue-500 hover:text-white"
-                      style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
+                {/* Reports Content */}
+                <div className={`transition-all duration-500 ease-in-out ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                  <div className="p-6 pt-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {reports.map((session) => (
+                      <div key={session._id} className="p-6 rounded-2xl border transition-all hover:shadow-xl hover:-translate-y-1 bg-white dark:bg-black/20" 
+                           style={{ borderColor: 'var(--border)' }}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="text-[10px] font-black uppercase tracking-[2px] opacity-40" style={{ color: 'var(--text-muted)' }}>
+                            <Clock className="inline w-3 h-3 mr-1" />
+                            {new Date(session.conductedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-accent/10 text-accent uppercase tracking-widest border border-accent/20">
+                                {session.duration}m
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <h3 className="font-black text-lg mb-4 line-clamp-1 uppercase tracking-tight" style={{ color: 'var(--text)' }}>{session.title}</h3>
+                        
+                        <div className="grid grid-cols-2 gap-3 mb-6">
+                          <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5">
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-40" style={{ color: 'var(--text-muted)' }}>Students</p>
+                            <p className="text-lg font-black" style={{ color: 'var(--text)' }}>{session.totalStudents}</p>
+                          </div>
+                          <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border-l-2 border-accent/20">
+                            <p className="text-[9px] font-black uppercase tracking-widest opacity-40" style={{ color: 'var(--text-muted)' }}>Avg Score</p>
+                            <p className="text-lg font-black" style={{ color: 'var(--accent)' }}>{session.classAverage.toFixed(1)}%</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => setSelectedSession(session)}
+                            className="flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl border transition-all hover:bg-accent hover:text-white hover:border-accent hover:shadow-lg hover:shadow-accent/20"
+                            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                          >
+                            View Details
+                          </button>
+                          <button 
+                            onClick={() => downloadPDF(session._id)}
+                            className="p-3 rounded-xl border transition-all hover:bg-accent hover:text-white hover:border-accent"
+                            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        ))
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="text-center py-24 opacity-30">
           <FileText className="w-16 h-16 mx-auto mb-4" />
-          <p>No reports found matching your criteria</p>
+          <p className="text-[10px] font-black uppercase tracking-[4px]">No reports found matching your criteria</p>
         </div>
       )}
 

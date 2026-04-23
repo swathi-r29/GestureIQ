@@ -9,14 +9,14 @@ from multiprocessing import Pool, cpu_count
 from functools import partial
 
 # Constants
-DATA_FOLDERS = [
-    "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
-]
-OUTPUT_CSV = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
-
 #DATA_FOLDERS = [
- # "../dataset/bharatanatyam_mudras/sorted_mudras"
+    #"D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
 #]
+#OUTPUT_CSV = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
+
+DATA_FOLDERS = [
+ "../dataset/bharatanatyam_mudras/sorted_mudras"
+]
 OUTPUT_CSV = "../dataset/bharatanatyam_mudras/landmarks.csv"
 
 def get_versions(img):

@@ -35,6 +35,7 @@ import ClassJoin from './pages/ClassJoin';
 import StudentLiveClass from './pages/StudentLiveClass';
 import StudentEnrollment from './pages/staff/StudentEnrollment';
 import Announcements from './pages/staff/Announcements';
+import StaffRegister from './pages/staff/StaffRegister';
 
 
 export default function App() {
@@ -69,6 +70,7 @@ export default function App() {
 
               {/* Staff Routes */}
               <Route path="/staff/login" element={<StaffLogin />} />
+              <Route path="/staff/register" element={<StaffRegister />} />
               <Route path="/staff/*" element={
                 <ProtectedRoute role="staff">
                   <StaffLayout>

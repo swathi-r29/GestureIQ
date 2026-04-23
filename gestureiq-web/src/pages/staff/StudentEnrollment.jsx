@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
     UserPlus,
     CheckCircle2,
@@ -13,16 +14,17 @@ import {
     Clock,
     ChevronRight,
     ShieldCheck,
-    UserCheck
+    UserCheck,
+    Loader2
 } from 'lucide-react';
 
-const EnrollmentRequest = ({ name, email, date, level }) => (
+const EnrollmentRequest = ({ id, name, email, date, level, onApprove, onReject }) => (
     <div className="p-8 hover:bg-[var(--bg-card2)] transition-all group flex flex-col sm:flex-row sm:items-center justify-between gap-8 border-b border-[var(--border)] last:border-0"
         style={{ backgroundColor: 'var(--bg-card)' }}>
         <div className="flex items-center gap-6">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl border shadow-inner transition-transform group-hover:scale-110"
                 style={{ backgroundColor: 'var(--bg-card2)', color: 'var(--accent)', borderColor: 'var(--border)' }}>
-                {name[0]}
+                {name ? name[0] : '?'}
             </div>
             <div>
                 <h3 className="text-lg font-black tracking-tighter uppercase" style={{ color: 'var(--text)' }}>{name}</h3>
@@ -30,7 +32,7 @@ const EnrollmentRequest = ({ name, email, date, level }) => (
                 <div className="flex items-center gap-3 mt-3">
                     <span className="text-[9px] font-black uppercase tracking-[2px] px-3 py-1 rounded-lg border"
                         style={{ backgroundColor: 'var(--bg)', color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
-                        Requested: {date}
+                        Joined: {new Date(date).toLocaleDateString()}
                     </span>
                     <span className="text-[9px] font-black uppercase tracking-[2px] px-3 py-1 rounded-lg border"
                         style={{ backgroundColor: 'var(--bg-card2)', color: 'var(--accent)', borderColor: 'var(--border)' }}>
@@ -40,10 +42,14 @@ const EnrollmentRequest = ({ name, email, date, level }) => (
             </div>
         </div>
         <div className="flex items-center gap-4">
-            <button className="flex-1 sm:flex-none py-4 px-8 bg-accent text-white rounded-2xl text-[10px] font-black tracking-[3px] uppercase transition-all shadow-xl shadow-accent/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95">
+            <button 
+                onClick={() => onApprove(id)}
+                className="flex-1 sm:flex-none py-4 px-8 bg-accent text-white rounded-2xl text-[10px] font-black tracking-[3px] uppercase transition-all shadow-xl shadow-accent/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95">
                 <CheckCircle2 size={16} /> Approve
             </button>
-            <button className="flex-1 sm:flex-none py-4 px-8 border rounded-2xl text-[10px] font-black tracking-[3px] uppercase transition-all flex items-center justify-center gap-2 hover:bg-red-500 hover:text-white hover:border-red-500 active:scale-95"
+            <button 
+                onClick={() => onReject(id)}
+                className="flex-1 sm:flex-none py-4 px-8 border rounded-2xl text-[10px] font-black tracking-[3px] uppercase transition-all flex items-center justify-center gap-2 hover:bg-red-500 hover:text-white hover:border-red-500 active:scale-95"
                 style={{ backgroundColor: 'var(--bg-card2)', borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                 <XCircle size={16} /> Reject
             </button>
@@ -53,12 +59,55 @@ const EnrollmentRequest = ({ name, email, date, level }) => (
 
 const StudentEnrollment = () => {
     const [activeTab, setActiveTab] = useState('pending');
+    const [pending, setPending] = useState([]);
+    const [verified, setVerified] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    const pending = [
-        { name: "Aravind Kumar", email: "aravind@example.com", date: "2 hours ago", level: "Beginner" },
-        { name: "Sanya Gupta", email: "sanya@test.in", date: "5 hours ago", level: "Intermediate" },
-        { name: "Vijay Deshmukh", email: "vijay.d@gmail.com", date: "Just now", level: "Advanced" },
-    ];
+    useEffect(() => {
+        fetchData();
+    }, []);
+
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const [pendingRes, verifiedRes] = await Promise.all([
+                axios.get('/api/staff/enrollment/pending', { headers: { 'x-auth-token': token } }),
+                axios.get('/api/staff/enrollment/verified', { headers: { 'x-auth-token': token } })
+            ]);
+            setPending(pendingRes.data);
+            setVerified(verifiedRes.data);
+        } catch (err) {
+            console.error('Failed to fetch enrollment data');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleApprove = async (id) => {
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(`/api/staff/enrollment/${id}/approve`, {}, {
+                headers: { 'x-auth-token': token }
+            });
+            fetchData();
+        } catch (err) {
+            alert('Approval failed');
+        }
+    };
+
+    const handleReject = async (id) => {
+        if (!window.confirm('Are you sure you want to reject this student?')) return;
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(`/api/staff/enrollment/${id}/reject`, {}, {
+                headers: { 'x-auth-token': token }
+            });
+            fetchData();
+        } catch (err) {
+            alert('Rejection failed');
+        }
+    };
 
     return (
         <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000 pb-20">
@@ -84,28 +133,60 @@ const StudentEnrollment = () => {
                             onClick={() => setActiveTab('active')}
                             className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-[3px] transition-all ${activeTab === 'active' ? 'bg-accent text-white shadow-2xl shadow-accent/30' : 'opacity-40 hover:opacity-100'}`} style={{ color: activeTab === 'active' ? 'white' : 'var(--text)' }}
                         >
-                            All Verified
+                            All Verified ({verified.length})
                         </button>
                     </div>
 
-                    <div className="border rounded-[35px] overflow-hidden shadow-sm"
+                    <div className="border rounded-[35px] overflow-hidden shadow-sm min-h-[400px] flex flex-col"
                         style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                        {activeTab === 'pending' ? (
+                        {loading ? (
+                            <div className="flex-1 flex items-center justify-center opacity-20">
+                                <Loader2 size={40} className="animate-spin" />
+                            </div>
+                        ) : activeTab === 'pending' ? (
                             pending.length > 0 ? (
-                                pending.map((req, i) => <EnrollmentRequest key={i} {...req} />)
+                                pending.map((req) => (
+                                    <EnrollmentRequest 
+                                        key={req._id} 
+                                        id={req._id}
+                                        name={req.name}
+                                        email={req.email}
+                                        date={req.createdAt}
+                                        level={req.experience_level || 'Beginner'}
+                                        onApprove={handleApprove}
+                                        onReject={handleReject}
+                                    />
+                                ))
                             ) : (
                                 <div className="p-20 text-center opacity-30 font-black text-[10px] uppercase tracking-[6px]">No pending protocols found</div>
                             )
                         ) : (
-                            <div className="p-24 text-center space-y-8">
-                                <Users size={56} className="mx-auto opacity-10" />
-                                <div>
-                                    <p className="text-lg font-black tracking-tighter mb-2" style={{ color: 'var(--text)' }}>124 Verified Students</p>
-                                    <p className="text-[10px] font-black opacity-30 uppercase tracking-[4px]">Active Enrollment Database</p>
+                            verified.length > 0 ? (
+                                verified.map((req) => (
+                                    <div key={req._id} className="p-8 border-b border-[var(--border)] last:border-0 flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-full bg-accent/10 text-accent flex items-center justify-center font-bold">
+                                                {req.name[0]}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold uppercase text-xs" style={{ color: 'var(--text)' }}>{req.name}</p>
+                                                <p className="text-[10px] opacity-40" style={{ color: 'var(--text)' }}>{req.email}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Verified</span>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="p-24 text-center space-y-8">
+                                    <Users size={56} className="mx-auto opacity-10" />
+                                    <div>
+                                        <p className="text-lg font-black tracking-tighter mb-2" style={{ color: 'var(--text)' }}>0 Verified Students</p>
+                                        <p className="text-[10px] font-black opacity-30 uppercase tracking-[4px]">Active Enrollment Database</p>
+                                    </div>
                                 </div>
-                                <button className="text-[10px] font-black uppercase tracking-[4px] py-4 px-10 rounded-2xl border border-accent/20 transition-all hover:bg-accent hover:text-white"
-                                    style={{ color: 'var(--accent)' }}>Download Registry (CSV)</button>
-                            </div>
+                            )
                         )}
                     </div>
                 </div>

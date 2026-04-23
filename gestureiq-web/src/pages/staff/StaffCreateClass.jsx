@@ -2,14 +2,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { PUBLIC_URL } from '../../utils/constants';
 import { Plus, Calendar, Clock, Users, Globe, CheckCircle, Copy, ChevronRight } from 'lucide-react';
 
 // Mudras now fetched dynamically from backend
 
-// ── FIX: Always use VITE_PUBLIC_URL (ngrok) so link works for anyone ──
+// ── FIX: Always use PUBLIC_URL (ngrok) so link works for anyone ──
 const getJoinLink = (classId) => {
-  const base = import.meta.env.VITE_PUBLIC_URL || window.location.origin;
-  return `${base}/class/join/${classId}`;
+  return `${PUBLIC_URL}/class/join/${classId}`;
 };
 
 const StaffCreateClass = () => {

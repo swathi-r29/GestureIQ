@@ -1,17 +1,17 @@
 //src/utils/socket.js
 
 import { io } from 'socket.io-client';
+import { SOCKET_URL } from './constants';
 
 let _socket = null;
 
 export const getSocket = () => {
     if (!_socket) {
-        _socket = io('/', {
-            path: '/socket.io',
-            secure: false, // development
-            rejectUnauthorized: false,
+        const socketUrl = SOCKET_URL;
+        _socket = io(socketUrl, {
+            transports: ['websocket'],
             reconnection: true,
-            reconnectionAttempts: 10,
+            reconnectionAttempts: 5,
             reconnectionDelay: 1000,
         });
 

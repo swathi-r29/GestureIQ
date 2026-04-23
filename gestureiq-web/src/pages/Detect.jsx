@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth }     from '../context/AuthContext';
 import { useVoiceGuide } from '../hooks/useVoiceGuide';
-import io from 'socket.io-client';
+import { getSocket } from '../utils/socket';
 import { checkGeometricAnchors } from '../utils/geometricRules';
+import { FLASK_URL } from '../utils/constants';
+
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
@@ -95,6 +97,8 @@ export default function Detect() {
   const [modalMudra,  setModalMudra]  = useState(null);
   const [isNarrating, setIsNarrating] = useState(false);
   const [doubleMsg,   setDoubleMsg]   = useState('Show both hands to the camera');
+  const [frozenFrame, setFrozenFrame] = useState(null);
+  const [needsNextHand, setNeedsNextHand] = useState(false);
 
   const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
   const activeModulesRef = useRef(activeModules);
@@ -110,75 +114,58 @@ export default function Detect() {
   const landmarksRef   = useRef(null);
   const bufferRef      = useRef([]); // Prediction buffer for majority vote
   const inFlightRef    = useRef(false);
-  const lockRef        = useRef({ name: null, until: 0 });
+  const lockRef        = useRef({ name: null, expiry: 0 });
   const prevKeyRef     = useRef(null);
   const modalTimerRef  = useRef(null);
   const engineErrCount = useRef(0);
   const frameCapRef    = useRef(null); // for double mode frame capture
   const consecutiveRef = useRef({ name: null, count: 0 });
   const graceRef       = useRef(0); // For stability grace window (hysteresis)
+  const isNarratingRef = useRef(false);
+  useEffect(() => { isNarratingRef.current = isNarrating || showModal; }, [isNarrating, showModal]);
 
-  const STABILITY_THRESHOLD = 10;
+  const STABILITY_THRESHOLD = 6;
   const MIN_CONF            = 20;
+
 
   useEffect(() => {
     if (!user || user.role !== 'student') { navigate('/'); return; }
     
-    const sock = io(window.location.origin.replace('5173', '5000'));
+    const sock = getSocket();
     socketRef.current = sock;
     sock.on('modules_changed', (data) => {
       setActiveModules(data.modules || data);
     });
 
     return () => {
-      sock.disconnect();
+      // Shared socket - don't disconnect globally
       doCleanup();
     };
   }, [user, navigate]);
 
-  // ── Modal + voice on detection ─────────────────────────────
+  // ── Simple voice on detection ─────────────────────────────
+  const lastAnnouncedRef = useRef(null);
+  const announceCooldownRef = useRef(false);
+
   useEffect(() => {
-    if (detectedKey && detectedKey !== prevKeyRef.current && !isNarrating) {
-      prevKeyRef.current = detectedKey;
+    if (detectedKey && detectedKey !== lastAnnouncedRef.current && !announceCooldownRef.current) {
       const data = mode === 'single' ? MUDRA_DATA[detectedKey] : DOUBLE_MUDRA_DATA[detectedKey];
       if (!data) return;
 
-      if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
-      
-      // TRIGGER NARRATION & FREEZE
-      setIsNarrating(true);
-      
-      modalTimerRef.current = setTimeout(() => {
-        setModalMudra({ ...data, isDouble: mode === 'double' });
-        setShowModal(true);
-        
-        const text = `${data.name}. ${data.description}. Used for ${data.usage}.`;
-        announce.raw(text, 4, { 
-          onEnd: () => {
-            // Give 1 second of "Reading Time" after voice ends
-            setTimeout(() => {
-              setIsNarrating(false);
-              setShowModal(false);
-              
-              // RESET DETECTION (Clear Slate)
-              setDetectedKey(null);
-              setConfidence(0);
-              setTop3([]);
-              setBufSize(0);
-              consecutiveRef.current = { name: null, count: 0 };
-              prevKeyRef.current = null;
-            }, 1000);
-          } 
-        });
-      }, 800); // Trigger faster than previous 1500ms
+      lastAnnouncedRef.current = detectedKey;
+      announce.raw(`${data.name} Identified`, 3);
+
+      // Cooldown to prevent repetitive talking
+      announceCooldownRef.current = true;
+      setTimeout(() => {
+        announceCooldownRef.current = false;
+      }, 3000);
     }
-    
-    if (!detectedKey && !isNarrating) {
-      prevKeyRef.current = null;
-      if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
-      setShowModal(false);
+
+    if (!detectedKey) {
+      lastAnnouncedRef.current = null;
     }
-  }, [detectedKey, isNarrating, mode]);
+  }, [detectedKey, mode]);
 
   const doCleanup = useCallback(() => {
     if (rafRef.current)      cancelAnimationFrame(rafRef.current);
@@ -272,38 +259,69 @@ export default function Detect() {
       setDetectedKey(null);
       setConfidence(0);
       setBufSize(0);
+      lockRef.current = { name: null, expiry: 0 }; // Break lock on hand removal
       return;
     }
+    
+    // Clear the "Next Hand" prompt as soon as a hand appears
+    if (needsNextHand) setNeedsNextHand(false);
     setHandPresent(true);
     inFlightRef.current = true;
     try {
       const lmArray = Array.from(lms).map(lm => ({ x: lm.x, y: lm.y, z: lm.z }));
-      const res = await fetch(`/api/detect_landmarks`, {
+      const res = await fetch(`${FLASK_URL}/api/detect_landmarks`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ landmarks: lmArray }), signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) throw new Error('Flask error');
       const json = await res.json();
+      
+      // [LOCK CHECK] If narration started while we were at the API, ABORT
+      if (isNarratingRef.current) return;
+
+      // [INTELLIGENT HOLD] If we are currently locked onto a mudra, check if we should keep it
+      const now = Date.now();
+      if (now < lockRef.current.expiry && lockRef.current.name) {
+        setDetectedKey(lockRef.current.name);
+        return; // Skip new evaluations while locked
+      }
+
       setEngineOk(true);
       engineErrCount.current = 0;
       
       const isValid = (json.confidence || 0) >= MIN_CONF && !!json.name;
       const detectedName = isValid ? json.name : null;
 
-      // ── MAJORITY VOTE SMOOTHING (3-Frame Buffer) ──
+      // ── HIGH-CONFIDENCE BYPASS (Strict 96% for "Perfect" signals) ──
+      if (json.confidence > 96 && !!json.name) {
+        setDetectedKey(json.name);
+        setConfidence(json.confidence);
+        setTop3(json.top3 || []);
+        lockRef.current = { name: json.name, expiry: Date.now() + 2000 };
+        return;
+      }
+      
+      // ── IMMEDIATE DROP (Low confidence) ──
+      if (json.confidence < 30) {
+        setDetectedKey(null);
+        consecutiveRef.current = { name: null, count: 0 };
+        bufferRef.current = [];
+      }
+
+      // ── MAJORITY VOTE SMOOTHING (5-Frame Buffer) ──
       bufferRef.current.push(detectedName);
-      if (bufferRef.current.length > 3) bufferRef.current.shift();
+      if (bufferRef.current.length > 5) bufferRef.current.shift();
 
       let finalVote = null;
-      if (bufferRef.current.length === 3) {
+      if (bufferRef.current.length === 5) {
         const counts = {};
         bufferRef.current.forEach(n => { if (n) counts[n] = (counts[n] || 0) + 1; });
-        const winner = Object.entries(counts).find(([_, c]) => c >= 2);
+        const winner = Object.entries(counts).find(([_, c]) => c >= 3);
         if (winner) finalVote = winner[0];
       }
 
-      // RELAXED 10-FRAME GATE (with Grace Window)
-      const effectiveName = finalVote || (graceRef.current < 3 ? consecutiveRef.current.name : null);
+      // RELAXED GATE (with 1-Frame Grace)
+      const effectiveName = finalVote || (graceRef.current < 1 ? consecutiveRef.current.name : null);
       if (finalVote) graceRef.current = 0; else graceRef.current++;
 
       if (effectiveName && effectiveName === consecutiveRef.current.name) {
@@ -315,6 +333,8 @@ export default function Detect() {
       if (consecutiveRef.current.count >= STABILITY_THRESHOLD) {
         setDetectedKey(consecutiveRef.current.name);
         setConfidence(Math.min(98, 85 + (json.confidence || 0) * 0.15));
+        // Set the 2-second lock
+        lockRef.current = { name: consecutiveRef.current.name, expiry: Date.now() + 2000 };
       } else {
         setDetectedKey(null);
         setConfidence(0);
@@ -380,12 +400,16 @@ export default function Detect() {
             targetMudra: '' // Detection mode
         };
 
-        const res = await fetch(`/api/detect_double_landmarks`, {
+        const res = await fetch(`${FLASK_URL}/api/detect_double_landmarks`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload), signal: AbortSignal.timeout(3000),
         });
         if (!res.ok) throw new Error('Flask error');
         const json = await res.json();
+
+        // [LOCK CHECK] If narration started while we were at the API, ABORT
+        if (isNarratingRef.current) return;
+
         setEngineOk(true);
         engineErrCount.current = 0;
 
@@ -397,7 +421,7 @@ export default function Detect() {
           consecutiveRef.current = { name: detectedName, count: detectedName ? 1 : 0 };
         }
 
-      if (consecutiveRef.current.count >= 4) { // Insta-Gate (4 frames)
+      if (consecutiveRef.current.count >= STABILITY_THRESHOLD) { // 2-Frame Gate
         setDetectedKey(consecutiveRef.current.name);
         setConfidence(Math.round(json.confidence || 0));
         setDoubleMsg(`✓ ${consecutiveRef.current.name} identified!`);
@@ -461,13 +485,14 @@ export default function Detect() {
     videoRef.current.srcObject = streamRef.current;
     videoRef.current.play().catch(() => {});
     const loop = async () => {
-      if (videoRef.current?.readyState >= 2 && handsRef.current)
+      // [TASK 5] Atomic Pause: Stop sending frames to MediaPipe while narrating/modal is open
+      if (!isNarrating && !showModal && videoRef.current?.readyState >= 2 && handsRef.current)
         await handsRef.current.send({ image: videoRef.current }).catch(() => {});
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     const detect = mode === 'single' ? runSingleDetection : runDoubleDetection;
-    intervalRef.current = setInterval(detect, 200); // Sustainable frequency for remote/ngrok stability
+    intervalRef.current = setInterval(detect, 100); // Pro speed: 100ms interval
     return () => { cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
   }, [cameraOn, mode, runSingleDetection, runDoubleDetection]);
 
@@ -563,26 +588,6 @@ export default function Detect() {
                 <>
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
                   <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }} />
-
-                  {/* Status */}
-                  <div className="absolute top-6 left-6 flex items-center gap-3 px-4 py-2 rounded-2xl backdrop-blur-xl border border-white/20 bg-white/10 shadow-lg">
-                    <div className={`w-2 h-2 rounded-full ${si.pulse ? 'animate-pulse' : ''}`} style={{ backgroundColor: si.color }} />
-                    <span className="text-[10px] text-white font-bold uppercase tracking-[2px]">
-                      {mode === 'double' && !isDetected ? doubleMsg : si.label}
-                    </span>
-                  </div>
-
-                  {/* Detected pill */}
-                  {isDetected && (
-                    <div className="absolute top-6 right-6">
-                      <div className="px-6 py-3 rounded-2xl backdrop-blur-2xl text-right shadow-2xl border border-white/20"
-                        style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
-                        <div className="text-[9px] uppercase tracking-[3px] text-white/60 mb-1 font-bold">Identified</div>
-                        <div className="text-2xl font-black text-white uppercase tracking-tight">{mudra?.name}</div>
-                        <div className="text-[10px] italic text-white/80">{mudra?.meaning}</div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* No hand prompt */}
                   {status === 'no_hand' && (

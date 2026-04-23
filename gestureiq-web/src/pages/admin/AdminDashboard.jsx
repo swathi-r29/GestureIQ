@@ -104,8 +104,8 @@ export default function AdminDashboard() {
                         <BarChart2 size={16} style={{ color: 'var(--accent)' }} />
                         <h3 className="text-[10px] tracking-[4px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Top 10 Practiced Mudras</h3>
                     </div>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] w-full" style={{ minWidth: 0 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <BarChart data={mudraStats}>
                                 <XAxis dataKey="mudraName" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
                                 <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
@@ -125,8 +125,8 @@ export default function AdminDashboard() {
                         <LineIcon size={16} style={{ color: 'var(--accent)' }} />
                         <h3 className="text-[10px] tracking-[4px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>New Registrations (Last 7 Days)</h3>
                     </div>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] w-full" style={{ minWidth: 0 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <LineChart data={registrations}>
                                 <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
                                 <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
@@ -150,8 +150,8 @@ export default function AdminDashboard() {
                         <PieIcon size={16} style={{ color: 'var(--accent)' }} />
                         <h3 className="text-[10px] tracking-[4px] uppercase font-bold" style={{ color: 'var(--text-muted)' }}>Students by Level</h3>
                     </div>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] w-full" style={{ minWidth: 0 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <PieChart>
                                 <Pie
                                     data={levelData}

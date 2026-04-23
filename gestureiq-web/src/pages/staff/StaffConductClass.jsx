@@ -150,6 +150,19 @@ const StaffConductClass = () => {
   const socketToUserIdRef = useRef({});
 
   useEffect(() => {
+    // Autoplay Fix: Unmute on first click
+    const handleFirstClick = () => {
+      const vids = document.querySelectorAll('video');
+      vids.forEach(v => {
+        if (v !== localVideoRef.current) { // Don't unmute local preview
+          v.muted = false;
+          v.play().catch(() => {});
+        }
+      });
+      document.removeEventListener('click', handleFirstClick);
+    };
+    document.addEventListener('click', handleFirstClick);
+
     const init = async () => {
       await fetchClassAndStart();
       await startLocalStream();
@@ -199,33 +212,35 @@ const StaffConductClass = () => {
         video: true,
         audio: {
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: true,
+          autoGainControl: true
         }
       });
       
-      // --- AUDIO AUDIT: Verify Mic Capture ---
-      const audioTracks = stream.getAudioTracks();
-      if (audioTracks.length > 0) {
-        console.log(`[WebRTC Teacher] Using Mic: ${audioTracks[0].label} (${audioTracks[0].readyState})`);
-        if (audioTracks[0].readyState === 'ended') {
-          console.error('[WebRTC Teacher] Mic track is in "ended" state! Audio will be silent.');
-        }
-      } else {
-        console.error('[WebRTC Teacher] No audio track found in the captured stream!');
-      }
-
       localStreamRef.current = stream;
       streamReadyRef.current = true;
 
+      // Force local review mute to prevent feedback loop beep
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        localVideoRef.current.muted = true;
       }
 
-      unlock(); // Bypass browser autoplay blocks
-      console.log('[WebRTC Teacher] Camera ready — sending offers to existing students');
+      // Debug tracks & Settings
+      console.log("🎤 Teacher tracks captured:");
+      stream.getAudioTracks().forEach(t => {
+          console.log(`[Audio Track] ${t.label}: ${t.enabled} settings:`, t.getSettings());
+          t.enabled = true; // Force ON
+      });
+      stream.getVideoTracks().forEach(t => console.log(`[Video Track] ${t.label}: ${t.enabled}`));
 
-      peerConnectionsRef.current.forEach((pc, studentSocketId) => {
-        if (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
+      unlock(); // Bypass browser autoplay blocks
+      console.log('[WebRTC Teacher] Camera ready — sending offers to all students');
+
+      // FIX: Iterate over all known student sockets, not just existing peer connections
+      Object.keys(socketToUserIdRef.current).forEach(studentSocketId => {
+        const pc = peerConnectionsRef.current.get(studentSocketId);
+        if (!pc || (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed')) {
           handleCreateOffer(studentSocketId);
         }
       });
@@ -378,8 +393,20 @@ const StaffConductClass = () => {
     lastOfferTimeRef.current.set(studentSocketId, now);
 
     try {
-      console.log('[WebRTC Teacher] Starting new handshake for:', studentSocketId);
+      console.log('[WebRTC Teacher] Starting new handshake (Audio + Video) for:', studentSocketId);
       const newPC = createPeerConnection(studentSocketId);
+      
+      // Ensure tracks are added (redundant but safe)
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => {
+          // Check if already added
+          const senders = newPC.getSenders();
+          if (!senders.find(s => s.track === track)) {
+            newPC.addTrack(track, localStreamRef.current);
+          }
+        });
+      }
+
       const offer = await newPC.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true
@@ -391,7 +418,7 @@ const StaffConductClass = () => {
         to: studentSocketId,
         offer
       });
-      console.log('[WebRTC Teacher] Offer sent to:', studentSocketId);
+      console.log('[WebRTC Teacher] Offer sent (Tracks added) to:', studentSocketId);
     } catch (err) {
       console.error('[WebRTC Teacher] Error creating offer:', err);
     } finally {
@@ -555,13 +582,11 @@ const StaffConductClass = () => {
         console.log('[Socket] State update acknowledging:', data);
       });
 
-      // --- NEW: AI VOICE PROXY LISTENER ---
-      // Allows the teacher to hear what the student's AI is saying
-      s.on('receive_proxy_voice', (data) => {
-        console.log(`[Proxy Voice] Student ${data.from} AI says: ${data.text}`);
-        // Use priority 2 to ensure it doesn't drown out essential classroom alerts
-        announce?.raw(`Student AI: ${data.text}`, 2);
-      });
+      // --- [VOICE DISABLED FOR LIVE CLASS] ---
+      // s.on('receive_proxy_voice', (data) => {
+      //   console.log(`[Proxy Voice] Student ${data.from} AI says: ${data.text}`);
+      //   announce?.raw(`Student AI: ${data.text}`, 2);
+      // });
 
       // Student requests offer (e.g. they refreshed or joined late)
       s.on('request_webrtc_offer', async ({ from }) => {
@@ -664,9 +689,7 @@ const StaffConductClass = () => {
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsMicOn(audioTrack.enabled);
-        console.log(`[WebRTC Teacher] Mic is now: ${audioTrack.enabled ? 'ON' : 'OFF'}`);
-      } else {
-        console.error('[WebRTC Teacher] No audio track found to toggle!');
+        console.log(`[WebRTC Teacher] Mic state: ${audioTrack.enabled ? 'ON' : 'OFF'}`);
       }
     }
   };

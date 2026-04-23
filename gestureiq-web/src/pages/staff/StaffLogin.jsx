@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
 
@@ -117,7 +117,7 @@ const StaffLogin = () => {
 
         <div className="mt-8 text-center">
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Need an account? <a href="/register" style={{ color: 'var(--accent)' }}>Register as Staff</a>
+            Need an account? <Link to="/staff/register" style={{ color: 'var(--accent)' }}>Register as Staff</Link>
           </p>
         </div>
       </div>

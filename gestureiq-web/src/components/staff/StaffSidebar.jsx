@@ -35,7 +35,6 @@ const StaffSidebar = () => {
             items: [
                 { name: 'Create Class', icon: PlusCircle, path: '/staff/class/create' },
                 { name: 'My Classes', icon: Calendar, path: '/staff/classes' },
-                { name: 'Live Now', icon: Radio, path: '/staff/live-now' },
             ]
         },
         {

@@ -58,6 +58,8 @@ if os.path.exists(mudra_model_path):
 else:
     print(f"[WARNING] Mudra model not found at {mudra_model_path}")
 
+SINGLE_MODEL_CLASSES = list(model.classes_) if model is not None else []
+
 navarasa_model = None
 navarasa_model_path = os.path.join(MODEL_DIR, "navarasa_model.pkl")
 if os.path.exists(navarasa_model_path):
@@ -166,8 +168,8 @@ _segmentor = _mp_selfie.SelfieSegmentation(model_selection=1) # 1 for landscape/
 WRIST_HISTORY = deque(maxlen=5) # Task 1: Velocity Gating
 # Using a global dict is much more stable than attaching attributes to functions.
 SMOOTHING_REGISTRY = {
-    "single": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""},
-    "double": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": ""}
+    "single": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": "", "prev_raw_conf": 0.0, "prev_geom_acc": 0.0, "last_hand": "Right"},
+    "double": {"smooth_acc": 0.0, "prev_display": 0.0, "last_target": "", "prev_raw_conf": 0.0, "prev_geom_acc": 0.0, "last_hand": "Right"}
 }
 
 # Explicit Cleanup Handler (Task 1)
@@ -189,10 +191,10 @@ cap = cv2.VideoCapture(0)
 # =============================================================================
 # EMA + STABILITY PARAMETERS
 # =============================================================================
-EMA_ALPHA          = 0.45
+EMA_ALPHA          = 0.75
 LANDMARK_EMA_ALPHA = 0.25
-MIN_STABLE_FRAMES  = 6
-STABLE_THRESHOLD   = 0.58
+MIN_STABLE_FRAMES  = 2
+STABLE_THRESHOLD   = 0.5
 FAST_BREAK_FRAMES  = 5
 
 is_double_mode = False  # [FIX 1] Hard mode switch flag
@@ -249,6 +251,8 @@ last_good_data = {} # { 'mudra_name': { result_dict } }
 MAX_GOOD_DATA_CACHE = 100
 
 frame_counter = 0
+no_hand_counter = 0
+NO_HAND_GRACE_PERIOD = 8 # Prevent feedback flicker if hand tracking drops briefly
 PROCESS_EVERY_N_FRAMES = 2
 
 HOLD_THRESHOLD  = 0.035  # Increased from 0.018 to be more forgiving
@@ -658,6 +662,34 @@ def get_finger_angles_dict(landmarks):
     })
     return res
 
+# --- [NEW] STRICT RULE HELPERS (Tamrachuda Group Fix) ---
+def is_finger_up(landmarks, tip_idx, pip_idx):
+    """Tip below PIP in coordinate space (inverted Y)"""
+    return landmarks[tip_idx].y < landmarks[pip_idx].y
+
+def is_thumb_up_strict(landmarks):
+    """Thumb tip X vs IP X (simple approximation)"""
+    return landmarks[4].x > landmarks[3].x
+
+def is_pinky_up_strict(landmarks):
+    return is_finger_up(landmarks, 20, 18)
+
+def thumb_touch_index(landmarks):
+    """Euclidean distance between thumb tip and index tip"""
+    p1 = (landmarks[4].x, landmarks[4].y)
+    p2 = (landmarks[8].x, landmarks[8].y)
+    dist = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+    return dist < 0.05
+
+def is_pinky_up_relaxed(smooth_angles):
+    return smooth_angles.get("pinky", 180) > 130
+
+def is_thumb_up_relaxed(smooth_angles):
+    return smooth_angles.get("thumb", 180) > 130
+
+def is_finger_up_relaxed(smooth_angles, finger):
+    return smooth_angles.get(finger, 180) > 130
+
 # =============================================================================
 # NAVARASA DETECTION
 # =============================================================================
@@ -778,6 +810,11 @@ def update_stability(current_name, ema_prob_vector, min_frames_override=None):
         stable_count = max(stable_count - 1, 0)
 
     is_stable = (stable_count >= target_frames)
+    
+    # --- [NEW] EARLY DETECTION (UX Fix) ---
+    if smooth_conf > 60.0:
+        is_stable = True
+        
     return stable_mudra, is_stable, smooth_conf
 
 # =============================================================================
@@ -1409,6 +1446,12 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         run_madm.last_target = target_key
         run_madm.smooth_acc = 0.0
         run_madm.prev_display = 0.0
+    
+    # [PHASE 18] Sync SMOOTHING_REGISTRY
+    reg = SMOOTHING_REGISTRY["single"]
+    prev_raw_conf = reg.get("prev_raw_conf", 0.0)
+    prev_geom_acc = reg.get("prev_geom_acc", 0.0)
+    last_hand_label = reg.get("last_hand", "Right")
         
     # [PHASE 13] RESULT FALLBACK (Single Hand)
     # If the target is a complex/joined hand and we lose confidence while stable, use fallback
@@ -1465,24 +1508,164 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         if best_raw_probs is None:
             return {"detected": False, "feedback": "Prediction error"}
 
-        raw_probs = best_raw_probs
         raw_conf  = best_raw_conf
         raw_name  = best_raw_name
+        raw_probs = best_raw_probs # Fix for UnboundLocalError
+        
+        # [PHASE 18] Orientation Sticky Logic: Prevent stability resets from label jitter
+        if abs(best_raw_conf - prev_raw_conf) < 10.0:
+            # If confidence is close, stick to the last valid hand label
+            best_hand_label = last_hand_label
+        reg["last_hand"] = best_hand_label
+
+        # [PHASE 18] Confidence Smoothing
+        raw_conf = (0.7 * raw_conf) + (0.3 * prev_raw_conf)
+        reg["prev_raw_conf"] = raw_conf
+
         print(f"[DEBUG] ML Predicted: {raw_name} ({raw_conf:.1f}%) [Orientation: {best_hand_label}]")
 
+        # 🔥 EARLY FORCE PROMOTE (Instant Success)
+        if target_key and raw_name == target_key and raw_conf > 80:
+            # Re-calculate geometry for accuracy return
+            raw_angles = get_finger_angles_dict(smooth_lm)
+            lm_wrapper = LMWrapper(smooth_lm)
+            active_corrections, geom_acc, current_finger_colors, _ = get_corrections(target_key, raw_angles, lm_wrapper, palm_size)
+            
+            # Smooth geom_acc
+            geom_acc = (0.6 * geom_acc) + (0.4 * prev_geom_acc)
+            reg["prev_geom_acc"] = geom_acc
+            
+            display_acc = (raw_conf * 0.7) + (geom_acc * 0.3)
+            
+            return {
+                "detected": True,
+                "name": target_key,
+                "status": "Correct" if display_acc >= 75 else "Unknown",
+                "wrong_mudra": "",
+                "target_mudra": target_mudra if target_mudra else "",
+                "confidence": round(raw_conf, 1),
+                "accuracy": round(display_acc, 1),
+                "corrections": active_corrections if display_acc < 75 else [],
+                "finger_colors": current_finger_colors,
+                "is_stable": True,
+                "hold_progress": 0, "hold_state": "idle",
+                "meaning": MUDRA_MEANINGS.get(target_key, ""),
+                "landmarks": lm_to_json(lm_list)
+            }
+
+        # [PHASE 18] Prepare angles for Rule Veto and Geometry
         raw_angles    = get_finger_angles_dict(smooth_lm)
         angle_buffer.append(raw_angles)
         finger_angles = {f: sum(a[f] for a in angle_buffer) / len(angle_buffer) for f in raw_angles}
         lm_wrapper    = LMWrapper(smooth_lm)
 
+        # --- [NEW] RULE OVERRIDE + FAST LOCK (Relaxed) ---
+        rule_triggered = False
+        skip_rule_veto = (target_key and raw_name == target_key and raw_conf > 50)
+        
+        if not skip_rule_veto:
+            # 1. Musti Rejection (All fingers fully closed)
+            if (raw_angles.get("index", 180) < 85 and 
+                raw_angles.get("middle", 180) < 85 and 
+                raw_angles.get("ring", 180) < 85 and 
+                raw_angles.get("pinky", 180) < 85):
+                raw_name = "musti"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Explicit Musti detection (Fist Rejection)")
+
+            # 2. Strict Kapittha (Thumb touch + Specific Bend)
+            elif (thumb_touch_index(smooth_lm) and 
+                  90 < raw_angles.get("index", 0) < 165 and
+                  raw_angles.get("thumb", 0) > 115 and
+                  not is_pinky_up_relaxed(raw_angles)):
+                raw_name = "kapittha"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Kapittha (Strict Lock)")
+            
+            # 3. Pataka (Flat Palm - All fingers up and straight)
+            elif (raw_angles.get("index", 0) > 160 and 
+                  raw_angles.get("middle", 0) > 160 and 
+                  raw_angles.get("ring", 0) > 160 and 
+                  raw_angles.get("pinky", 0) > 160 and
+                  raw_angles.get("thumb", 0) > 140):
+                raw_name = "pataka"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Pataka (Flat Palm)")
+
+            # 4. Correct Tamrachuda (Index bent, others closed)
+            elif (raw_angles.get("index", 0) < 130 and
+                  raw_angles.get("middle", 180) < 100 and
+                  raw_angles.get("ring", 180) < 100 and
+                  raw_angles.get("pinky", 180) < 100):
+                raw_name = "tamrachuda"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Tamrachuda (Rooster Crest)")
+            
+            # 4. Arala (Index bent, others straight)
+            elif (raw_angles.get("index", 180) < 110 and
+                  raw_angles.get("middle", 0) > 160 and
+                  raw_angles.get("ring", 0) > 160 and
+                  raw_angles.get("pinky", 0) > 160):
+                raw_name = "arala"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Arala (Index Bend)")
+
+            # 5. Tripataka (Ring bent, others straight)
+            elif (raw_angles.get("ring", 180) < 110 and
+                  raw_angles.get("index", 0) > 160 and
+                  raw_angles.get("middle", 0) > 160 and
+                  raw_angles.get("pinky", 0) > 160):
+                raw_name = "tripataka"
+                raw_conf = 95.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Tripataka (Ring Bend)")
+
+            # 6. Sarpashira (Flattened tips - Cobra head)
+            elif (130 < raw_angles.get("index", 0) < 165 and
+                  130 < raw_angles.get("middle", 0) < 165 and
+                  130 < raw_angles.get("ring", 0) < 165 and
+                  130 < raw_angles.get("pinky", 0) < 165):
+                raw_name = "sarpashira"
+                raw_conf = 92.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Sarpashira (Cobra Head)")
+
+            # 7. Trishula (Pinky and Thumb down, 3 fingers up)
+            elif (raw_angles.get("index", 0) > 155 and
+                  raw_angles.get("middle", 0) > 155 and
+                  raw_angles.get("ring", 0) > 155 and
+                  not is_thumb_up_relaxed(raw_angles) and
+                  not is_pinky_up_relaxed(raw_angles)):
+                raw_name = "trishula"
+                raw_conf = 90.0
+                rule_triggered = True
+                print(f"[RULE VETO] Override to Trishula (Fast Lock)")
+
+        if rule_triggered:
+            # Force high-confidence probability vector for instant EMA lock
+            if raw_name in SINGLE_MODEL_CLASSES:
+                mi = SINGLE_MODEL_CLASSES.index(raw_name)
+                raw_probs = np.zeros_like(raw_probs)
+                raw_probs[mi] = 0.9
+            # Add strict floor to prevent spike drops
+            raw_conf = max(raw_conf, 75.0)
+
         # TARGET-PRIORITY HYBRID LOGIC
         geom_acc   = 0
-        # target_key already sanitized at function entry
         if target_key and target_key in MUDRA_REFERENCE_ANGLES:
             _, geom_acc, _, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             if target_key == "hamsasya":
                 if dist_lm(lm_wrapper, 4, 8, palm_size) < 0.12 and finger_angles.get("index", 180) < 110:
                     geom_acc = 95.0
+
+        # [PHASE 18] Geometry Smoothing
+        geom_acc = (0.6 * geom_acc) + (0.4 * prev_geom_acc)
+        reg["prev_geom_acc"] = geom_acc
 
         ema_p      = update_ema_probs(raw_probs)
         top_idx    = int(np.argmax(ema_p))
@@ -1503,47 +1686,59 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                         is_stable   = False
                         break
 
-        # [PHASE 18] Strict Accuracy & Wrong Mudra Validation
-        display_acc = 0.0
+        # [PHASE 18] 100% PRODUCTION FEEDBACK LOGIC
+        final_status = "Unknown"
+        out_wrong    = ""
+        out_target   = target_mudra if target_mudra else ""
         active_corrections = []
-        current_finger_colors = None
+        current_finger_colors = {f: "green" for f in ["thumb", "index", "middle", "ring", "pinky"]}
+        display_acc  = 0.0
         
         clean_stable = clean_mudra_name(stable_name)
+        
+        # Base accuracy calculation for all states (even Unknown/Adjusting)
+        # This prevents the AI Score from being 0/hidden.
+        display_accIdx = int(np.argmax(ema_p))
+        ml_acc = float(ema_p[display_accIdx] * 100) if raw_name == target_key or stable_name == target_key else 0
+        display_acc = (ml_acc * 0.7) + (geom_acc * 0.3)
+        
         is_wrong = (target_key and clean_stable != target_key and (smooth_conf > 30 or raw_conf > 30))
 
         if is_wrong:
-            wrong_msg = f"Wrong mudra — you are showing {stable_name.capitalize()} instead of {target_mudra.capitalize()}"
-            display_acc = 0.0
-            if target_key in MUDRA_REFERENCE_ANGLES:
-                active_corrections, _, current_finger_colors, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
-            active_corrections = [c for c in active_corrections if not c.startswith("Wrong mudra")]
-            active_corrections.insert(0, wrong_msg)
+            final_status = "Wrong Mudra"
+            out_wrong    = stable_name.capitalize()
+            display_acc  = 0.0
+            wrong_msg    = f"You are showing {out_wrong} instead of {out_target}"
+            active_corrections    = [wrong_msg]
+            current_finger_colors = {f: "red" for f in ["thumb", "index", "middle", "ring", "pinky"]}
         elif target_key:
             if target_key in MUDRA_REFERENCE_ANGLES:
                 active_corrections, geom_acc, current_finger_colors, _ = get_corrections(target_key, finger_angles, lm_wrapper, palm_size)
             
-            if clean_stable == target_key:
-                display_acc = (smooth_conf * 0.7) + (geom_acc * 0.3)
-            else:
-                display_acc = geom_acc
+            if display_acc >= 75:
+                final_status = "Correct"
         else:
             if stable_name in MUDRA_REFERENCE_ANGLES:
                 active_corrections, geom_acc, current_finger_colors, _ = get_corrections(stable_name, finger_angles, lm_wrapper, palm_size)
             display_acc = (smooth_conf * 0.7) + (geom_acc * 0.3)
+            if display_acc >= 75:
+                final_status = "Correct"
 
         return {
-            "detected":    True,
-            "name":        stable_name if not target_key else target_key,
-            "confidence":  round(raw_conf, 1),
-            "status":      "Correct" if display_acc >= 75 else "Stabilizing..." if (display_acc < 75 and display_acc > 0) else "Refining Form",
-            "accuracy":    round(display_acc, 1),
-            "corrections": active_corrections if active_corrections else ["Match the position carefully"],
-            "meaning":     MUDRA_MEANINGS.get(target_key or stable_name, ""),
-            "is_stable":   display_acc >= 75,
-            "landmarks":   lm_to_json(lm_list),
-            "hold_progress": 0,
-            "hold_state":  "idle",
+            "detected":     True,
+            "name":         stable_name if not target_key else target_key,
+            "status":       final_status,
+            "wrong_mudra":  out_wrong,
+            "target_mudra": out_target,
+            "confidence":   round(raw_conf, 1),
+            "accuracy":     round(display_acc, 1),
+            "corrections":  active_corrections,
             "finger_colors": current_finger_colors,
+            "is_stable":    is_stable,
+            "hold_progress": 0,
+            "hold_state":   "idle",
+            "meaning":      MUDRA_MEANINGS.get(target_key or stable_name, ""),
+            "landmarks":    lm_to_json(lm_list)
         }
 
     except Exception as e:
@@ -1777,11 +1972,20 @@ def detect_frame():
 
         mudra_result = base_response.copy()
         result       = hands.process(rgb_frame)
+        
         if not result.multi_hand_landmarks:
-            ema_landmarks = None
-            ema_probs     = None
-            current_mudra = base_response.copy()
+            no_hand_counter += 1
+            if no_hand_counter < NO_HAND_GRACE_PERIOD and current_mudra.get("detected"):
+                # Transition: Hand lost briefly, keep last state but mark as adjusting
+                mudra_result = current_mudra.copy()
+                mudra_result["status"] = "Adjusting..."
+            else:
+                ema_landmarks = None
+                ema_probs     = None
+                current_mudra = base_response.copy()
+                mudra_result = base_response.copy()
         else:
+            no_hand_counter = 0
             mudra_result = run_madm(result.multi_hand_landmarks[0], target)
             current_mudra.update(mudra_result)
 
@@ -1822,12 +2026,22 @@ def detect_landmarks():
         handedness     = body.get('handedness', 'Right')
 
         if presence_score < 0.25:
-            return jsonify({
+            no_hand_counter += 1
+            if no_hand_counter < NO_HAND_GRACE_PERIOD and current_mudra.get("detected"):
+                # Grace period: use last valid state
+                return jsonify(current_mudra)
+            
+            ema_landmarks = None
+            ema_probs     = None
+            res = {
                 "detected": False, "status": "No Hand Detected",
                 "confidence": 0, "feedback": "Hand presence too low",
                 "accuracy": 0, "corrections": [], "hold_progress": 0, "hold_state": "idle",
-            })
+            }
+            current_mudra.update(res)
+            return jsonify(res)
 
+        no_hand_counter = 0
         mudra_result = run_madm(landmarks, target, label=handedness, min_frames=3)
         mudra_result.update(current_navarasa)
         current_mudra.update(mudra_result)

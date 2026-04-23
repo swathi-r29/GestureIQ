@@ -13,21 +13,10 @@ const app = express();
 
 const allowedOrigins = [
     process.env.CLIENT_URL,
-    // HTTP variants (legacy / localhost direct access)
     'http://localhost:5173',
     'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
-    // HTTPS variants — required now that Vite runs with basicSsl
     'https://localhost:5173',
     'https://localhost:5174',
-    'https://127.0.0.1:5173',
-    'https://127.0.0.1:5174',
-    // Network IP — required for mobile access on same WiFi
-    'http://10.161.112.28:5173',
-    'https://10.161.112.28:5173',
-    'http://10.161.112.28:5174',
-    'https://10.161.112.28:5174',
 ];
 
 app.use(cors({
@@ -44,6 +33,11 @@ app.use(cors({
 
         // Allow any ngrok subdomain (dev flexibility)
         if (/^https?:\/\/.*\.ngrok-free\.(app|dev)$/.test(origin)) {
+            return callback(null, true);
+        }
+
+        // Allow any 10.x.x.x IP (Local LAN flexibility)
+        if (/^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(origin)) {
             return callback(null, true);
         }
 

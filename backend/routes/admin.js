@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const adminAuth = require('../middleware/adminAuth');
+const { sendStaffApprovalEmail, sendStaffRejectionEmail } = require('../utils/mailer');
 
 // @route   POST api/admin/login
 // @desc    Admin login using .env credentials
@@ -367,12 +368,19 @@ router.get('/staff/all', adminAuth, async (req, res) => {
 router.post('/staff/approve', adminAuth, async (req, res) => {
     try {
         const { staffId } = req.body;
-        await User.findByIdAndUpdate(staffId, {
-            status: 'approved',
-            approvedAt: Date.now()
-        });
+        const staff = await User.findById(staffId);
+        if (!staff) return res.status(404).json({ msg: 'Staff not found' });
+
+        staff.status = 'approved';
+        staff.approvedAt = Date.now();
+        await staff.save();
+
+        // Send Notification Email
+        await sendStaffApprovalEmail(staff.email, staff.name);
+
         res.json({ success: true });
     } catch (err) {
+        console.error(err);
         res.status(500).send('Approval Failed');
     }
 });
@@ -381,12 +389,19 @@ router.post('/staff/approve', adminAuth, async (req, res) => {
 router.post('/staff/reject', adminAuth, async (req, res) => {
     try {
         const { staffId, reason } = req.body;
-        await User.findByIdAndUpdate(staffId, {
-            status: 'rejected',
-            rejectionReason: reason
-        });
+        const staff = await User.findById(staffId);
+        if (!staff) return res.status(404).json({ msg: 'Staff not found' });
+
+        staff.status = 'rejected';
+        staff.rejectionReason = reason;
+        await staff.save();
+
+        // Send Notification Email
+        await sendStaffRejectionEmail(staff.email, staff.name, reason);
+
         res.json({ success: true });
     } catch (err) {
+        console.error(err);
         res.status(500).send('Rejection Failed');
     }
 });

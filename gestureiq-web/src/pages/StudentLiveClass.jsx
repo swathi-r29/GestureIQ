@@ -105,14 +105,27 @@ const StudentLiveClass = () => {
   const aiScoreRef = useRef(0);
   const sessionStatusRef = useRef('Incorrect');
   const consecutiveRef = useRef({ name: null, count: 0 });
+  const preStabilityRef = useRef({ name: null, count: 0 });
   const graceRef = useRef(0); // For stability grace window (hysteresis)
-  const STABILITY_THRESHOLD = 10;
-  const STABILITY_THRESHOLD_DOUBLE = 4;
+  const STABILITY_THRESHOLD = 6;
+  const STABILITY_THRESHOLD_DOUBLE = 3;
+  const smoothedScoreRef = useRef(0);
+  const holdTimerRef = useRef(null);
+  const frameBufferRef = useRef([]);
 
   const targetMudraRef = useRef('');
   const fingerDeviationsRef = useRef(null);
 
   useEffect(() => { classDataRef.current = classData; }, [classData]);
+
+  // FIX: Clear hold timer on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+      }
+    };
+  }, []);
 
   // ── handleReceiveOffer ──────────────────────────────────────
   const handleReceiveOffer = useCallback(async (offer, fromSocketId) => {
@@ -158,38 +171,35 @@ const StudentLiveClass = () => {
       console.warn('[WebRTC Student] Received null offer, skipping');
       return;
     }
-
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peerConnectionRef.current = pc;
 
-      pc.ontrack = (event) => {
-        if (peerConnectionRef.current !== pc) return;
-        
-        const audioTracks = event.streams[0]?.getAudioTracks() || [];
-        console.log(`[WebRTC Student] Got remote track: ${event.track.kind}. Total audio tracks from teacher: ${audioTracks.length}`);
-        
-        if (remoteVideoRef.current) {
-          let stream = event.streams[0] || remoteVideoRef.current.srcObject;
-          if (!stream || !(stream instanceof MediaStream)) stream = new MediaStream();
-          if (!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
-          
-          if (remoteVideoRef.current.srcObject !== stream) {
-            remoteVideoRef.current.srcObject = stream;
-          }
+    pc.ontrack = (event) => {
+      console.log("🎧 Teacher stream received");
+      const remoteStream = event.streams[0];
+      
+      console.log("🎧 Tracks from teacher:");
+      if (remoteStream) {
+        remoteStream.getTracks().forEach(t => {
+          console.log(`[Remote Track] ${t.kind}: ${t.enabled} (${t.readyState})`);
+        });
 
-          // EXPLICIT AUTO-UNMUTE FOR HUMAN VOICE
-          remoteVideoRef.current.muted = false;
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          remoteVideoRef.current.muted = false; 
+          remoteVideoRef.current.volume = 1.0;
+
           remoteVideoRef.current.onloadedmetadata = () => {
-              console.log('[WebRTC Student] Teacher feed metadata loaded, unmuting human voice.');
-              if (remoteVideoRef.current) {
-                  remoteVideoRef.current.muted = false;
-                  remoteVideoRef.current.play().catch(e => console.warn('[WebRTC Student] Teacher feed play failed:', e));
-              }
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.play().catch(err => {
+                console.warn("Autoplay blocked:", err);
+              });
+            }
           };
-          
-          setTeacherConnected(true);
         }
-      };
+        setTeacherConnected(true);
+      }
+    };
 
     pc.onicecandidate = (event) => {
       if (peerConnectionRef.current !== pc) return;
@@ -275,6 +285,19 @@ const StudentLiveClass = () => {
 
   // ── 1. Fetch Class Data & Setup Socket ─────────────────────
   useEffect(() => {
+    // Autoplay Fix: Unmute on first click
+    const handleFirstClick = () => {
+      const vids = document.querySelectorAll('video');
+      vids.forEach(v => {
+        if (v !== videoRef.current) { // Don't unmute local preview (feedback)
+          v.muted = false;
+          v.play().catch(() => {});
+        }
+      });
+      document.removeEventListener('click', handleFirstClick);
+    };
+    document.addEventListener('click', handleFirstClick);
+
     const fetchClass = async () => {
       try {
         const res = await axios.get(
@@ -301,61 +324,41 @@ const StudentLiveClass = () => {
           targetMudraRef.current = data.target || data.mudra;
         });
 
-        // NEW: Real-Time Teacher-Controlled Spotlight
+        // NEW: Real-Time Teacher-Controlled Spotlight & State Sync
         sock.on('update_class_state', (data) => {
+          console.log('[Socket] Class state updated:', data);
+          
           if (data.targetMudra) {
-            setClassData(prev => prev ? { ...prev, targetMudra: data.targetMudra } : prev);
-            targetMudraRef.current = data.targetMudra;
+            const newMudra = data.targetMudra;
+            setClassData(prev => prev ? { ...prev, targetMudra: newMudra } : prev);
+            targetMudraRef.current = newMudra;
+            setTargetMudra(newMudra);
+
+            // --- GURU SYNC: CLEAR BUFFERS ON MUDRA CHANGE ---
+            setDetectedMudra('');
+            detectedMudraRef.current = '';
+            setAiScore(0);
+            aiScoreRef.current = 0;
+            frameBufferRef.current = [];
+            smoothedScoreRef.current = 0;
+            consecutiveRef.current = { name: null, count: 0 };
+            preStabilityRef.current = { name: null, count: 0 };
+            isDetectingRef.current = false;
+            
+            // SHOW TOAST
+            setToastData({
+              name: data.name || newMudra,
+              meaning: data.meaning || `Practice ${newMudra}`,
+              nameta: data.nameta || newMudra,
+              meaningta: data.meaningta || ''
+            });
+            setShowMudraToast(true);
+            setTimeout(() => setShowMudraToast(false), 5000);
           }
+
           if (data.activeModules) {
             setActiveModules(data.activeModules);
           }
-        });
-
-        // FIX: SYNC MUDRA CHANGE TOAST AND VOICE (Teacher selection)
-        sock.on('mudra_changed', (data) => {
-          console.log('[Socket] Teacher changed mudra:', data.newMudra);
-          
-          // --- GURU SYNC: CLEAR GHOST SESSIONS (Task: Sync Student logic) ---
-          landmarksRef.current = null;      // Clear ghost skeleton
-          setDetectedMudra('');             // Reset UI state
-          setAiScore(0);
-          isDetectingRef.current = false;   // SAFETY RESET: Clear processing lock
-          lastResultTimeRef.current = Date.now();
-          consecutiveRef.current = { name: null, count: 0 }; // Clear stability counter
-          graceRef.current = 0;
-
-          setTargetMudra(data.newMudra);
-          targetMudraRef.current = data.newMudra;
-          setToastData({
-            name: data.name,
-            meaning: data.meaning,
-            nameta: data.nameta,
-            meaningta: data.meaningta
-          });
-          setShowMudraToast(true);
-
-          // Voice Guide Announcement (Wait for Toast)
-          setTimeout(() => {
-            const msg = lang === 'ta' 
-              ? `அடுத்த முத்திரை: ${data.nameta || data.name}. ${data.meaningta || ''}` 
-              : `The next mudra is ${data.name}. This symbolizes ${data.meaning}.`;
-            
-            // PRIO 3 (High) to override small corrections
-            announce?.raw(msg, 3);
-
-            // --- NEW: PROXY VOICE EMISSION ---
-            if (sock && sock.connected) {
-              sock.emit('proxy_voice_instruction', {
-                classId: classId,
-                text: msg,
-                senderRole: 'student'
-              });
-            }
-          }, 1500);
-
-          // Auto-hide toast
-          setTimeout(() => setShowMudraToast(false), 7000);
         });
 
         sock.on('class_ended_broadcast', handleEndSessionFromTeacher);
@@ -549,9 +552,11 @@ const StudentLiveClass = () => {
 
       unlock(); // UNBLOCK AUDIO CONTEXT ON CAPTURE
       streamRef.current = stream;
+
+      // Force local review is ALWAYS muted to prevent feedback loop beep
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.muted = true; // Local preview is always muted to prevent feedback
+        videoRef.current.muted = true; 
         await videoRef.current.play();
       }
       setWebcamActive(true);
@@ -637,108 +642,84 @@ const StudentLiveClass = () => {
   }, []);
 
   const runDetection = async () => {
+
     const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 500;
     const lmData = isFresh ? landmarksRef.current : null;
     const socket = socketRef.current;
-    const currentClassData = classDataRef.current;
     
-    // FIX: Use activeModulesRef to ensure we check the LATEST toggle values
-    if (!activeModulesRef.current.mudra) {
+    if (!lmData) {
+      setDetectedMudra('');
+      detectedMudraRef.current = '';
+      if (aiScoreRef.current !== 0) {
+        setAiScore(0);
+        aiScoreRef.current = 0;
+      }
+      setSessionStatus('No Hand');
+      sessionStatusRef.current = 'No Hand';
+      setFeedback('Show your hand to the camera');
+      consecutiveRef.current = { name: null, count: 0 };
+      preStabilityRef.current = { name: null, count: 0 };
+      frameBufferRef.current = [];
+      smoothedScoreRef.current = 0;
+      
       if (socket && socket.connected) {
         socket.emit('student_performance_update', {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
-          mudra: 'Paused',
+          mudra: 'No Hand',
           score: 0,
-          status: 'Inactive',
+          status: 'Practicing',
           landmarks: null,
           frame: null
         });
       }
-      setFeedback('Mudra Detection Paused by Teacher');
-      setAiScore(0);
-      setDetectedMudra('');
       return;
     }
 
-    if (socket && socket.connected) {
-      socket.emit('student_performance_update', {
-        classId: classId,
-        studentId: user?.id || user?._id || 'unknown',
-        studentName: user?.name || 'Student',
-        mudra: lmData ? detectedMudraRef.current : 'No Hand',
-        score: lmData ? aiScoreRef.current : 0,
-        status: lmData ? sessionStatusRef.current : 'Practicing',
-        landmarks: lmData?.landmarks || null,
-        frame: captureFrame()
-      });
+    // 🚨 FIX 2: PRE-STABILITY FILTER (Skip API if unstable)
+    const rawDetected = lmData ? 'hand_present' : null;
+    if (rawDetected === preStabilityRef.current.name) {
+      preStabilityRef.current.count++;
+    } else {
+      preStabilityRef.current = { name: rawDetected, count: 1 };
     }
 
-    if (!lmData) {
-      setFeedback(activeModulesRef.current.mudra ? 'Show your hand to the camera' : 'AI Detection Paused');
-      return;
+    if (preStabilityRef.current.count < 2) {
+      setFeedback('Stabilizing...');
+      return; // Skip API call
     }
 
-    // FIX: USE REF FOR INSTANT SYNC
+    // Determine target
     const targetMudra = targetMudraRef.current?.toLowerCase() || classDataRef.current?.targetMudra?.toLowerCase();
-    
-    // Check if target is a double mudra (Samyuta)
     const DOUBLE_MUDRAS = ['anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 'sivalinga', 'svastika', 'utsanga', 'varaha'];
     const isTargetDouble = targetMudra && DOUBLE_MUDRAS.includes(targetMudra);
 
-    if (!lmData) {
-      if (isTargetDouble) {
-        setFeedback('Bring both hands closer to the center of the camera');
-      } else {
-        setFeedback(activeModulesRef.current.mudra ? 'Show your hand to the camera' : 'AI Detection Paused');
-      }
-      consecutiveRef.current = { name: null, count: 0 };
-      setDetectedMudra('');
-      setAiScore(0);
+    if (!activeModulesRef.current.mudra) {
+      setFeedback('Mudra Detection Paused');
       return;
-    }
-
-    // In double mode, check if hands are present
-    if (isTargetDouble && (!lmData.multiHandLandmarks || lmData.multiHandLandmarks.length === 0)) {
-        setFeedback('Bring both hands closer to the center of the camera');
-        consecutiveRef.current = { name: null, count: 0 };
-        setDetectedMudra('');
-        setAiScore(0);
-        return;
     }
 
     isDetectingRef.current = true;
     try {
       const endpoint = isTargetDouble ? '/api/detect_double_landmarks' : '/api/evaluate_session';
-      
       let body = {};
+      
       if (isTargetDouble) {
-          // Correctly map hands to Right/Left based on MediaPipe labels
           let rightLm = null, leftLm = null;
           lmData.multiHandLandmarks.forEach((lms, idx) => {
               let label = lmData.multiHandedness?.[idx]?.label || 'Right';
-              
-              // [RECTIFICATION] SPATIAL POSITIONING (Fix identity overwriting)
               if (lmData.multiHandLandmarks.length === 2) {
                   label = lms[0].x < 0.5 ? 'Right' : 'Left';
               }
-
               if (label === 'Right') rightLm = lms; else leftLm = lms;
           });
-
-          body = {
-              right_landmarks: rightLm,
-              left_landmarks: leftLm,
-              targetMudra: targetMudra
-          };
+          body = { right_landmarks: rightLm, left_landmarks: leftLm, targetMudra: targetMudra };
       } else {
           body = {
               landmarks: lmData.landmarks,
               activeModules: activeModules,
-              activeMudras: (currentClassData?.mudrasList?.length > 0)
-                ? currentClassData.mudrasList
-                : (targetMudra ? [targetMudra] : [])
+              activeMudras: targetMudra ? [targetMudra] : []
           };
       }
 
@@ -751,106 +732,125 @@ const StudentLiveClass = () => {
       if (!res.ok) throw new Error(`Server Error: ${res.status}`);
       const data = await res.json();
 
-      // Update Visual Correction Joint Colors
-      if (data.finger_colors) {
-          setFingerDeviations(data.finger_colors);
-          fingerDeviationsRef.current = data.finger_colors;
-      } else {
-          setFingerDeviations(null);
-          fingerDeviationsRef.current = null;
-      }
-
       let detectedName = data.matchedMudra || data.name || '';
       const score = data.score || data.accuracy || 0;
+      const detected = detectedName?.toLowerCase();
+      const target = targetMudra?.toLowerCase();
 
-      // GEOMETRIC OVERRIDE for Double Mudras
-      if (detectedName && isTargetDouble && ['anjali', 'karkata', 'sivalinga', 'sankha'].includes(detectedName.toLowerCase())) {
-        const geo = checkGeometricAnchors(detectedName, lmData.multiHandLandmarks);
-        if (!geo.isValid) {
-          detectedName = null;
-          setFeedback(geo.corrections[0] || "Adjust your hand position");
+      // 🚨 HARD BLOCK WRONG MUDRA (NO DELAY)
+      if (target && detected && detected !== target) {
+        setDetectedMudra(detectedName);
+        detectedMudraRef.current = detectedName;
+        setAiScore(0);
+        aiScoreRef.current = 0;
+        frameBufferRef.current = [];
+        smoothedScoreRef.current = 0;
+        consecutiveRef.current = { name: null, count: 0 }; // Reset stability counter
+        preStabilityRef.current = { name: null, count: 0 };
+        setSessionStatus('Incorrect');
+        sessionStatusRef.current = 'Incorrect';
+        setFeedback(`❌ Wrong mudra: ${detectedName}`);
+        
+        if (socket && socket.connected) {
+          socket.emit('student_performance_update', {
+            classId: classId,
+            studentId: user?.id || user?._id || 'unknown',
+            studentName: user?.name || 'Student',
+            mudra: detectedName,
+            score: 0,
+            status: 'Incorrect',
+            landmarks: lmData.landmarks || null,
+            frame: captureFrame()
+          });
         }
+        return;
       }
 
-      // RELAXED 10-FRAME STABILITY GATE (with Grace Window)
-      const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
-      if (detectedName) graceRef.current = 0; else graceRef.current++;
+      // 🚨 HARD GATE BEFORE STABILITY: If target exists and mismatch, stop now
+      if (target && detected !== target) {
+        return;
+      }
 
-      if (effectiveName && effectiveName === consecutiveRef.current.name) {
+      // ── STABILITY (ONLY FOR CORRECT MUDRA) ──
+      if (detected === consecutiveRef.current.name) {
         consecutiveRef.current.count++;
       } else {
-        consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
+        consecutiveRef.current = { name: detected, count: 1 };
       }
 
       const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
-      if (consecutiveRef.current.count >= currentThreshold) {
-        setDetectedMudra(consecutiveRef.current.name);
-        detectedMudraRef.current = consecutiveRef.current.name;
-        setAiScore(score);
-        aiScoreRef.current = score;
-        setSessionStatus(data.status || (score >= 75 ? 'Correct' : 'Incorrect'));
-        sessionStatusRef.current = sessionStatus;
-
-        // Feedback logic
-        if (score >= 90 && (!targetMudra || consecutiveRef.current.name.toLowerCase() === targetMudra)) {
-          setFeedback('✓ Correct! Perfect form.');
-        } else if (consecutiveRef.current.name && targetMudra && consecutiveRef.current.name.toLowerCase() !== targetMudra) {
-          setFeedback(`Incorrect. You are showing ${consecutiveRef.current.name} instead of ${targetMudra}.`);
-        } else if (score >= 75) {
-          setFeedback('Good! Keep holding...');
-        } else {
-          setFeedback('Keep adjusting your fingers...');
+      
+      if (consecutiveRef.current.count >= currentThreshold && detected) {
+        // 🚨 STEP 3: SCORE FILTER + BUFFER (Ignore noise)
+        if (score < 75) {
+          frameBufferRef.current = [];
+          smoothedScoreRef.current = 0;
+          return;
         }
+        
+        frameBufferRef.current.push(score);
+        if (frameBufferRef.current.length > 5) frameBufferRef.current.shift();
+        
+        const avgScore = frameBufferRef.current.reduce((a, b) => a + b, 0) / frameBufferRef.current.length;
+
+        // 🚨 STEP 4: APPLY SMOOTHING (EMA)
+        const alpha = 0.2;
+        const smoothed = (alpha * avgScore) + ((1 - alpha) * smoothedScoreRef.current);
+        smoothedScoreRef.current = smoothed;
+
+        const finalScore = Math.round(smoothed);
+
+        // 🚨 STEP 5: FINAL SCORE SET (WITH HOLD)
+        setDetectedMudra(detectedName);
+        detectedMudraRef.current = detectedName;
+        setAiScore(finalScore);
+        aiScoreRef.current = finalScore;
+        setSessionStatus(finalScore >= 75 ? 'Correct' : 'Incorrect');
+        sessionStatusRef.current = finalScore >= 75 ? 'Correct' : 'Incorrect';
+        setFeedback(finalScore >= 90 ? '✓ Correct! Perfect form.' : 'Good! Keep holding...');
+
+        if (finalScore > bestScoreRef.current) {
+          bestScoreRef.current = finalScore;
+          setBestScore(finalScore);
+        }
+
+        // HOLD LOGIC: Clears score only after 1.5s of no valid detection
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = setTimeout(() => {
+            setAiScore(0);
+            aiScoreRef.current = 0;
+            setDetectedMudra('');
+            detectedMudraRef.current = '';
+        }, 1500);
+
       } else {
-        // Not stable yet
-        if (!detectedName) {
-            setFeedback(isTargetDouble ? 'Show both hands' : 'Show your hand');
-        } else if (consecutiveRef.current.count === 1) {
-            setFeedback('Analyzing stability...');
-        }
-        setDetectedMudra('');
-        setAiScore(0);
+        // Detecting but not yet stable
+        // (🚨 DO NOT RESET SMOOTHING HERE)
+        setSessionStatus('Analyzing');
+        sessionStatusRef.current = 'Analyzing';
+        setFeedback(lmData ? 'Hold steady...' : 'Show your hand');
       }
 
-      if (score > bestScoreRef.current) {
-        bestScoreRef.current = score;
-        bestMudraRef.current = detectedName || '';
-        setBestScore(score);
-      }
-
-      if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('student_performance_update', {
+      if (socket && socket.connected) {
+        socket.emit('student_performance_update', {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
-          mudra: detectedMudraRef.current,
+          mudra: detectedMudraRef.current || 'Practicing',
           score: aiScoreRef.current,
           status: sessionStatusRef.current,
-          landmarks: lmData.landmarks,
+          landmarks: lmData.landmarks || null,
           frame: captureFrame()
         });
       }
 
-      const now = Date.now();
-      if (now - lastVoiceRef.current > 2000 && consecutiveRef.current.count >= STABILITY_THRESHOLD) {
-        lastVoiceRef.current = now;
-        const feedbackMsg = announce?.fromResult(data);
-        
-        if (feedbackMsg && socketRef.current && socketRef.current.connected) {
-            socketRef.current.emit('proxy_voice_instruction', {
-                classId: classId,
-                text: feedbackMsg,
-                senderRole: 'student'
-            });
-        }
-      }
     } catch (err) {
-      console.error('Detection error:', err);
+      console.error('Detection Error:', err);
     } finally {
       isDetectingRef.current = false;
     }
-
   };
+
 
   const toggleMic = () => {
     if (streamRef.current) {
@@ -1237,7 +1237,6 @@ const StudentLiveClass = () => {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                muted={false}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
               {!teacherConnected && (

@@ -7,6 +7,9 @@ import BorderPattern from '../components/BorderPattern';
 import HandVisualiser from '../components/HandVisualiser';
 import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG, translate, getMudraName } from '../hooks/useVoiceGuide';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { logFingerStates } from '../utils/fingerRules';
+import { BASE_URL, SOCKET_URL, FLASK_URL } from '../utils/constants';
+
 
 const { Hands, HAND_CONNECTIONS } = window;
 const { drawConnectors, drawLandmarks } = window;
@@ -118,6 +121,7 @@ export default function Learn() {
     const [frozenFrame, setFrozenFrame] = useState(null);
     const [isMuted, setIsMuted] = useState(false); // UI State (stays for CSS/UI if needed)
     const isMutedRef = useRef(false);             // Logic State (prevents stale closures)
+    const [liveLandmarks, setLiveLandmarks] = useState(null); // [TASK 5] 3D Visualizer Sync
 
     const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
     const activeModulesRef = useRef(activeModules);
@@ -157,6 +161,7 @@ export default function Learn() {
     const hasAnnouncedSuccessRef = useRef(false); // Success Gate: only say "Hold it" once
     const lastWrongVoiceRef = useRef({ text: '', time: 0 });
     const lastCorrVoiceRef = useRef({ text: '', time: 0 });
+    const lastSpokenRef = useRef(''); // [TASK 5] Voice Spam Protection
     const lastOkVoiceRef = useRef(0);
     const lastNoHandRef = useRef(0);
     const stableCorrFramesRef = useRef(0);
@@ -175,8 +180,8 @@ export default function Learn() {
 
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
-        
-        const sock = io(window.location.origin.replace('5173', '5000'));
+
+        const sock = io(SOCKET_URL);
         sock.on('modules_changed', (data) => {
             setActiveModules(data.modules || data);
         });
@@ -215,7 +220,7 @@ export default function Learn() {
         if (needsRebuild) {
             // Close the old one cleanly if it exists
             if (handsInstanceRef.current) {
-                try { handsInstanceRef.current.close(); } catch (_) {}
+                try { handsInstanceRef.current.close(); } catch (_) { }
                 handsInstanceRef.current = null;
                 console.log('[Learn] Hands rebuilt for type:', selectedType);
             }
@@ -239,12 +244,12 @@ export default function Learn() {
                 lastResultTimeRef.current = Date.now();
 
                 const canvas = canvasRef.current;
-                const video  = videoRef.current;
+                const video = videoRef.current;
                 if (!canvas || !video) return;
 
-                const ctx          = canvas.getContext('2d');
-                canvas.width       = video.clientWidth;
-                canvas.height      = video.clientHeight;
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.clientWidth;
+                canvas.height = video.clientHeight;
 
                 ctx.save();
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -252,7 +257,7 @@ export default function Learn() {
                 ctx.translate(-canvas.width, 0);
 
                 if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
-                    const lmsList   = results.multiHandLandmarks;
+                    const lmsList = results.multiHandLandmarks;
                     const handsList = results.multiHandedness || [];
 
                     lmsList.forEach((lms, idx) => {
@@ -272,7 +277,7 @@ export default function Learn() {
                                 const jIdx = JOINT_MAP[j.joint] ||
                                     JOINT_MAP[j.joint.replace('_mcp', '_pip')];
                                 if (jIdx !== undefined && lms[jIdx]) {
-                                    const pt      = lms[jIdx];
+                                    const pt = lms[jIdx];
                                     const screenX = pt.x * canvas.width;
                                     const screenY = pt.y * canvas.height;
                                     const gradient = ctx.createRadialGradient(
@@ -292,29 +297,33 @@ export default function Learn() {
                     if (selectedType === 'Double') {
                         let left = null, right = null;
                         handsList.forEach((h, i) => {
-                            if (h.label === 'Left')  left  = lmsList[i];
-                            else                     right = lmsList[i];
+                            if (h.label === 'Left') left = lmsList[i];
+                            else right = lmsList[i];
                         });
-                        if (!left  && lmsList.length > 1) left  = lmsList[1];
+                        if (!left && lmsList.length > 1) left = lmsList[1];
                         if (!right && lmsList.length > 1) right = lmsList[0];
 
                         landmarksRef.current = { left, right };
                     } else {
-                        const lms   = lmsList[0];
+                        const lms = lmsList[0];
                         const label = handsList[0]?.label || 'Right';
                         const score = handsList[0]?.score || 1.0;
 
-                        landmarksRef.current      = lms;
-                        landmarksMetaRef.current  = { handedness: label, score };
+                        landmarksRef.current = lms;
+                        landmarksMetaRef.current = { handedness: label, score };
+                        
+                        // [TASK 5] Visualizer Fix: Force re-render with spread to guarantee reactivity
+                        setLiveLandmarks([...lms]);
                     }
                 } else {
                     landmarksRef.current = null;
+                    setLiveLandmarks(null);
                 }
                 ctx.restore();
             });
 
             handsInstanceRef.current = hands;
-            handsRef.current         = hands; // Keep handsRef in sync
+            handsRef.current = hands; // Keep handsRef in sync
         }
 
         if (!cameraOn) return; // Don't start the RAF loop if camera is off
@@ -322,7 +331,7 @@ export default function Learn() {
         // 2. Video Stream Sync
         if (streamRef.current && videoRef.current) {
             videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(() => {});
+            videoRef.current.play().catch(() => { });
         }
 
         // 3. High-Performance requestAnimationFrame Loop
@@ -350,7 +359,8 @@ export default function Learn() {
             if (cameraOn && Date.now() - lastResultTimeRef.current > 4000) {
                 console.warn('[Detection] Loop hung, forcing lock clear');
                 lastResultTimeRef.current = Date.now();
-                isProcessingRef.current   = false;
+                isProcessingRef.current = false; 
+                isDetectingRef.current = false; // [TASK 5] Clear API lock too
             }
         }, 2000);
 
@@ -367,17 +377,17 @@ export default function Learn() {
     useEffect(() => {
         return () => {
             if (handsInstanceRef.current) {
-                try { handsInstanceRef.current.close(); } catch (_) {}
+                try { handsInstanceRef.current.close(); } catch (_) { }
                 handsInstanceRef.current = null;
                 console.log('[Learn] Hands resources released (unmount).');
             }
         };
     }, []);
- 
+
     const startWebcam = useCallback(async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { width: 640, height: 480, facingMode: 'user' } 
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, facingMode: 'user' }
             });
             streamRef.current = stream;
             setCameraOn(true);
@@ -388,11 +398,19 @@ export default function Learn() {
     }, []);
 
     const stopWebcam = useCallback(() => {
+        // [PHASE 18] Atomic Stop — force kill RAF loop first
+        if (requestRef.current) {
+            cancelAnimationFrame(requestRef.current);
+            requestRef.current = null;
+        }
+
         streamRef.current?.getTracks().forEach(t => t.stop());
         streamRef.current = null;
         if (videoRef.current) videoRef.current.srcObject = null;
+
         setCameraOn(false);
         landmarksRef.current = null;
+        isProcessingRef.current = false; // Reset lock immediately
     }, []);
 
     const captureFrame = useCallback(() => {
@@ -429,10 +447,10 @@ export default function Learn() {
 
             // GATEKEEPER: If teacher disabled the module OR we are in "mute" window, skip
             if (!activeModulesRef.current.mudra || isMutedRef.current) {
-                setDetected({ 
-                    name: isMutedRef.current ? 'Positioning...' : 'AI Paused', 
-                    confidence: 0, 
-                    detected: false 
+                setDetected({
+                    name: isMutedRef.current ? 'Positioning...' : 'AI Paused',
+                    confidence: 0,
+                    detected: false
                 });
                 setHoldProgress(0);
                 return;
@@ -440,16 +458,24 @@ export default function Learn() {
 
             isDetectingRef.current = true;
 
+            const dataObj = landmarksRef.current;
+
+            // Debug Logging (User Request)
+            if (selectedMudra?.folder === 'tamrachuda' ||
+                selectedMudra?.folder === 'kapittha' ||
+                selectedMudra?.folder === 'trishula') {
+                logFingerStates(dataObj);
+            }
+
             try {
-                const dataObj = landmarksRef.current;
 
                 // ── NO HAND ───────────────────────────────────────────────────
                 const hasHand = dataObj && (
-                  selectedType === 'Double'
-                    ? (dataObj.left && dataObj.right)
-                    : (dataObj.length === 21)  // NormalizedLandmarkList is NOT a native Array — don't use Array.isArray
+                    selectedType === 'Double'
+                        ? (dataObj.left && dataObj.right)
+                        : (dataObj.length === 21)  // NormalizedLandmarkList is NOT a native Array — don't use Array.isArray
                 );
-                  if (!hasHand) {
+                if (!hasHand) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
                     setHoldProgress(0);
                     holdStartRef.current = null;
@@ -476,11 +502,11 @@ export default function Learn() {
 
                 attemptsRef.current += 1;
 
-                let endpoint = `/api/detect_landmarks`;
+                let endpoint = `${FLASK_URL}/api/detect_landmarks`;
                 let body = {};
 
                 if (selectedType === 'Double') {
-                    endpoint = `/api/detect_double_landmarks`;
+                    endpoint = `${FLASK_URL}/api/detect_double_landmarks`;
                     body = {
                         left_landmarks: Array.from(dataObj.left).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
                         right_landmarks: Array.from(dataObj.right).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
@@ -507,64 +533,32 @@ export default function Learn() {
                 });
 
                 const data = await res.json();
+                
+                // [TASK 5] 100% Production Feedback Logic
+                let feedback = "Adjusting...";
+                const isWrong = data.status === "Wrong Mudra";
+                const isCorrect = data.status === "Correct";
 
-                // ── STABLE EVALUATION WINDOW ──────────────────────────────────
-                const detectedName = data.name || '';
-                const isStableAPI = data.is_stable === true; // Task 1
-                const accuracy = data.accuracy || 0;
-                const holdMs = accuracy >= 90 ? 500 : HOLD_DURATION_MS;
-                const corrections = data.corrections || [];
-                const problematicJoints = data.problematic_joints || []; // Task 4
-
-                // RELAXED 10-FRAME GATE (with Grace Window)
-                const effectiveName = detectedName || (graceRef.current < 3 ? consecutiveRef.current.name : null);
-                if (detectedName) graceRef.current = 0; else graceRef.current++;
-
-                // [PHASE 18] Added Accuracy check to stability reset
-                const isAccurate = accuracy >= ACCURACY_THRESHOLD;
-                if (effectiveName && effectiveName === consecutiveRef.current.name && isAccurate) {
-                    consecutiveRef.current.count++;
-                } else {
-                    consecutiveRef.current = { name: effectiveName, count: effectiveName ? 1 : 0 };
+                if (isWrong) {
+                    feedback = data.wrong_mudra 
+                        ? `You are showing ${data.wrong_mudra} instead of ${data.target_mudra}`
+                        : "Wrong Mudra";
+                } else if (isCorrect) {
+                    feedback = "Correct";
                 }
 
-                const locallyStable = consecutiveRef.current.count >= STABILITY_THRESHOLD;
-
-                const isWrongMudraMsg = (c) => typeof c === 'string' && (
-                    c.toLowerCase().startsWith('wrong mudra') || 
-                    c.toLowerCase().includes('instead of') ||
-                    c.toLowerCase().startsWith('veto') ||
-                    c.toLowerCase().includes('wrong position')
-                );
-                const wrongMsg = corrections.find(c => isWrongMudraMsg(c));
-                const fingerCorr = corrections.filter(c => typeof c === 'string' && !isWrongMudraMsg(c));
-
-                // ── FIX: Wrong mudra frame counter (for voice gating only) ────
-                // The UI always shows wrongMsg immediately when backend sends it.
-                // Only the VOICE announcement is gated behind wrongMudraFramesRef.
-                if (wrongMsg) {
-                    wrongMudraFramesRef.current = Math.min(6, wrongMudraFramesRef.current + 1);
-                } else {
-                    wrongMudraFramesRef.current = Math.max(0, wrongMudraFramesRef.current - 0.5);
+                // Voice Spam Protection
+                if (voiceEnabledRef.current && lastSpokenRef.current !== feedback) {
+                    if (isWrong || isCorrect) {
+                        announce.raw(feedback, isCorrect ? 4 : 3);
+                        lastSpokenRef.current = feedback;
+                    }
                 }
-
-                // displayCorrections passes wrongMsg through untouched — no UI gate
-                const displayCorrections = [...corrections];
-                const hasWrongMudraInDisplay = displayCorrections.some(
-                    c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra')
-                );
 
                 const displayData = {
                     ...data,
-                    corrections: displayCorrections,
-                    // ── FIX: isAdjusting checks raw wrongMsg, not the filtered display list ──
-                    // If backend sent a wrongMsg, suppress "Adjusting…" and show the alert instead
-                    // ── RELAXED ADJUSTING LOGIC: Show accuracy immediately if detection is live ──
-                    _isAdjusting: !locallyStable && !isStableAPI && accuracy < 10 && !wrongMsg,
-                    _isMoving: !isStableAPI && data.status === 'Stabilizing...',
-                    problematic_joints: problematicJoints,
+                    feedback: feedback // Unified feedback field
                 };
-                detectedRef.current = displayData;
 
                 // ── SUCCESS LOCK ─────────────────────────────────────────────
                 if (successLockRef.current) {
@@ -573,67 +567,16 @@ export default function Learn() {
                 }
 
                 setDetected(prev => {
-                    // Prevent jitter if we just achieved success
                     if (successLockRef.current) return prev;
                     return displayData;
                 });
 
-                // --- UPDATED VOICE & SUCCESS LOGIC ---
-                if (voiceEnabledRef.current) {
-                    const now = Date.now();
-                    const currentHoldPct = (holdAccumulatorRef.current / holdMs) * 100;
+                const accuracy = data.accuracy || 0;
+                const wrongMsg = isWrong ? feedback : null;
+                const holdMs = accuracy >= 95 ? 800 : HOLD_DURATION_MS;
 
-                    // 1. SUCCESS STATE: User is holding the pose
-                    if (currentHoldPct > 10 && !sessionComplete) {
-                        // SUCCESS GATE: Only announce "Hold it" the first time perfection is reached
-                        if (!hasAnnouncedSuccessRef.current) {
-                            hasAnnouncedSuccessRef.current = true;
-                            const msg = lang === 'ta' 
-                                ? 'அப்படியே பிடியுங்கள்! நீங்கள் செய்துவிட்டீர்கள்!' 
-                                : 'Perfect! Hold it right there, you did it!';
-                            announce.raw(msg, 4); // Priority 4 (Ultra)
-                        } else if (now - lastOkVoiceRef.current > 12000) {
-                            // Subtle "Still holding" reminder if they hold for a very long time
-                            lastOkVoiceRef.current = now;
-                            const msg = lang === 'ta' ? 'அப்படியே பிடியுங்கள்!' : 'Keep holding!';
-                            announce.raw(msg, 2);
-                        }
-                    }
-                    // 2. WRONG MUDRA STATE (Guard: only if not already in success hold)
-                    else if (wrongMsg && holdAccumulatorRef.current === 0) {
-                        const stableWrongMsg = wrongMudraFramesRef.current >= WRONG_MUDRA_GATE ? wrongMsg : null;
-                        if (stableWrongMsg) {
-                            const prev = lastWrongVoiceRef.current;
-                            if (stableWrongMsg !== prev.text || (now - prev.time) > 7000) { // Increased interval
-                                lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                                const detMatch = stableWrongMsg.match(/showing ([a-zA-Z]+)/i);
-                                const detName = detMatch ? detMatch[1] : detectedName;
-                                
-                                let voiceMsg = lang === 'ta'
-                                    ? `தவறான முத்திரை. காட்டுவது ${getMudraName(lang, detName)}.`
-                                    : `Wrong mudra. Showing ${detName}.`;
-                                announce.raw(voiceMsg, 3);
-                            }
-                        }
-                    } 
-                    // 3. FINGER CORRECTIONS (Guard: Guru is SILENT if accuracy > 85%)
-                    else if (fingerCorr.length > 0 && holdAccumulatorRef.current === 0 && accuracy < 85) {
-                        stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
-                        if (stableCorrFramesRef.current >= 3) { // Increased frame check for stability
-                            const currentCorr = fingerCorr[0];
-                            const prev = lastCorrVoiceRef.current;
-                            if (currentCorr !== prev.text || (now - prev.time) > 6000) { // Increased interval
-                                lastCorrVoiceRef.current = { text: currentCorr, time: now };
-                                // announce.raw(translate(lang, currentCorr), 2); // SILENCED: fold your hands like that...
-                            }
-                        }
-                    } 
-                }
-
-                // ── HOLD + SAVE ───────────────────────────────────────────────
-                // [PHASE 18] STRICT SUCCESS TRIGGER: Require detected Name to match Folder
-                const isCorrect = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudraRef.current?.folder);
-                const isGoodFrame = isCorrect;
+                const isCorrectForm = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudraRef.current?.folder);
+                const isGoodFrame = isCorrectForm;
 
                 const now = Date.now();
                 const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 0;
@@ -644,7 +587,7 @@ export default function Learn() {
                     lowAccuracyFramesRef.current = 0;
                 } else {
                     lowAccuracyFramesRef.current++;
-                    
+
                     if (wrongMsg || accuracy < ACCURACY_THRESHOLD) {
                         // [PHASE 18] Wrong mudra or low accuracy — drain instantly
                         holdAccumulatorRef.current = 0;
@@ -657,10 +600,10 @@ export default function Learn() {
                 }
 
                 let displayPct = (holdAccumulatorRef.current / holdMs) * 100;
-                if (!isGoodFrame && (isCorrect && accuracy >= 62)) {
+                if (!isGoodFrame && (isCorrectForm && accuracy >= 62)) {
                     displayPct = Math.min(75, displayPct);
                 }
-                
+
                 // Functional update to avoid stale state flicker
                 setHoldProgress(() => {
                     if (successLockRef.current) return 100;
@@ -670,11 +613,11 @@ export default function Learn() {
                 // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
                 if (holdAccumulatorRef.current >= holdMs && !saveMutexRef.current) {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
-                    
+
                     // 1. First, tell the user they did it
                     if (voiceEnabledRef.current) {
                         const msg = lang === 'ta' ? 'அற்புதம்! முடித்துவிட்டீர்கள்.' : 'Excellent! You did it.';
-                        announce.raw(msg, 4); 
+                        announce.raw(msg, 4);
                     }
 
                     // 2. Wait 1.5 seconds for the voice to play BEFORE showing the mastery page
@@ -683,7 +626,7 @@ export default function Learn() {
                         saveInProgressRef.current = true;
                         successLockRef.current = true; // Lock UI at 100%
                         handleMudraMastered(selectedMudraRef.current?.folder, accuracy);
-                    }, 1500); 
+                    }, 1500);
                 }
 
             } catch (err) {
@@ -735,7 +678,7 @@ export default function Learn() {
         setHoldProgress(0);
 
         if (voiceEnabledRef.current) {
-            const congrats = lang === 'ta' 
+            const congrats = lang === 'ta'
                 ? `வாழ்த்துகள்! நீங்கள் ${selectedMudra.name} முத்திரையை வெற்றிகரமாக முடித்துவிட்டீர்கள்!`
                 : `Congratulations! You have successfully mastered the ${selectedMudra.name} mudra!`;
             announce.raw(congrats, 4);
@@ -774,8 +717,8 @@ export default function Learn() {
 
     const enterPractice = async (mudra) => {
         // [PHASE 18] CRITICAL: Unlock audio on exactly this click event
-        unlock(); 
-        
+        unlock();
+
         setSelectedMudra(mudra);
         setSessionComplete(false);
         setDetected({ name: '', confidence: 0, detected: false });
@@ -791,16 +734,20 @@ export default function Learn() {
         setFrozenFrame(null);
         attemptsRef.current = 0;
         lowAccuracyFramesRef.current = 0;
-        
+        holdAccumulatorRef.current = 0; // [TASK 5] Reset hold progress memory
+
         // ── ATOMIC RESET & MUTE (Ghost Session Fix) ──
         isMutedRef.current = true;
         setIsMuted(true);
         hasAnnouncedSuccessRef.current = false; // Reset Success Gate
         landmarksRef.current = null;             // Clear ghost skeleton
+        setLiveLandmarks(null);                  // Reset 3D visualizer
         setDetected(prev => ({ ...prev, name: '', confidence: 0 })); // Reset detection display
-        isProcessingRef.current = false;         // SAFETY RESET: Clear any stale frame locks (Task 5)
+
+        isProcessingRef.current = false;         // SAFETY RESET: Clear any stale frame locks
+        isDetectingRef.current = false;         // CRITICAL: Clear API lock for next mudra
         lastResultTimeRef.current = Date.now(); // Reset watchdog timer
-        
+
         // Synchronous History Flush: Ensure registry is wiped BEFORE detection starts
         try {
             await axios.post('/api/clear_history');
@@ -809,7 +756,7 @@ export default function Learn() {
             console.error('[Learn] Flush failed:', e);
         }
 
-        // HARD RESET: Give hardware and Flask time to settle (Task 5)
+        // HARD RESET: Give hardware and Flask time to settle
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Re-unlock voice just in case browser re-locked on route/state change
@@ -823,25 +770,46 @@ export default function Learn() {
     const nextMudra = () => {
         // [PHASE 18] Audio Unlock
         unlock();
-        
+
+        // 🔴 1. STOP old detection & Release hardware
+        stopWebcam();
+        stop(); // stop voice
+
         const levelMudras = getLevelMudras(selectedLevel);
         const currentIndex = levelMudras.findIndex(m => m.folder === selectedMudra.folder);
         setIsFrozen(false);
         setFrozenFrame(null);
         attemptsRef.current = 0;
-        if (currentIndex < levelMudras.length - 1) enterPractice(levelMudras[currentIndex + 1]);
-        else setStage(STAGES.MUDRA_LIST);
+
+        // 🔴 2. Small Delay before switching and restarting
+        setTimeout(() => {
+            if (currentIndex < levelMudras.length - 1) {
+                // ATOMIC RESET: Wipe all state before starting next
+                lastSpokenRef.current = '';
+                setDetected({ name: 'Initializing...', confidence: 0, detected: false, feedback: 'Adjusting...' });
+                setLiveLandmarks(null);
+                isDetectingRef.current = false;
+                isProcessingRef.current = false; // [TASK 5] Clear hardware processing lock
+
+                enterPractice(levelMudras[currentIndex + 1]);
+            } else {
+                setStage(STAGES.MUDRA_LIST);
+            }
+        }, 300);
     };
 
     // ── Derived display state ─────────────────────────────────────────────────
     const accuracy = detected.accuracy || 0;
-    const corrections = detected.corrections || [];
-    const fingerCorrs = corrections.filter(c => typeof c === 'string' && !c.toLowerCase().startsWith('wrong mudra'));
-    const wrongMudraMsg = detected.isWrongMudra 
-        ? `You are showing ${detected.actualMudra?.capitalize?.() || detected.actualMudra} instead of ${selectedMudra?.name}`
-        : corrections.find(c => typeof c === 'string' && c.toLowerCase().startsWith('wrong mudra'));
-    const isAdjusting = detected._isAdjusting;
-    const isCorrect = detected.detected && accuracy >= 80 && !wrongMudraMsg && fingerCorrs.length === 0 && (detected.name === selectedMudra?.folder);
+    const status = detected.status || "Unknown";
+    const feedbackMsg = detected.feedback || "Adjusting...";
+    
+    // Priority Logic: Wrong Mudra > Correct > Adjusting
+    const isWrong = status === "Wrong Mudra";
+    const isCorrect = status === "Correct";
+    const isAdjusting = !isWrong && !isCorrect;
+
+    const wrongMudraMsg = isWrong ? feedbackMsg : null;
+    const fingerCorrs = !isWrong ? (detected.corrections || []).filter(c => typeof c === 'string') : [];
 
     const fingerGuideText = selectedMudra
         ? (MUDRA_CONFIG[selectedMudra.folder]?.fingers || selectedMudra.fingers || '')
@@ -1088,7 +1056,7 @@ export default function Learn() {
                                     </div>
                                     <HandVisualiser
                                         targetMudra={selectedMudra.folder}
-                                        landmarks={landmarksRef.current || []}
+                                        landmarks={liveLandmarks || []}
                                         deviations={detected?.deviations || {}}
                                         infoOverride={detected}
                                     />
@@ -1133,7 +1101,7 @@ export default function Learn() {
                                 {cameraOn && (isAdjusting || detected._isMoving) && !isCorrect && (
                                     <div className={`mb-4 p-3 rounded-xl border ${detected._isMoving ? 'border-orange-500/20 bg-orange-500/5' : 'border-yellow-500/20 bg-yellow-500/5'}`}>
                                         <div className={`text-[9px] tracking-[3px] uppercase ${detected._isMoving ? 'text-orange-500' : 'text-yellow-500'} font-bold flex items-center gap-2`}>
-                                            <span className={`w-2 h-2 rounded-full ${detected._isMoving ? 'bg-orange-400' : 'bg-yellow-400'} animate-pulse`} /> 
+                                            <span className={`w-2 h-2 rounded-full ${detected._isMoving ? 'bg-orange-400' : 'bg-yellow-400'} animate-pulse`} />
                                             {detected._isMoving ? 'Stabilizing…' : 'Adjusting…'}
                                         </div>
                                         <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
@@ -1143,7 +1111,7 @@ export default function Learn() {
                                 )}
 
                                 {/* Live corrections */}
-                                {cameraOn && !isAdjusting && (wrongMudraMsg || fingerCorrs.length > 0) && (
+                                {cameraOn && (wrongMudraMsg || fingerCorrs.length > 0) && (
                                     <div className="mb-4 space-y-2">
                                         {wrongMudraMsg && (
                                             <div className="p-4 rounded-xl border bg-red-500/10 border-red-500/30">
@@ -1207,16 +1175,16 @@ export default function Learn() {
 
                         {/* RIGHT: Camera ───────────────────────────────── */}
                         <div className="flex flex-col">
-                            <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner transition-all duration-500" 
-                                 style={{ 
-                                     borderColor: (wrongMudraMsg && accuracy === 0) ? '#ef4444' : 'var(--border)', 
-                                     height: '520px',
-                                     boxShadow: (wrongMudraMsg && accuracy === 0) ? '0 0 25px rgba(239, 68, 68, 0.4)' : 'none'
-                                 }}>
-                                 {/* Task B: Red Pulsing Border for Structural Veto */}
-                                 {(wrongMudraMsg && accuracy === 0) && (
-                                     <div className="absolute inset-0 z-10 pointer-events-none animate-pulse border-4 border-red-500/50 mix-blend-screen" />
-                                 )}
+                            <div className="w-full rounded-xl overflow-hidden border relative bg-black shadow-inner transition-all duration-500"
+                                style={{
+                                    borderColor: (wrongMudraMsg && accuracy === 0) ? '#ef4444' : 'var(--border)',
+                                    height: '520px',
+                                    boxShadow: (wrongMudraMsg && accuracy === 0) ? '0 0 25px rgba(239, 68, 68, 0.4)' : 'none'
+                                }}>
+                                {/* Task B: Red Pulsing Border for Structural Veto */}
+                                {(wrongMudraMsg && accuracy === 0) && (
+                                    <div className="absolute inset-0 z-10 pointer-events-none animate-pulse border-4 border-red-500/50 mix-blend-screen" />
+                                )}
                                 <canvas ref={canvasRef} className="hidden" />
                                 {cameraOn ? (
                                     <>
@@ -1228,9 +1196,9 @@ export default function Learn() {
                                             <span className="text-[8px] tracking-[3px] uppercase text-white/50">Accuracy</span>
                                             <span className="text-2xl font-mono font-bold"
                                                 style={{ color: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }}>
-                                                {isAdjusting ? '…' : `${accuracy.toFixed(0)}%`}
+                                                {(isAdjusting && accuracy === 0) ? '…' : `${accuracy.toFixed(0)}%`}
                                             </span>
-                                            {!isAdjusting && (
+                                            {(!(isAdjusting && accuracy === 0)) && (
                                                 <div className="w-24 h-1.5 bg-white/10 rounded-full">
                                                     <div className="h-full rounded-full transition-all duration-300"
                                                         style={{ width: `${accuracy}%`, backgroundColor: accuracy > 75 ? '#4ade80' : accuracy > 50 ? '#fbbf24' : '#f87171' }} />

@@ -2,6 +2,10 @@
 
 import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { BASE_URL } from '../utils/constants';
+
+// Centralized Axios Configuration
+axios.defaults.baseURL = BASE_URL;
 
 const AuthContext = createContext();
 

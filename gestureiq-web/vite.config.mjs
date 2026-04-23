@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   
   // Extract hostname from VITE_PUBLIC_URL (e.g., https://name.ngrok-free.dev -> name.ngrok-free.dev)
   const hmrHost = env.VITE_PUBLIC_URL 
-    ? env.VITE_PUBLIC_URL.replace(/^https?:\/\//, '').split('/')[0] 
+    ? env.VITE_PUBLIC_URL.replace(/^https?:\/\//, '').split('/')[0].split(':')[0] 
     : 'localhost';
 
   console.log(`[Vite Config] HMR Host: ${hmrHost}`);
@@ -35,15 +35,15 @@ export default defineConfig(({ mode }) => {
     ],
 
     server: {
-      host: '0.0.0.0',
+      host: true,
       port: 5173,
       strictPort: true,
       allowedHosts: true, 
       cors: true,
       hmr: {
         host: hmrHost,
-        protocol: hmrHost === 'localhost' ? 'ws' : 'wss',
-        clientPort: hmrHost === 'localhost' ? 5173 : 443,
+        protocol: env.VITE_PUBLIC_URL?.startsWith('https') ? 'wss' : 'ws',
+        clientPort: env.VITE_PUBLIC_URL?.startsWith('https') ? 443 : 5173,
       },
       headers: {
         'ngrok-skip-browser-warning': 'true',
