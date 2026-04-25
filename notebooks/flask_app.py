@@ -487,8 +487,9 @@ MUDRA_FINGERPRINTS = {
 
 def get_finger_state(angle, is_thumb=False):
     # Adaptive threshold: Thumb is naturally more curved even when "straight"
-    straight_limit = 120 if is_thumb else 125
-    curled_limit   = 100 if is_thumb else 115
+    # [PHASE 18] Relaxed for Arala/Pataka Distinction
+    straight_limit = 140 if is_thumb else 155
+    curled_limit   = 100 if is_thumb else 105
     
     if angle > straight_limit: return 1   # Fully Straight
     if angle < curled_limit:   return 0   # Fully Curled
@@ -1606,20 +1607,20 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
                 print(f"[RULE VETO] Override to Tamrachuda (Rooster Crest)")
             
             # 4. Arala (Index bent, others straight)
-            elif (raw_angles.get("index", 180) < 110 and
-                  raw_angles.get("middle", 0) > 160 and
-                  raw_angles.get("ring", 0) > 160 and
-                  raw_angles.get("pinky", 0) > 160):
+            elif (raw_angles.get("index", 180) < 145 and
+                  raw_angles.get("middle", 0) > 155 and
+                  raw_angles.get("ring", 0) > 155 and
+                  raw_angles.get("pinky", 0) > 155):
                 raw_name = "arala"
                 raw_conf = 95.0
                 rule_triggered = True
                 print(f"[RULE VETO] Override to Arala (Index Bend)")
 
             # 5. Tripataka (Ring bent, others straight)
-            elif (raw_angles.get("ring", 180) < 110 and
-                  raw_angles.get("index", 0) > 160 and
-                  raw_angles.get("middle", 0) > 160 and
-                  raw_angles.get("pinky", 0) > 160):
+            elif (raw_angles.get("ring", 180) < 135 and
+                  raw_angles.get("index", 0) > 155 and
+                  raw_angles.get("middle", 0) > 155 and
+                  raw_angles.get("pinky", 0) > 155):
                 raw_name = "tripataka"
                 raw_conf = 95.0
                 rule_triggered = True
@@ -1670,6 +1671,23 @@ def run_madm(landmarks, target_mudra='', min_frames=None, label='Right'):
         ema_p      = update_ema_probs(raw_probs)
         top_idx    = int(np.argmax(ema_p))
         top_name   = str(model.classes_[top_idx])
+
+        # --- [NEW] PHYSICAL VALIDATION GUARD (Check All) ---
+        # If the ML model is naming a "Wrong Mudra", we verify it against physics.
+        # This prevents the "Everything is Pataka" bias.
+        is_physically_valid, _ = verify_mudra_identity(top_name, finger_angles, lm_wrapper, palm_size)
+        if not is_physically_valid and top_name != target_key:
+            # If the top guess is physically wrong, try the 2nd best guess
+            sorted_indices = np.argsort(ema_p)[::-1]
+            if len(sorted_indices) > 1:
+                alt_idx = sorted_indices[1]
+                alt_name = str(model.classes_[alt_idx])
+                alt_valid, _ = verify_mudra_identity(alt_name, finger_angles, lm_wrapper, palm_size)
+                if alt_valid and ema_p[alt_idx] > 0.15:
+                    print(f"[PHYSICS VETO] Overriding {top_name} -> {alt_name} (Physical Match)")
+                    top_name = alt_name
+                    # We don't modify ema_p here to avoid jitter, but we steer the stability name
+
         stable_name, is_stable, smooth_conf = update_stability(top_name, ema_p, min_frames_override=min_frames)
 
         # ── HARD ALAPADMA STRUCTURAL VETO (post-stability) ───────────────────

@@ -107,11 +107,15 @@ const StudentLiveClass = () => {
   const consecutiveRef = useRef({ name: null, count: 0 });
   const preStabilityRef = useRef({ name: null, count: 0 });
   const graceRef = useRef(0); // For stability grace window (hysteresis)
-  const STABILITY_THRESHOLD = 6;
-  const STABILITY_THRESHOLD_DOUBLE = 3;
+  const STABILITY_THRESHOLD = 10;
+  const STABILITY_THRESHOLD_DOUBLE = 6;
   const smoothedScoreRef = useRef(0);
   const holdTimerRef = useRef(null);
   const frameBufferRef = useRef([]);
+  const [toastType, setToastType] = useState('next'); // 'next', 'wrong', 'perfect'
+  const perfectFiredRef = useRef(false);
+  const perfectCountRef = useRef(0);
+  const toastTimerRef = useRef(null);
 
   const targetMudraRef = useRef('');
   const fingerDeviationsRef = useRef(null);
@@ -344,6 +348,9 @@ const StudentLiveClass = () => {
             consecutiveRef.current = { name: null, count: 0 };
             preStabilityRef.current = { name: null, count: 0 };
             isDetectingRef.current = false;
+            perfectFiredRef.current = false;
+            perfectCountRef.current = 0;
+            setToastType('next');
             
             // SHOW TOAST
             setToastData({
@@ -352,8 +359,10 @@ const StudentLiveClass = () => {
               nameta: data.nameta || newMudra,
               meaningta: data.meaningta || ''
             });
+            
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
             setShowMudraToast(true);
-            setTimeout(() => setShowMudraToast(false), 5000);
+            toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 5000);
           }
 
           if (data.activeModules) {
@@ -433,7 +442,7 @@ const StudentLiveClass = () => {
     });
     handsRef.current.setOptions({
       maxNumHands: 2, modelComplexity: 1,
-      minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+      minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
     });
     handsRef.current.onResults((results) => {
       lastResultTimeRef.current = Date.now();
@@ -643,22 +652,21 @@ const StudentLiveClass = () => {
 
   const runDetection = async () => {
 
-    const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 500;
+    const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 1000;
     const lmData = isFresh ? landmarksRef.current : null;
     const socket = socketRef.current;
     
     if (!lmData) {
-      setDetectedMudra('');
-      detectedMudraRef.current = '';
-      if (aiScoreRef.current !== 0) {
-        setAiScore(0);
-        aiScoreRef.current = 0;
-      }
       setSessionStatus('No Hand');
       sessionStatusRef.current = 'No Hand';
       setFeedback('Show your hand to the camera');
+      
+      // Reset stability counters immediately
       consecutiveRef.current = { name: null, count: 0 };
       preStabilityRef.current = { name: null, count: 0 };
+      
+      // [HYSTERESIS] Score and Mudra name are cleared only by the holdTimer (1.5s)
+      // frameBuffer and smoothing are cleared to ensure no "legacy" score leaks back
       frameBufferRef.current = [];
       smoothedScoreRef.current = 0;
       
@@ -700,6 +708,14 @@ const StudentLiveClass = () => {
       return;
     }
 
+    // 🚨 PRE-API TARGET CHECK
+    if (!targetMudra) {
+      setFeedback('Waiting for teacher to set target...');
+      setAiScore(0);
+      aiScoreRef.current = 0;
+      return;
+    }
+
     isDetectingRef.current = true;
     try {
       const endpoint = isTargetDouble ? '/api/detect_double_landmarks' : '/api/evaluate_session';
@@ -737,19 +753,41 @@ const StudentLiveClass = () => {
       const detected = detectedName?.toLowerCase();
       const target = targetMudra?.toLowerCase();
 
-      // 🚨 HARD BLOCK WRONG MUDRA (NO DELAY)
+      // 🚨 HARD BLOCK WRONG MUDRA (STRICT TARGET-CONSTRAINED ENFORCEMENT)
       if (target && detected && detected !== target) {
         setDetectedMudra(detectedName);
         detectedMudraRef.current = detectedName;
+        
+        // RESET EVERYTHING IMMEDIATELY
         setAiScore(0);
         aiScoreRef.current = 0;
-        frameBufferRef.current = [];
         smoothedScoreRef.current = 0;
-        consecutiveRef.current = { name: null, count: 0 }; // Reset stability counter
+        frameBufferRef.current = [];
+        
+        // Reset all stability counters (consecutiveRef and preStabilityRef)
+        consecutiveRef.current = { name: null, count: 0 }; 
         preStabilityRef.current = { name: null, count: 0 };
+        
+        // TRIGGER WARNING TOAST
+        setToastType('wrong');
+        setToastData({
+          name: `❌ Incorrect: ${detectedName}`,
+          meaning: `Please show ${targetMudra}`,
+          nameta: `❌ தவறான: ${detectedName}`,
+          meaningta: `${targetMudra} காட்டவும்`
+        });
+        
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setShowMudraToast(true);
+        // Quick 2s hide for warnings
+        toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 2000);
+
+        // Clear hold timer so score doesn't linger
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        
         setSessionStatus('Incorrect');
         sessionStatusRef.current = 'Incorrect';
-        setFeedback(`❌ Wrong mudra: ${detectedName}`);
+        setFeedback(`❌ Wrong: ${detectedName}. Show ${targetMudra}`);
         
         if (socket && socket.connected) {
           socket.emit('student_performance_update', {
@@ -763,7 +801,7 @@ const StudentLiveClass = () => {
             frame: captureFrame()
           });
         }
-        return;
+        return; // Stop processing this frame immediately
       }
 
       // 🚨 HARD GATE BEFORE STABILITY: If target exists and mismatch, stop now
@@ -781,10 +819,12 @@ const StudentLiveClass = () => {
       const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
       
       if (consecutiveRef.current.count >= currentThreshold && detected) {
-        // 🚨 STEP 3: SCORE FILTER + BUFFER (Ignore noise)
-        if (score < 75) {
+        // 🚨 TARGET-CONSTRAINED SCORE GATE (Strict 85% Precision)
+        if (score < 85) {
           frameBufferRef.current = [];
           smoothedScoreRef.current = 0;
+          setAiScore(0);
+          aiScoreRef.current = 0;
           return;
         }
         
@@ -812,6 +852,27 @@ const StudentLiveClass = () => {
         if (finalScore > bestScoreRef.current) {
           bestScoreRef.current = finalScore;
           setBestScore(finalScore);
+        }
+
+        // 🌟 PERFECT FORM TOAST (Fire once per target after 5 stable frames)
+        if (finalScore >= 90 && !perfectFiredRef.current) {
+          perfectCountRef.current++;
+          if (perfectCountRef.current >= 5) {
+            perfectFiredRef.current = true;
+            setToastType('perfect');
+            setToastData({
+              name: "🌟 PERFECT FORM!",
+              meaning: `${targetMudra}: Perfected`,
+              nameta: "🌟 சிறப்பான வடிவம்!",
+              meaningta: `${targetMudra}: சரியானது`
+            });
+            
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+            setShowMudraToast(true);
+            toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 3000);
+          }
+        } else {
+          perfectCountRef.current = 0;
         }
 
         // HOLD LOGIC: Clears score only after 1.5s of no valid detection
@@ -890,29 +951,29 @@ const StudentLiveClass = () => {
 
   const saveReport = useCallback(async () => {
     const timeTaken = Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
+    const reportData = {
+      studentId: user?.id || user?._id || 'unknown',
+      classId,
+      mudraName: bestMudraRef.current || 'N/A',
+      aiScore: bestScoreRef.current || 0,
+      timeTaken,
+      timestamp: new Date().toISOString(),
+      feedback: bestScoreRef.current >= 75 ? 'Excellent' : 'Needs Practice'
+    };
+
     setReportLoading(true);
     try {
-      const res = await fetch(`/api/session_report`, {
+      // Send to backend for background processing/storage
+      await fetch(`/api/session_report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentId: user?.id || user?._id || 'unknown',
-          classId, mudraName: bestMudraRef.current || 'N/A',
-          aiScore: bestScoreRef.current || 0,
-          timeTaken, timestamp: new Date().toISOString()
-        })
+        body: JSON.stringify(reportData)
       });
-      const saved = await res.json();
-      setReport(saved);
+      // Use local data for display since the API returns a generic success message
+      setReport(reportData);
     } catch (error) {
-      setReport({
-        studentId: user?.id || user?._id || 'unknown', classId,
-        mudraName: bestMudraRef.current || 'N/A',
-        aiScore: bestScoreRef.current || 0,
-        timeTaken,
-        timestamp: new Date().toISOString(),
-        feedback: bestScoreRef.current >= 75 ? 'Excellent' : 'Needs Practice'
-      });
+      console.warn("Report save background sync failed, using local data", error);
+      setReport(reportData);
     } finally {
       setReportLoading(false);
       setSessionEnded(true);
@@ -1123,13 +1184,18 @@ const StudentLiveClass = () => {
             {showMudraToast && (
               <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none animate-in fade-in zoom-in duration-500">
                 <div className="px-8 py-6 rounded-[32px] backdrop-blur-2xl shadow-2xl border border-white/40 flex flex-col items-center gap-2 text-center"
-                  style={{ background: 'rgba(124, 58, 237, 0.9)', boxShadow: '0 25px 50px -12px rgba(124, 58, 237, 0.5)' }}>
-                  <span className="text-[10px] font-black uppercase tracking-[5px] text-violet-200">Next Mudra</span>
+                  style={{ 
+                    background: toastType === 'wrong' ? 'rgba(220, 38, 38, 0.9)' : toastType === 'perfect' ? 'rgba(5, 150, 105, 0.9)' : 'rgba(124, 58, 237, 0.9)',
+                    boxShadow: toastType === 'wrong' ? '0 25px 50px -12px rgba(220, 38, 38, 0.5)' : toastType === 'perfect' ? '0 25px 50px -12px rgba(5, 150, 105, 0.5)' : '0 25px 50px -12px rgba(124, 58, 237, 0.5)' 
+                  }}>
+                  <span className="text-[10px] font-black uppercase tracking-[5px] text-white/70">
+                    {toastType === 'wrong' ? 'Alert' : toastType === 'perfect' ? 'Achievement' : 'Next Mudra'}
+                  </span>
                   <h2 className="text-4xl font-black text-white py-1">
                     {lang === 'ta' ? toastData.nameta : toastData.name}
                   </h2>
                   <div className="h-[1px] w-20 bg-white/30 my-2" />
-                  <p className="text-sm font-medium text-violet-50 max-w-[280px] leading-relaxed italic">
+                  <p className="text-sm font-medium text-white/90 max-w-[280px] leading-relaxed italic">
                     {lang === 'ta' ? toastData.meaningta : toastData.meaning}
                   </p>
                 </div>
