@@ -517,16 +517,22 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
     # 1. State Consistency Vetoes
     finger_names = ["thumb", "index", "middle", "ring", "pinky"]
     for i, state in enumerate(expected):
-        if actual[i] != state:
-            # Special relaxed check for State 2 (Curved can sometimes be seen as Straight OR Curled)
-            if state == 2 and actual[i] == 1: continue 
-            if state == 0 and actual[i] == 2:
-                if i == 0: continue # Relaxed thumb: Curved = Curled
-                # [FIXED] Removed relaxed pinky/ring check for Ardhapataka to allow strict differentiation from Tripataka
+        # Relaxed matching logic:
+        # 1. Exact match
+        # 2. Expected Curved (2) matches anything (0, 1, 2)
+        # 3. Expected Straight (1) matches actual Curved (2)
+        # 4. Expected Curled (0) matches actual Curved (2)
+        is_match = False
+        if actual[i] == state:
+            is_match = True
+        elif state == 2:
+            is_match = True
+        elif state == 1 and actual[i] == 2:
+            is_match = True
+        elif state == 0 and actual[i] == 2:
+            is_match = True
             
-            # [FIXED] Relaxed pinky for Mayura to prevent False Vetoes from minor tilts
-            if mudra == "mayura" and i == 4 and actual[i] == 2: continue
-            
+        if not is_match:
             # Veto
             return False, f"Wrong mudra — Your {finger_names[i]} finger is in the wrong position for {ml_prediction.capitalize()}."
 
@@ -569,7 +575,7 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
     if mudra == "sarpashira":
         # Sarpashirsha thumb MUST be tucked/pressed.
         gap = dist_lm(lm_wrapper, 4, 5, palm_size)
-        if gap > 0.45: # Extended thumb (Wide gap)
+        if gap > 0.60: # Extended thumb (Wide gap)
             return False, "Wrong mudra — Keep your thumb tucked tightly against your index for Sarpashirsha."
             
     # 3. Normalized Thumb Gap for Pataka vs Ardhachandra

@@ -32,30 +32,358 @@
  */
 
 // ── Mudra category lists (mirrors Flask ALL_DOUBLE_MUDRAS) ──────────────────
-const JOINED_MUDRAS      = ['anjali','kapotha','puspaputa','samputa','sankha','chakra','matsya','kurma','varaha'];
-const STACKED_MUDRAS     = ['sivalinga','matsya'];
-const CROSS_MUDRAS       = ['svastika','utsanga','nagabandha','katva','bherunda','kartarisvastika','katakavardhana','garuda'];
-const INTERLOCKED_MUDRAS = ['pasa','kilaka','karkata'];
+const JOINED_MUDRAS = ['anjali', 'kapotha', 'puspaputa', 'samputa', 'sankha', 'chakra', 'matsya', 'kurma', 'varaha'];
+const STACKED_MUDRAS = ['sivalinga', 'matsya'];
+const CROSS_MUDRAS = ['svastika', 'utsanga', 'nagabandha', 'katva', 'bherunda', 'kartarisvastika', 'katakavardhana', 'garuda'];
+const INTERLOCKED_MUDRAS = ['pasa', 'kilaka', 'karkata'];
 
 /**
  * MERGEABLE_MUDRAS — mudras where both hands may overlap into a single
  * MediaPipe "blob" (e.g. Anjali with pressed palms, Svastika with crossed wrists).
- * For these, a single-hand detection is ALLOWED through the gate so the AI model
- * can still attempt classification.
  */
 export const MERGEABLE_MUDRAS = [
-  'anjali','karkata','kapotha','svastika','puspaputa','utsanga','sakata',
-  'sankha','pasa','kilaka','samputa','matsya','kurma','varaha','garuda',
-  'nagabandha','katva','bherunda','katakavardhana','kartarisvastika',
+  'anjali', 'karkata', 'kapotha', 'svastika', 'puspaputa', 'utsanga', 'sakata',
+  'sankha', 'pasa', 'kilaka', 'samputa', 'matsya', 'kurma', 'varaha', 'garuda',
+  'nagabandha', 'katva', 'bherunda', 'katakavardhana', 'kartarisvastika',
 ];
 
-// ── Utility ─────────────────────────────────────────────────────────────────
+// ── Physical Truth Table (Fingerprints) ────────────────────────────────────
+// States: 1=UP, 0=DOWN, 2=CURVED/HOODED
+export const MUDRA_FINGERPRINTS = {
+  pataka: [1, 1, 1, 1, 1],
+  tripataka: [1, 1, 1, 0, 1],
+  ardhapataka: [1, 1, 1, 0, 0],
+  suchi: [0, 1, 0, 0, 0],
+  chandrakala: [1, 1, 0, 0, 0],
+  sarpashira: [2, 2, 2, 2, 2],
+  shikhara: [1, 0, 0, 0, 0],
+  mushti: [0, 0, 0, 0, 0],
+  ardhachandra: [1, 1, 1, 1, 1],
+  trishula: [0, 1, 1, 1, 0],
+  mukula: [0, 0, 0, 0, 0],
+  tamrachuda: [1, 0, 0, 0, 1],
+  kartarimukha: [0, 1, 1, 0, 0],
+  mayura: [0, 1, 1, 2, 1],
+  arala: [1, 2, 1, 1, 1],
+  kapittha: [2, 2, 0, 0, 0],
+  katakamukha: [2, 2, 2, 1, 1],
+  shukatunda: [0, 1, 1, 0, 1],
+  kangula: [1, 1, 1, 0, 1],
+  alapadma: [2, 2, 2, 2, 2],
+  hamsasya: [2, 2, 1, 1, 1],
+  bhramara: [2, 2, 2, 1, 1],
+  padmakosha: [2, 2, 2, 2, 2],
+  mrigashira: [1, 0, 0, 0, 1],
+  simhamukha: [1, 0, 0, 0, 1],
+  chatura: [0, 1, 1, 1, 0],
+  hamsapaksha: [1, 1, 1, 1, 1],
+  sandamsha: [2, 2, 2, 0, 0],
+};
+
+// ── Utility Functions ────────────────────────────────────────────────────────
+
 const d2 = (a, b) => {
   if (!a || !b) return 999;
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 };
 
-// ── Main export ──────────────────────────────────────────────────────────────
+/**
+ * calculateAngle - Using dot product to find angle between three points
+ */
+export const calculateAngle = (p1, p2, p3) => {
+  const v1 = { x: p1.x - p2.x, y: p1.y - p2.y, z: p1.z - p2.z };
+  const v2 = { x: p3.x - p2.x, y: p3.y - p2.y, z: p3.z - p2.z };
+
+  const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+  const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y + v1.z * v1.z);
+  const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z);
+
+  const angle = Math.acos(dot / (mag1 * mag2));
+  return (angle * 180) / Math.PI;
+};
+
+export const getFingerAngles = (lms) => {
+  return {
+    thumb: calculateAngle(lms[1], lms[2], lms[4]),
+    index: calculateAngle(lms[5], lms[6], lms[8]),
+    middle: calculateAngle(lms[9], lms[10], lms[12]),
+    ring: calculateAngle(lms[13], lms[14], lms[16]),
+    pinky: calculateAngle(lms[17], lms[18], lms[20]),
+  };
+};
+
+export const getFingerState = (angle, isThumb = false) => {
+  const straightLimit = isThumb ? 140 : 155;
+  const curledLimit = isThumb ? 100 : 105;
+
+  if (angle > straightLimit) return 1; // UP
+  if (angle < curledLimit) return 0; // DOWN
+  return 2; // CURVED
+};
+
+// ── Main exports ──────────────────────────────────────────────────────────────
+
+/**
+ * normalizeLandmarks
+ * Normalizes landmarks to a standard [0,1] palm-center scale
+ * and handles Handedness-Aware Mirroring.
+ */
+export const normalizeLandmarks = (lms, handedness = 'Right') => {
+  if (!lms || lms.length < 21) return lms;
+
+  // 1. Handedness-Aware Mirroring: Ensure "Universal Right Hand" model
+  let mirrored = lms.map(pt => ({
+    x: handedness === 'Left' ? 1.0 - pt.x : pt.x,
+    y: pt.y,
+    z: pt.z || 0
+  }));
+
+  // 2. Palm-Center Scaling: Anchor to Middle MCP (9) and scale by palm size (Wrist-to-MiddleMCP)
+  const wrist = mirrored[0];
+  const palmCenter = mirrored[9];
+  const palmSize = d2(wrist, palmCenter) || 0.2; // Fallback to 0.2
+
+  return mirrored.map(pt => ({
+    x: (pt.x - palmCenter.x) / palmSize,
+    y: (pt.y - palmCenter.y) / palmSize,
+    z: (pt.z - (palmCenter.z || 0)) / palmSize,
+    originalX: pt.x, // Keep original for some legacy checks if needed
+    originalY: pt.y
+  }));
+};
+
+/**
+ * evaluateSingleMudra
+ * Identifies a mudra based on research-grade geometric vetoes.
+ * Grounded in landmark topology [Zhang et al. 2020].
+ */
+export const evaluateSingleMudra = (rawLms, targetMudra = null, handedness = 'Right', detectionConfidence = 1.0) => {
+  // 0. LANDMARK QUALITY GATE
+  if (!rawLms || rawLms.length < 21 || detectionConfidence < 0.3) {
+    return { name: null, confidence: 0, corrections: [] };
+  }
+
+  // Normalize landmarks for Universal Right Hand model and scale-invariance
+  const lms = normalizeLandmarks(rawLms, handedness);
+  // We use rawLms for d2 checks that were calibrated on image-space [0,1]
+  const rawD2 = (i, j) => d2(rawLms[i], rawLms[j]);
+
+  const angles = getFingerAngles(rawLms);
+  const states = [
+    getFingerState(angles.thumb, true),
+    getFingerState(angles.index),
+    getFingerState(angles.middle),
+    getFingerState(angles.ring),
+    getFingerState(angles.pinky)
+  ];
+
+  const target = targetMudra?.toLowerCase();
+
+  // 1. If we have a target, check it first for strict pedagogical enforcement
+  if (target && MUDRA_FINGERPRINTS[target]) {
+    const fingerprint = MUDRA_FINGERPRINTS[target];
+    let matchCount = 0;
+    for (let i = 0; i < 5; i++) {
+      let isMatch = false;
+      const expected = fingerprint[i];
+      const actual = states[i];
+      if (actual === expected) {
+        isMatch = true;
+      } else if (expected === 2) {
+        isMatch = true;
+      } else if (expected === 1 && actual === 2) {
+        isMatch = true;
+      } else if (expected === 0 && actual === 2) {
+        isMatch = true;
+      }
+      if (isMatch) matchCount++;
+    }
+
+    const score = (matchCount / 5) * 100;
+    let valid = true;
+    let corrections = [];
+
+    // ── RESEARCH-GRADE STRUCTURAL VETOES ──────────────────────────────────────
+
+    // 🔴 PATAKA: All fingers straight + tight gaps
+    if (target === 'pataka') {
+      if (states.slice(1).some(s => s !== 1)) {
+        valid = false;
+        corrections.push('Keep all your fingers completely straight');
+      }
+      // Spacing gaps strictly < 0.06
+      if (rawD2(8, 12) > 0.06 || rawD2(12, 16) > 0.06 || rawD2(16, 20) > 0.06) {
+        valid = false;
+        corrections.push('Join your fingers tightly');
+      }
+      if (states[0] === 0) {
+        valid = false;
+        corrections.push('Un-tuck your thumb');
+      }
+    }
+
+    // 🔴 TRIPATAKA: Ring finger folded + Deep depth
+    if (target === 'tripataka') {
+      if (states[3] !== 0) {
+        valid = false;
+        corrections.push('Fold your ring finger fully');
+      }
+      // Tip-to-Wrist distance strictly < 0.18
+      const ringFoldDepth = rawD2(16, 0);
+      if (ringFoldDepth > 0.18) {
+        valid = false;
+        corrections.push('Fold your ring finger fully to the palm');
+      }
+    }
+
+    // 🔴 SUCHI: Only index straight, thumb folded
+    if (target === 'suchi') {
+      if (states[0] !== 0) {
+        valid = false;
+        corrections.push('Tuck your thumb inward');
+      }
+      // Only index can be straight (State 1)
+      const otherFingersStraight = states.slice(2).some(s => s === 1);
+      if (states[1] !== 1 || otherFingersStraight) {
+        valid = false;
+        corrections.push('Fold all fingers except your index finger');
+      }
+      // Verticality check
+      if (rawLms[8].y > (rawLms[9].y + 0.10)) {
+        valid = false;
+        corrections.push('Point your index finger straight up');
+      }
+    }
+
+    // 🔴 KATAKAMUKHA vs. KAPITTHA: 3-finger pinch rule
+    if (target === 'katakamukha' || target === 'kapittha') {
+      // Thumb-Index-Middle tips distance < 0.15
+      const pinchDist = (rawD2(4, 8) + rawD2(4, 12) + rawD2(8, 12)) / 3;
+      if (pinchDist > 0.15) {
+        valid = false;
+        corrections.push('Touch your thumb, index, and middle fingers together');
+      }
+      if (target === 'katakamukha' && (states[3] !== 1 || states[4] !== 1)) {
+        valid = false;
+        corrections.push('Keep your ring and pinky fingers extended');
+      }
+    }
+
+    // 🔴 ARDHACHANDRA: Fingers must be spread
+    if (target === 'ardhachandra') {
+      const tips = [rawLms[8], rawLms[12], rawLms[16], rawLms[20]];
+      let touching = true;
+      for (let i = 0; i < tips.length - 1; i++) {
+        if (d2(tips[i], tips[i + 1]) > 0.08) touching = false;
+      }
+      if (touching) {
+        valid = false;
+        corrections.push('Spread your fingers wide apart');
+      }
+    }
+
+    // 🔴 CHANDRAKALA
+    if (target === 'chandrakala') {
+      if (states[0] !== 1) {
+        valid = false;
+        corrections.push('Extend your thumb outward');
+      }
+      if (rawD2(4, 8) < 0.12) {
+        valid = false;
+        corrections.push('Spread your index and thumb into a wide crescent');
+      }
+    }
+
+    if (valid && score >= (target === 'pataka' ? 85 : 80)) {
+      return { name: target, confidence: score, corrections: [] };
+    } else {
+      return { name: null, confidence: 0, corrections };
+    }
+  }
+
+  // 2. Otherwise, find the best match from all fingerprints (for auto-detect)
+  let bestMatch = null;
+  let maxScore = 0;
+
+  for (const [name, fingerprint] of Object.entries(MUDRA_FINGERPRINTS)) {
+    let matchCount = 0;
+    for (let i = 0; i < 5; i++) {
+      let isMatch = false;
+      const expected = fingerprint[i];
+      const actual = states[i];
+      if (actual === expected) {
+        isMatch = true;
+      } else if (expected === 2) {
+        isMatch = true;
+      } else if (expected === 1 && actual === 2) {
+        isMatch = true;
+      } else if (expected === 0 && actual === 2) {
+        isMatch = true;
+      }
+      if (isMatch) matchCount++;
+    }
+
+    const score = (matchCount / 5) * 100;
+    if (score > maxScore) {
+      maxScore = score;
+      bestMatch = name;
+    }
+  }
+
+  if (maxScore < 75) return { name: null, confidence: 0, corrections: [] };
+
+  // Apply Global Vetoes to bestMatch
+  if (bestMatch === 'pataka') {
+    if (states.slice(1).some(s => s !== 1) || rawD2(8, 12) > 0.07) return { name: null, confidence: 0 };
+  }
+  if (bestMatch === 'tripataka') {
+    if (states[3] !== 0 || rawD2(16, 0) > 0.18) return { name: null, confidence: 0 };
+  }
+  if (bestMatch === 'suchi') {
+    if (states[0] !== 0 || states.slice(2).some(s => s === 1)) return { name: null, confidence: 0 };
+  }
+
+  return { name: bestMatch, confidence: maxScore, corrections: [] };
+};
+
+
+
+/**
+ * evaluateDoubleMudra
+ * Identifies double-hand mudras by evaluating both hands and checking spatial anchors
+ */
+export const evaluateDoubleMudra = (multiHandLandmarks, targetMudraName = null) => {
+  if (!multiHandLandmarks || multiHandLandmarks.length < 2) {
+    return { name: null, confidence: 0, corrections: ['Show both hands clearly'] };
+  }
+
+  // 1. Check Spatial Anchors (Pre-filter)
+  const anchorCheck = checkGeometricAnchors(targetMudraName, multiHandLandmarks);
+  if (!anchorCheck.isValid) {
+    return { name: null, confidence: 0, corrections: anchorCheck.corrections };
+  }
+
+  // 2. Evaluate both hands
+  // For Samyuta, often both hands form the same asamyuta mudra or similar
+  const h1 = evaluateSingleMudra(multiHandLandmarks[0]);
+  const h2 = evaluateSingleMudra(multiHandLandmarks[1]);
+
+  // If both hands are identified as the same mudra, and they pass anchor check, 
+  // it's highly likely a valid Samyuta mudra (like Anjali, which is Pataka+Pataka).
+  // Note: This is a simplified logic for the "Instant" version. 
+  // Real double-hand classification often requires specialized fingerprints.
+
+  // For now, if they match a known Samyuta pattern, return it.
+  const name = targetMudraName?.toLowerCase();
+  if (name && anchorCheck.isValid) {
+    // If the teacher has set a target, and they pass the geometric gate, 
+    // we give them a high confidence score for that target.
+    return { name: targetMudraName, confidence: 90, corrections: [] };
+  }
+
+  return { name: h1.name === h2.name ? h1.name : null, confidence: (h1.confidence + h2.confidence) / 2, corrections: [] };
+};
+
 /**
  * checkGeometricAnchors
  * @param {string} mudraName  - target mudra folder name (lowercase)
@@ -64,79 +392,44 @@ const d2 = (a, b) => {
  */
 export const checkGeometricAnchors = (mudraName, multiHandLandmarks) => {
   const name = mudraName?.toLowerCase?.() ?? '';
-  const num  = multiHandLandmarks?.length ?? 0;
+  const num = multiHandLandmarks?.length ?? 0;
 
-  // ── No hands ──────────────────────────────────────────────────────────────
-  if (num === 0) {
-    return { isValid: false, corrections: ['Show your hands to the camera'] };
-  }
+  if (num === 0) return { isValid: false, corrections: ['Show your hands to the camera'] };
 
-  // ── Exactly one hand detected ─────────────────────────────────────────────
   if (num === 1) {
-    // Mergeable mudras (overlapping / pressed palms) are fine with one blob
-    if (MERGEABLE_MUDRAS.includes(name)) {
-      return { isValid: true, corrections: [] };
-    }
+    if (MERGEABLE_MUDRAS.includes(name)) return { isValid: true, corrections: [] };
     return { isValid: false, corrections: ['Show BOTH hands clearly to the camera'] };
   }
 
-  // ── Two hands detected ────────────────────────────────────────────────────
   const h1 = multiHandLandmarks[0];
   const h2 = multiHandLandmarks[1];
 
-  // Safety guard — malformed landmark arrays pass through silently
   if (!h1?.[0] || !h2?.[0]) return { isValid: true, corrections: [] };
 
   const wristDist = d2(h1[0], h2[0]);
 
-  // ── JOINED mudras — palms pressed or cupped together ──────────────────────
-  // [Ref 3]: inter-wrist distance for Anjali measured 0.05–0.22; using 0.40 gate
-  // to add 80 % headroom for camera distance & hand-size variance [Ref 4].
   if (JOINED_MUDRAS.includes(name)) {
     const valid = wristDist < 0.40;
-    return {
-      isValid: valid,
-      corrections: valid ? [] : ['Bring both hands closer together — palms should nearly touch'],
-    };
+    return { isValid: valid, corrections: valid ? [] : ['Bring both hands closer together — palms should nearly touch'] };
   }
 
-  // ── STACKED mudras — one hand rests on / above the other ─────────────────
-  // Use palm-centre (lm[9]) average Y rather than wrist alone for better stability.
-  // [Ref 1]: y increases downward; stacked hands need ≥ 6 % vertical separation.
   if (STACKED_MUDRAS.includes(name)) {
     const avgY1 = h1[9] ? (h1[0].y + h1[9].y) / 2 : h1[0].y;
     const avgY2 = h2[9] ? (h2[0].y + h2[9].y) / 2 : h2[0].y;
-    const yDiff = Math.abs(avgY1 - avgY2);
-    const valid = yDiff > 0.05;   // relaxed from 0.12 → 0.05
-    return {
-      isValid: valid,
-      corrections: valid ? [] : ['Stack one hand clearly on top of the other'],
-    };
+    const valid = Math.abs(avgY1 - avgY2) > 0.05;
+    return { isValid: valid, corrections: valid ? [] : ['Stack one hand clearly on top of the other'] };
   }
 
-  // ── CROSS mudras — wrists crossed or arms folded ──────────────────────────
-  // 0.45 accommodates arms crossed at shoulder distance [Ref 2].
   if (CROSS_MUDRAS.includes(name)) {
     const valid = wristDist < 0.45;
-    return {
-      isValid: valid,
-      corrections: valid ? [] : ['Cross or fold your wrists closer to the centre of your body'],
-    };
+    return { isValid: valid, corrections: valid ? [] : ['Cross or fold your wrists closer to the centre of your body'] };
   }
 
-  // ── INTERLOCKED mudras — fingertips hooked / touching ────────────────────
-  // Check index tips AND middle tips — either pair close is acceptable [Ref 1].
-  // Threshold raised from 0.06 → 0.30 (fingertip ≈ 0.22–0.28 apart when hooked).
   if (INTERLOCKED_MUDRAS.includes(name)) {
-    const idxDist = d2(h1[8],  h2[8]);
-    const midDist = d2(h1[12], h2[12]);
-    const valid   = idxDist < 0.30 || midDist < 0.30;
-    return {
-      isValid: valid,
-      corrections: valid ? [] : ['Hook or interlock your fingertips together — bring fingers closer'],
-    };
+    const valid = d2(h1[8], h2[8]) < 0.30 || d2(h1[12], h2[12]) < 0.30;
+    return { isValid: valid, corrections: valid ? [] : ['Hook or interlock your fingertips together'] };
   }
 
-  // ── All other mudras (dola, sakata, etc.) — pass through to AI ───────────
   return { isValid: true, corrections: [] };
 };
+
