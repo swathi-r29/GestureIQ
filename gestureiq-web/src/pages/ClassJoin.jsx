@@ -54,7 +54,9 @@ const ClassJoin = () => {
     // Socket listener for class start
     let socket;
     if (inWaitingRoom) {
+      const token = localStorage.getItem('token');
       socket = io('/', {
+        auth: { token },
         path: '/socket.io',
         secure: false,
         rejectUnauthorized: false

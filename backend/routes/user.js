@@ -47,15 +47,24 @@ router.get('/progress', auth, async (req, res) => {
       console.error('Auth middleware error: req.user or req.user.id missing');
       return res.status(401).json({ msg: 'Authorization denied' });
     }
-    const user = await User.findById(req.user.id).select('-password');
+
+    const { isLocalMode } = require('../utils/dbFallback');
+    let user;
+    if (isLocalMode()) {
+       // Return empty mock progress for resilience mode
+       user = { progress: { detectedMudras: [], mudraScores: {} } };
+    } else {
+       user = await User.findById(req.user.id).select('-password').maxTimeMS(2000);
+    }
+    
     if (!user) {
       console.warn(`User with ID ${req.user.id} not found in database`);
       return res.status(404).json({ msg: 'User not found' });
     }
     res.json(user);
   } catch (err) {
-    console.error('Database Error in [/progress]:', err);
-    res.status(500).json({ msg: 'Server error' });
+    console.warn('[Warning] Database Error in [/progress], falling back to resilience empty state:', err.message);
+    res.json({ progress: { detectedMudras: [], mudraScores: {} } });
   }
 });
 

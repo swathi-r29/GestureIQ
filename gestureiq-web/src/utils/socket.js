@@ -8,7 +8,9 @@ let _socket = null;
 export const getSocket = () => {
     if (!_socket) {
         const socketUrl = SOCKET_URL;
+        const token = localStorage.getItem('token');
         _socket = io(socketUrl, {
+            auth: { token },
             transports: ['websocket'],
             reconnection: true,
             reconnectionAttempts: 5,

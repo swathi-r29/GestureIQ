@@ -1,7 +1,16 @@
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
+let resend;
+if (process.env.RESEND_API_KEY) {
+  resend = new Resend(process.env.RESEND_API_KEY);
+} else {
+  console.warn('[Warning] RESEND_API_KEY is missing. Emails will be mocked and not actually sent.');
+  resend = {
+    emails: {
+      send: async () => ({ data: { id: 'mock_email_id' }, error: null })
+    }
+  };
+}
 const sendClassNotificationEmail = async (studentEmail, studentName, staffName, institutionName, classTitle, scheduledAt, duration, joinLink) => {
   try {
     const { data, error } = await resend.emails.send({

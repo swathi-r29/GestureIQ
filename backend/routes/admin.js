@@ -5,6 +5,10 @@ const User = require('../models/User');
 const adminAuth = require('../middleware/adminAuth');
 const { sendStaffApprovalEmail, sendStaffRejectionEmail } = require('../utils/mailer');
 
+const escapeRegex = (text) => {
+    return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+};
+
 // @route   POST api/admin/login
 // @desc    Admin login using .env credentials
 // @access  Public
@@ -305,15 +309,24 @@ router.post('/mudra/set-primary-video', adminAuth, async (req, res) => {
 router.delete('/mudra/delete-image', adminAuth, async (req, res) => {
     try {
         const { mudraName, imageName } = req.body;
-        const content = await MudraContent.findOne({ mudraName });
 
-        // Remove from DB
-        content.images = content.images.filter(img => img !== imageName);
-        if (content.primaryImage === imageName) content.primaryImage = "";
-        await content.save();
+        // Path validation to prevent traversal
+        const baseDir = path.resolve(__dirname, '../uploads/mudras');
+        const filePath = path.resolve(baseDir, mudraName, 'images', imageName);
+
+        if (!filePath.startsWith(baseDir)) {
+            return res.status(400).json({ msg: 'Invalid file path' });
+        }
+
+        const content = await MudraContent.findOne({ mudraName });
+        if (content) {
+            // Remove from DB
+            content.images = content.images.filter(img => img !== imageName);
+            if (content.primaryImage === imageName) content.primaryImage = "";
+            await content.save();
+        }
 
         // Remove from Disk
-        const filePath = path.join(__dirname, `../uploads/mudras/${mudraName}/images/${imageName}`);
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
         res.json({ success: true });
@@ -422,15 +435,17 @@ router.post('/staff/status', adminAuth, async (req, res) => {
 
 // @route   GET api/admin/students/all
 // @desc    Get all students with filters
+// @access  Private (Admin)
 router.get('/students/all', adminAuth, async (req, res) => {
     try {
         const { search, level } = req.query;
         let query = { role: 'student' };
 
         if (search) {
+            const escapedSearch = escapeRegex(search);
             query.$or = [
-                { name: { $regex: search, $options: 'i' } },
-                { email: { $regex: search, $options: 'i' } }
+                { name: { $regex: escapedSearch, $options: 'i' } },
+                { email: { $regex: escapedSearch, $options: 'i' } }
             ];
         }
 

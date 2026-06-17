@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
 import { evaluateSingleMudra, evaluateDoubleMudra } from '../utils/geometricRules';
+import { FLASK_URL } from '../utils/constants';
 
 let Hands, HAND_CONNECTIONS, drawConnectors, drawLandmarks;
 
@@ -189,8 +190,9 @@ export default function MudraDetect() {
   const [particles, setParticles] = useState([]);
   const [sessionHistory, setSessionHistory] = useState([]);
   const [uniqueMudras, setUniqueMudras] = useState(new Set());
+  const [webcamError, setWebcamError] = useState(null);
 
-
+  const isProcessingRef = useRef(false);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const videoRef = useRef(null);
@@ -251,9 +253,9 @@ export default function MudraDetect() {
 
   const handleDetection = useCallback((key, conf) => {
     const now = Date.now();
-    setDetectedKey(key);
-    setConfidence(conf);
     if (key) {
+      setDetectedKey(key);
+      setConfidence(conf);
       if (key !== prevKeyRef.current) {
         prevKeyRef.current = key;
         const newStreak = streakRef.current + 1;
@@ -285,13 +287,18 @@ export default function MudraDetect() {
       lastDetectRef.current = now;
     } else {
       if (now - lastDetectRef.current > 1500) {
-        prevKeyRef.current = null; streakRef.current = 0; setStreak(0);
+        setDetectedKey(null);
+        setConfidence(0);
+        prevKeyRef.current = null;
+        streakRef.current = 0;
+        setStreak(0);
       }
     }
   }, [spawnParticles, mode]);
 
 
   const runSingleDetection = useCallback(async () => {
+    if (isProcessingRef.current) return;
     const lms = landmarksRef.current;
     const handedness = 'Right'; // Default for single hand detection in this mode
 
@@ -307,19 +314,20 @@ export default function MudraDetect() {
     let finalName = null;
     let finalConf = 0;
 
+    isProcessingRef.current = true;
     try {
       // 1. Hybrid Request: AI Model candidate
-      const response = await axios.post('/api/predict', { landmarks: lms, handedness });
+      const response = await axios.post(`/api/predict`, { landmarks: lms, handedness });
       const modelRes = response.data;
 
       // 2. Structural Veto Gatekeeper
       const vetoRes = evaluateSingleMudra(lms, modelRes.name, handedness, 1.0);
 
-      if (vetoRes.name && modelRes.accuracy > 70) {
+      if (vetoRes.name && modelRes.accuracy > 50) {
         finalName = vetoRes.name;
         finalConf = Math.max(vetoRes.confidence, modelRes.accuracy);
-      } else if (modelRes.accuracy > 85) {
-        // Fallback for mudras not yet in strict veto fingerprints but strong in ML model
+      } else if (modelRes.name && modelRes.accuracy > 45) {
+        // Fallback: Detect page is a sandbox, so we trust the AI even if geometry is sloppy
         finalName = modelRes.name;
         finalConf = modelRes.accuracy;
       }
@@ -328,6 +336,8 @@ export default function MudraDetect() {
       const local = evaluateSingleMudra(lms);
       finalName = local.name;
       finalConf = local.confidence;
+    } finally {
+      isProcessingRef.current = false;
     }
 
     let name = finalName;
@@ -341,21 +351,34 @@ export default function MudraDetect() {
       detectionLockRef.current = { name, until: nowTime + 1500 };
     }
 
-    // ── TEMPORAL STABILITY (8 Consecutive Frames) ──
-    const lastMudra = bufferRef.current[bufferRef.current.length - 1];
-    if (name === lastMudra && name !== null) {
-      bufferRef.current.push(name);
-    } else {
-      bufferRef.current = [name];
+    // ── TEMPORAL STABILITY (Sliding Window Majority Vote) ──
+    bufferRef.current.push(name);
+    if (bufferRef.current.length > 6) {
+      bufferRef.current.shift();
     }
 
-    if (bufferRef.current.length >= 8) {
-      handleDetection(name, conf);
+    const counts = {};
+    let maxCount = 0;
+    let winner = null;
+
+    bufferRef.current.forEach(val => {
+      if (val !== null) {
+        counts[val] = (counts[val] || 0) + 1;
+        if (counts[val] > maxCount) {
+          maxCount = counts[val];
+          winner = val;
+        }
+      }
+    });
+
+    if (winner && maxCount >= 3) {
+      handleDetection(winner, conf);
     } else {
       handleDetection(null, 0);
     }
   }, [handleDetection]);
   const runDoubleDetection = useCallback(async () => {
+    if (isProcessingRef.current) return;
     const results = landmarksRef.current;
     if (!results?.multiHandLandmarks || results.multiHandLandmarks.length < 2) {
       setHandPresent(false);
@@ -371,9 +394,10 @@ export default function MudraDetect() {
     let finalConf = 0;
     let corrections = [];
 
+    isProcessingRef.current = true;
     try {
       // 1. Hybrid Request: Double Hand AI Model candidate
-      const response = await axios.post('/api/predict_double', {
+      const response = await axios.post(`/api/predict_double`, {
         landmarks: results.multiHandLandmarks
       });
       const modelRes = response.data;
@@ -381,11 +405,12 @@ export default function MudraDetect() {
       // 2. Structural Veto Gatekeeper for Double Hands
       const vetoRes = evaluateDoubleMudra(results.multiHandLandmarks);
 
-      if (vetoRes.name && modelRes.accuracy > 70) {
+      if (vetoRes.name && modelRes.accuracy > 50) {
         finalName = vetoRes.name;
         finalConf = Math.max(vetoRes.confidence, modelRes.accuracy);
         corrections = vetoRes.corrections || [];
-      } else {
+      } else if (modelRes.name && modelRes.accuracy > 45) {
+        // Fallback: Detect page is a sandbox, so we trust the AI even if geometry is sloppy
         finalName = modelRes.name;
         finalConf = modelRes.accuracy;
         corrections = modelRes.corrections || [];
@@ -395,6 +420,8 @@ export default function MudraDetect() {
       finalName = local.name;
       finalConf = local.confidence;
       corrections = local.corrections || [];
+    } finally {
+      isProcessingRef.current = false;
     }
 
     let name = finalName;
@@ -407,17 +434,28 @@ export default function MudraDetect() {
     } else if (name && conf >= 90) {
       detectionLockRef.current = { name, until: nowTime + 1500 };
     }
-
-    // ── TEMPORAL STABILITY (8 Consecutive Frames) ──
-    const lastMudra = bufferRef.current[bufferRef.current.length - 1];
-    if (name === lastMudra && name !== null) {
-      bufferRef.current.push(name);
-    } else {
-      bufferRef.current = [name];
+    // ── TEMPORAL STABILITY (Sliding Window Majority Vote) ──
+    bufferRef.current.push(name);
+    if (bufferRef.current.length > 6) {
+      bufferRef.current.shift();
     }
 
-    if (bufferRef.current.length >= 8) {
-      handleDetection(name, conf);
+    const counts = {};
+    let maxCount = 0;
+    let winner = null;
+
+    bufferRef.current.forEach(val => {
+      if (val !== null) {
+        counts[val] = (counts[val] || 0) + 1;
+        if (counts[val] > maxCount) {
+          maxCount = counts[val];
+          winner = val;
+        }
+      }
+    });
+
+    if (winner && maxCount >= 3) {
+      handleDetection(winner, conf);
       setDoubleMsg('Mudra identified');
     } else {
       handleDetection(null, 0);
@@ -486,9 +524,10 @@ export default function MudraDetect() {
     const startStream = async () => {
       try {
         const numHands = mode === 'double' ? 2 : 1;
-        const success = initHands(numHands);
+        const success = await initHands(numHands);
         if (!success) throw new Error('Hands engine failed');
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+        setWebcamError(null);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           streamRef.current = stream;
@@ -501,7 +540,15 @@ export default function MudraDetect() {
 
           const processFrame = async () => {
             if (handsRef.current && videoRef.current && cameraOn) {
-              await handsRef.current.send({ image: videoRef.current });
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (e) {
+                console.warn("MediaPipe send error:", e);
+              }
+            }
+            // Always queue the next frame as long as cameraOn is true, 
+            // so we don't accidentally kill the loop before handsRef is ready
+            if (cameraOn) {
               rafRef.current = requestAnimationFrame(processFrame);
             }
           };
@@ -514,11 +561,44 @@ export default function MudraDetect() {
       } catch (error) {
         console.error('Camera error:', error);
         setCameraOn(false);
+        const errMsg = 'Camera access denied. Please allow camera permission and ensure you are using HTTPS.';
+        setWebcamError(errMsg);
+        alert(errMsg);
       }
     };
     startStream();
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
   }, [cameraOn, mode, initHands, runSingleDetection, runDoubleDetection]);
+
+  // Page-exit cleanup: close the Hands instance and stop the media stream when component unmounts
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      if (handsRef.current) {
+        try {
+          handsRef.current.close();
+        } catch (e) {
+          console.error("Error closing Hands:", e);
+        }
+        handsRef.current = null;
+      }
+      isProcessingRef.current = false;
+    };
+  }, []);
 
   const stopCamera = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -532,6 +612,8 @@ export default function MudraDetect() {
     setCameraOn(false); setHandPresent(false); setDetectedKey(null);
     setConfidence(0); setStreak(0); streakRef.current = 0; prevKeyRef.current = null;
     setSessionHistory([]); setUniqueMudras(new Set());
+    setWebcamError(null);
+    isProcessingRef.current = false;
   }, []);
 
 
@@ -705,7 +787,7 @@ export default function MudraDetect() {
                 <div style={{ textAlign: 'right' }}>
                   <p style={{ fontFamily: "'Lora', serif", fontSize: 9, color: C.sandal, textTransform: 'uppercase', letterSpacing: 1, marginBottom: -2 }}>Mastery Progress</p>
                   <span style={{ fontFamily: "'IM Fell English', serif", fontSize: 20, color: C.templeGold, fontWeight: 700 }}>
-                    {uniqueMudras.size} / {mode === 'single' ? 27 : 23}
+                    {uniqueMudras.size} / {mode === 'single' ? 28 : 23}
                   </span>
                 </div>
               )}
@@ -749,7 +831,7 @@ export default function MudraDetect() {
             boxShadow: `0 2px 12px rgba(44,26,14,0.08)`,
           }}>
             {[
-              { key: 'single', label: 'Asamyuta Hasta', sub: '27 Single-hand Mudras', Icon: Hand },
+              { key: 'single', label: 'Asamyuta Hasta', sub: '28 Single-hand Mudras', Icon: Hand },
               { key: 'double', label: 'Samyuta Hasta', sub: '23 Double-hand Mudras', Icon: Layers },
             ].map(({ key, label, sub, Icon }, idx) => (
               <button key={key} className="mode-tab" onClick={() => switchMode(key)} style={{
@@ -859,9 +941,33 @@ export default function MudraDetect() {
                       : '27 classical asamyuta mudras · Single hand recognition'}
                   </p>
 
+                  {webcamError && (
+                    <div style={{
+                      margin: '0 24px 20px',
+                      padding: '12px 18px',
+                      borderRadius: 10,
+                      background: '#FDE8E8',
+                      border: '1.5px solid #F8B4B4',
+                      color: '#9B1C1C',
+                      fontSize: 12.5,
+                      fontFamily: "'Lora', serif",
+                      textAlign: 'center',
+                      maxWidth: '85%',
+                      lineHeight: '1.4',
+                      boxShadow: '0 2px 8px rgba(155, 28, 28, 0.08)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 4
+                    }}>
+                      <strong style={{ fontWeight: 600 }}>Webcam Connection Failed</strong>
+                      <span>{webcamError}</span>
+                    </div>
+                  )}
+
                   <button
                     className="btn-primary"
-                    onClick={() => { unlockAudio(); setCameraOn(true); }}
+                    onClick={() => { unlockAudio(); setWebcamError(null); setCameraOn(true); }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '14px 40px', borderRadius: 12,
@@ -1194,10 +1300,12 @@ export default function MudraDetect() {
                         : <Hand size={24} color={C.sandal} />}
                     </div>
                     <p style={{ fontFamily: "'Yatra One', serif", fontSize: 20, color: C.sandal, marginBottom: 6 }}>
-                      {status === 'analyzing' ? 'Reading Mudra...' : 'Awaiting Hasta'}
+                      {status === 'analyzing' ? 'Not a Mudra' : 'Awaiting Hasta'}
                     </p>
                     <p style={{ fontFamily: "'Lora', serif", fontStyle: 'italic', fontSize: 12, color: C.linen }}>
-                      {mode === 'double' ? 'Show both hands to the camera' : 'Form a classical hand mudra'}
+                      {status === 'analyzing'
+                        ? (mode === 'double' ? 'Form a classical double-hand mudra' : 'Form a classical hand mudra')
+                        : (mode === 'double' ? 'Show both hands to the camera' : 'Form a classical hand mudra')}
                     </p>
                   </div>
                 )}
@@ -1225,7 +1333,7 @@ export default function MudraDetect() {
                   {[
                     { label: 'Streak', value: streak, Icon: Flame, color: C.templeGold },
                     { label: 'Unique', value: uniqueMudras.size, Icon: Star, color: C.vermillion },
-                    { label: 'Total', value: mode === 'single' ? 27 : 23, Icon: Trophy, color: C.brownLight },
+                    { label: 'Total', value: mode === 'single' ? 28 : 23, Icon: Trophy, color: C.brownLight },
                   ].map((item, i) => (
                     <div key={i} style={{
                       textAlign: 'center',

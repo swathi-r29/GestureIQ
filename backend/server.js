@@ -6,6 +6,8 @@ const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 const MudraContent = require('./models/MudraContent');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
 
 dotenv.config();
 
@@ -118,18 +120,53 @@ const io = new Server(server, {
 // Track socket to room/identity mapping for cleanup
 const socketRegistry = new Map();
 
+// Socket Authentication Middleware
+io.use(async (socket, next) => {
+    try {
+        const token = socket.handshake.auth?.token || socket.handshake.query?.token || socket.handshake.headers['x-auth-token'];
+        if (!token) {
+            return next(new Error('Authentication error: No token provided'));
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.user = decoded.user; // { id, role, ... }
+
+        try {
+            const { isLocalMode } = require('./utils/dbFallback');
+            if (!isLocalMode()) {
+                const user = await User.findById(socket.user.id).maxTimeMS(2000);
+                if (!user) return next(new Error('Authentication error: User not found'));
+                
+                const isActive = user.role === 'admin' || user.status === 'active' || user.status === 'approved';
+                if (!isActive) return next(new Error('Authentication error: Account is not active'));
+                
+                socket.user.role = user.role;
+            }
+        } catch (dbErr) {
+            console.warn('[Socket Auth] DB check skipped or failed, proceeding with token role:', dbErr.message);
+        }
+
+        next();
+    } catch (err) {
+        next(new Error('Authentication error: Invalid or expired token'));
+    }
+});
+
 io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+    console.log(`A user connected: ${socket.id} (Role: ${socket.user?.role})`);
 
     // ── Live Class Handshake ───────────────────────────────────
     socket.on('join_class', (data) => {
-        const { classId, userId, name, isTeacher } = data;
+        const { classId, userId, name } = data;
         if (!classId) return;
 
-        socket.join(classId);
-        socketRegistry.set(socket.id, { classId, userId, name, isTeacher: !!isTeacher });
+        // Use verified role instead of client-provided isTeacher
+        const isTeacher = socket.user?.role === 'staff' || socket.user?.role === 'admin';
 
-        console.log(`[Socket] User ${name} (${userId}) joined room ${classId}`);
+        socket.join(classId);
+        socketRegistry.set(socket.id, { classId, userId, name, isTeacher });
+
+        console.log(`[Socket] User ${name} (${userId}) joined room ${classId} [Teacher: ${isTeacher}]`);
 
         // Notify others in room
         socket.to(classId).emit('participant_joined', {
@@ -159,6 +196,12 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start_live_session', (classId) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized start_live_session attempt by ${socket.id}`);
+            return;
+        }
+
         console.log(`[Socket] Class ${classId} starting LIVE`);
 
         // 1. Update classes_db.json (Sync for Dashboard)
@@ -188,6 +231,12 @@ io.on('connection', (socket) => {
     });
 
     socket.on('set_target_mudra', async (data) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized set_target_mudra attempt by ${socket.id}`);
+            return;
+        }
+
         const { classId, target } = data;
         if (!classId) return;
 
@@ -220,6 +269,12 @@ io.on('connection', (socket) => {
 
     // NEW: Real-Time Teacher-Controlled Spotlight
     socket.on('update_class_state', async (data) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized update_class_state attempt by ${socket.id}`);
+            return;
+        }
+
         const { classId, targetMudra, activeModules } = data;
         if (!classId) return;
 
@@ -256,6 +311,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('modules_changed', (data) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized modules_changed attempt by ${socket.id}`);
+            return;
+        }
         const { classId, modules } = data;
         socket.to(classId).emit('modules_changed', { modules });
     });
@@ -269,6 +329,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('class_ended', (classId) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized class_ended attempt by ${socket.id}`);
+            return;
+        }
         io.to(classId).emit('class_ended_broadcast');
     });
 
@@ -317,6 +382,12 @@ io.on('connection', (socket) => {
 
     // ── AI Voice Proxy ────────────────────────────────────────
     socket.on('proxy_voice_instruction', (data) => {
+        const registry = socketRegistry.get(socket.id);
+        if (!registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized proxy_voice_instruction attempt by ${socket.id}`);
+            return;
+        }
+        
         const { classId, text, senderRole } = data;
         if (!classId) return;
 

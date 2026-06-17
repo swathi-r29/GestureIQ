@@ -9,10 +9,10 @@ import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG, translate, getMudraName 
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 import { logFingerStates } from '../utils/fingerRules';
 import { BASE_URL, SOCKET_URL, FLASK_URL } from '../utils/constants';
+import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
 
-
-const { Hands, HAND_CONNECTIONS } = window;
-const { drawConnectors, drawLandmarks } = window;
+let Hands, HAND_CONNECTIONS;
+let drawConnectors, drawLandmarks;
 
 const MUDRAS = [
     // --- SINGLE HAND MUDRAS ---
@@ -181,7 +181,10 @@ export default function Learn() {
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
 
-        const sock = io(SOCKET_URL);
+        const token = localStorage.getItem('token');
+        const sock = io(SOCKET_URL, {
+            auth: { token }
+        });
         sock.on('modules_changed', (data) => {
             setActiveModules(data.modules || data);
         });
@@ -212,32 +215,39 @@ export default function Learn() {
     const handsInstanceRef = useRef(null); // True singleton across renders
 
     useEffect(() => {
-        // 1. Build (or update options on) the singleton Hands object
-        const needsRebuild = !handsInstanceRef.current ||
-            (selectedType === 'Double' ? 2 : 1) !==
-            (handsInstanceRef.current._maxNumHands ?? null);
+        const initHands = async () => {
+            // 1. Build (or update options on) the singleton Hands object
+            const needsRebuild = !handsInstanceRef.current ||
+                (selectedType === 'Double' ? 2 : 1) !==
+                (handsInstanceRef.current._maxNumHands ?? null);
 
-        if (needsRebuild) {
-            // Close the old one cleanly if it exists
-            if (handsInstanceRef.current) {
-                try { handsInstanceRef.current.close(); } catch (_) { }
-                handsInstanceRef.current = null;
-                console.log('[Learn] Hands rebuilt for type:', selectedType);
-            }
+            if (needsRebuild) {
+                // Close the old one cleanly if it exists
+                if (handsInstanceRef.current) {
+                    try { handsInstanceRef.current.close(); } catch (_) { }
+                    handsInstanceRef.current = null;
+                    console.log('[Learn] Hands rebuilt for type:', selectedType);
+                }
 
-            const hands = new Hands({
-                locateFile: (file) =>
-                    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-            });
+                const mp = await loadMediaPipeScripts();
+                Hands = mp.Hands;
+                HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
+                drawConnectors = mp.drawConnectors;
+                drawLandmarks = mp.drawLandmarks;
 
-            const maxHands = selectedType === 'Double' ? 2 : 1;
-            hands.setOptions({
-                maxNumHands: maxHands,
-                modelComplexity: 0,
-                minDetectionConfidence: 0.3,
-                minTrackingConfidence: 0.3,
-            });
-            hands._maxNumHands = maxHands; // Tag for change detection
+                const hands = new Hands({
+                    locateFile: (file) =>
+                        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+                });
+
+                const maxHands = selectedType === 'Double' ? 2 : 1;
+                hands.setOptions({
+                    maxNumHands: maxHands,
+                    modelComplexity: 0,
+                    minDetectionConfidence: 0.3,
+                    minTrackingConfidence: 0.3,
+                });
+                hands._maxNumHands = maxHands; // Tag for change detection
 
             hands.onResults((results) => {
                 isProcessingRef.current = false;
@@ -325,6 +335,10 @@ export default function Learn() {
             handsInstanceRef.current = hands;
             handsRef.current = hands; // Keep handsRef in sync
         }
+    };
+
+        // Fire the initialization immediately
+        initHands();
 
         if (!cameraOn) return; // Don't start the RAF loop if camera is off
 
@@ -368,8 +382,11 @@ export default function Learn() {
         return () => {
             active = false;
             clearInterval(recoveryId);
-            if (requestRef.current) cancelAnimationFrame(requestRef.current);
-            // Singleton stays alive — console.log removed to reduce noise
+            if (requestRef.current) {
+                cancelAnimationFrame(requestRef.current);
+                requestRef.current = null;
+            }
+            // Singleton stays alive - console.log removed to reduce noise
         };
     }, [cameraOn, selectedType]);
 
@@ -502,11 +519,11 @@ export default function Learn() {
 
                 attemptsRef.current += 1;
 
-                let endpoint = `${FLASK_URL}/api/detect_landmarks`;
+                let endpoint = `/api/detect_landmarks`;
                 let body = {};
 
                 if (selectedType === 'Double') {
-                    endpoint = `${FLASK_URL}/api/detect_double_landmarks`;
+                    endpoint = `/api/detect_double_landmarks`;
                     body = {
                         left_landmarks: Array.from(dataObj.left).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
                         right_landmarks: Array.from(dataObj.right).map(lm => ({ x: lm.x, y: lm.y, z: lm.z })),
