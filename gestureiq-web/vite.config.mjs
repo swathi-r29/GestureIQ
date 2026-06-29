@@ -19,6 +19,9 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         filename: 'manifest.json',
+        devOptions: {
+          enabled: true
+        },
         manifest: {
           name:             'GestureIQ',
           short_name:       'GestureIQ',

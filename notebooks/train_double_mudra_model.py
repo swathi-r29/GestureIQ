@@ -20,11 +20,11 @@ from sklearn.preprocessing import LabelEncoder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.double_feature_engineering import extract_double_features
 
-#CSV_PATH   = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
-#MODEL_PATH = "D:/GestureIQ/models/double_mudra_model.pkl"
+CSV_PATH   = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
+MODEL_PATH = "D:/GestureIQ/models/double_mudra_model.pkl"
 
-CSV_PATH   = "../dataset/double_handed_mudras/landmarks_double.csv"
-MODEL_PATH = "../models/double_mudra_model.pkl"
+#CSV_PATH   = "../dataset/double_handed_mudras/landmarks_double.csv"
+#MODEL_PATH = "../models/double_mudra_model.pkl"
 
 MIN_SAMPLES = 80    # drop classes below this (too few to learn)
 MAX_SAMPLES = 600   # cap per class to reduce imbalance
@@ -82,30 +82,37 @@ def load_and_process(csv_path):
     print("\nExtracting 166-dim feature vectors ...")
     X = []
     y = []
+    groups = []
     errors = 0
     for _, row in df.iterrows():
         try:
             feats = row_to_features(row)
             X.append(feats)
             y.append(row['mudra_name'])
+            groups.append(row['group'])
         except Exception as e:
             errors += 1
     if errors:
         print(f"  Skipped {errors} rows due to errors")
 
-    return np.array(X), np.array(y)
+    return np.array(X), np.array(y), np.array(groups)
 
 
-def train(X, y):
+def train(X, y, groups):
     print(f"\nFeature matrix: {X.shape}")
     print(f"Label count: {Counter(y)}")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    from sklearn.model_selection import StratifiedGroupKFold
+    from sklearn.calibration import CalibratedClassifierCV
+    
+    sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+    train_idx, test_idx = next(sgkf.split(X, y, groups=groups))
+
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
 
     print(f"\nTraining RandomForest on {len(X_train)} samples ...")
-    clf = RandomForestClassifier(
+    rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=25,
         min_samples_split=4,
@@ -114,6 +121,7 @@ def train(X, y):
         n_jobs=-1,
         random_state=42
     )
+    clf = CalibratedClassifierCV(estimator=rf, method='sigmoid', cv=5)
     clf.fit(X_train, y_train)
 
     y_pred = clf.predict(X_test)
@@ -124,7 +132,7 @@ def train(X, y):
 
     # 5-fold cross-validation for reliability estimate
     print("Running 5-fold cross-validation ...")
-    cv_scores = cross_val_score(clf, X, y, cv=5, scoring='accuracy', n_jobs=-1)
+    cv_scores = cross_val_score(clf, X, y, groups=groups, cv=sgkf, scoring='accuracy', n_jobs=-1)
     print(f"CV scores: {[f'{s:.3f}' for s in cv_scores]}")
     print(f"CV mean:   {cv_scores.mean()*100:.2f}% ± {cv_scores.std()*100:.2f}%")
 
@@ -137,8 +145,8 @@ def main():
         print("Run extract_double_landmarks.py first.")
         sys.exit(1)
 
-    X, y = load_and_process(CSV_PATH)
-    clf  = train(X, y)
+    X, y, groups = load_and_process(CSV_PATH)
+    clf  = train(X, y, groups)
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, 'wb') as f:

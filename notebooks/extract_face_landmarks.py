@@ -10,11 +10,11 @@ face_mesh = mp_face.FaceMesh(
     refine_landmarks=True,
     min_detection_confidence=0.4,
 )
-#FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
-#OUTPUT_CSV    = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
+FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
+OUTPUT_CSV    = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 
-FRAMES_FOLDER = "../dataset/navarasa/frames"
-OUTPUT_CSV    = "../dataset/navarasa/navarasa_landmarks.csv"
+#FRAMES_FOLDER = "../dataset/navarasa/frames"
+#OUTPUT_CSV    = "../dataset/navarasa/navarasa_landmarks.csv"
 
 RASAS = [
     "hasya", "karuna", "raudra", "vira", "bhayanaka",
@@ -26,8 +26,8 @@ def extract():
         writer = csv.writer(csvfile)
 
         # Build header
-        header = ["label"]
-        for i in range(468):
+        header = ["label", "group"]
+        for i in range(478):
             header += [f"x{i}", f"y{i}", f"z{i}"]
         writer.writerow(header)
 
@@ -54,6 +54,12 @@ def extract():
                     rasa_failed += 1
                     continue
 
+                filename = os.path.basename(img_file)
+                if ".mp4_" in filename:
+                    group = filename.split(".mp4_")[0]
+                else:
+                    group = filename.split(".")[0]
+
                 rgb    = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 result = face_mesh.process(rgb)
 
@@ -68,7 +74,7 @@ def extract():
                 nose_y = landmarks[1].y
                 nose_z = landmarks[1].z
 
-                row = [rasa]   # ← rasa name goes first as label
+                row = [rasa, group]   # ← rasa name goes first as label, then group
                 for lm in landmarks:
                     row.append(round(lm.x - nose_x, 6))
                     row.append(round(lm.y - nose_y, 6))

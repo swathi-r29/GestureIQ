@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 import {
   Camera as CameraIcon, CameraOff, Hand, Layers, Flame, Trophy,
   Star, LayoutGrid, X, Activity, Zap, BookOpen,
@@ -177,6 +178,7 @@ const GoldDivider = () => (
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 export default function MudraDetect() {
+  const { user } = useAuth();
   const [mode, setMode] = useState('single');
   const [cameraOn, setCameraOn] = useState(false);
   const [handPresent, setHandPresent] = useState(false);
@@ -254,6 +256,11 @@ export default function MudraDetect() {
   const handleDetection = useCallback((key, conf) => {
     const now = Date.now();
     if (key) {
+      const activeDict = mode === 'single' ? MUDRA_DATA : DOUBLE_MUDRA_DATA;
+      if (!activeDict[key]) {
+        console.warn(`Detected key "${key}" is not registered in ${mode} mudra dictionary`);
+        return;
+      }
       setDetectedKey(key);
       setConfidence(conf);
       if (key !== prevKeyRef.current) {
@@ -264,7 +271,7 @@ export default function MudraDetect() {
         playSuccess();
 
         // Update History
-        const mudraName = mode === 'single' ? MUDRA_DATA[key].name : DOUBLE_MUDRA_DATA[key].name;
+        const mudraName = activeDict[key].name;
         setSessionHistory(prev => [{
           key, name: mudraName, confidence: conf, isDouble: mode === 'double'
         }, ...prev].slice(0, 12));
@@ -317,19 +324,24 @@ export default function MudraDetect() {
     isProcessingRef.current = true;
     try {
       // 1. Hybrid Request: AI Model candidate
-      const response = await axios.post(`/api/predict`, { landmarks: lms, handedness });
+      const response = await axios.post(`${FLASK_URL}/api/predict`, {
+        userId: user?.id || user?._id || 'anonymous',
+        landmarks: lms,
+        handedness
+      });
       const modelRes = response.data;
+      const accuracy = modelRes.accuracy ?? modelRes.confidence ?? 0;
 
       // 2. Structural Veto Gatekeeper
       const vetoRes = evaluateSingleMudra(lms, modelRes.name, handedness, 1.0);
 
-      if (vetoRes.name && modelRes.accuracy > 50) {
+      if (vetoRes.name && accuracy > 50) {
         finalName = vetoRes.name;
-        finalConf = Math.max(vetoRes.confidence, modelRes.accuracy);
-      } else if (modelRes.name && modelRes.accuracy > 45) {
+        finalConf = Math.max(vetoRes.confidence, accuracy);
+      } else if (modelRes.name && accuracy > 45) {
         // Fallback: Detect page is a sandbox, so we trust the AI even if geometry is sloppy
         finalName = modelRes.name;
-        finalConf = modelRes.accuracy;
+        finalConf = accuracy;
       }
     } catch (e) {
       // Fallback to local geometry if server is offline
@@ -376,11 +388,12 @@ export default function MudraDetect() {
     } else {
       handleDetection(null, 0);
     }
-  }, [handleDetection]);
+  }, [handleDetection, user]);
+  
   const runDoubleDetection = useCallback(async () => {
     if (isProcessingRef.current) return;
     const results = landmarksRef.current;
-    if (!results?.multiHandLandmarks || results.multiHandLandmarks.length < 2) {
+    if (!results?.left_landmarks || !results?.right_landmarks) {
       setHandPresent(false);
       setDoubleMsg('Show both hands to the camera');
       handleDetection(null, 0);
@@ -397,26 +410,30 @@ export default function MudraDetect() {
     isProcessingRef.current = true;
     try {
       // 1. Hybrid Request: Double Hand AI Model candidate
-      const response = await axios.post(`/api/predict_double`, {
-        landmarks: results.multiHandLandmarks
+      const response = await axios.post(`${FLASK_URL}/api/predict_double`, {
+        userId: user?.id || user?._id || 'anonymous',
+        left_landmarks: results.left_landmarks,
+        right_landmarks: results.right_landmarks,
+        landmarks: [results.left_landmarks, results.right_landmarks]
       });
       const modelRes = response.data;
+      const accuracy = modelRes.accuracy ?? modelRes.confidence ?? 0;
 
       // 2. Structural Veto Gatekeeper for Double Hands
-      const vetoRes = evaluateDoubleMudra(results.multiHandLandmarks);
+      const vetoRes = evaluateDoubleMudra([results.left_landmarks, results.right_landmarks]);
 
-      if (vetoRes.name && modelRes.accuracy > 50) {
+      if (vetoRes.name && accuracy > 50) {
         finalName = vetoRes.name;
-        finalConf = Math.max(vetoRes.confidence, modelRes.accuracy);
+        finalConf = Math.max(vetoRes.confidence, accuracy);
         corrections = vetoRes.corrections || [];
-      } else if (modelRes.name && modelRes.accuracy > 45) {
+      } else if (modelRes.name && accuracy > 45) {
         // Fallback: Detect page is a sandbox, so we trust the AI even if geometry is sloppy
         finalName = modelRes.name;
-        finalConf = modelRes.accuracy;
+        finalConf = accuracy;
         corrections = modelRes.corrections || [];
       }
     } catch (e) {
-      const local = evaluateDoubleMudra(results.multiHandLandmarks);
+      const local = evaluateDoubleMudra([results.left_landmarks, results.right_landmarks]);
       finalName = local.name;
       finalConf = local.confidence;
       corrections = local.corrections || [];
@@ -464,7 +481,17 @@ export default function MudraDetect() {
   }, [handleDetection]);
 
   const initHands = useCallback(async (numHands) => {
-    if (handsRef.current) return true;
+    if (handsRef.current) {
+      if (handsRef.current._maxNumHands === numHands) {
+        return true;
+      }
+      try {
+        handsRef.current.close();
+      } catch (e) {
+        console.error("Error rebuilding hands instance:", e);
+      }
+      handsRef.current = null;
+    }
 
     const mp = await loadMediaPipeScripts();
     Hands = mp.Hands;
@@ -473,10 +500,11 @@ export default function MudraDetect() {
     drawLandmarks = mp.drawLandmarks;
 
     if (!Hands) return false;
+
     const h = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-    h.setOptions({ maxNumHands: numHands, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    h.setOptions({ maxNumHands: numHands, modelComplexity: numHands === 2 ? 1 : 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    h._maxNumHands = numHands;
     h.onResults((results) => {
-      // ... same as before
       if (results.multiHandLandmarks?.length > 0) {
         console.log("Hand Detected - Engine Running");
       }
@@ -487,37 +515,75 @@ export default function MudraDetect() {
       canvas.height = video.clientHeight || 480;
       ctx.save(); ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.scale(-1, 1); ctx.translate(-canvas.width, 0);
-      if (numHands === 1) {
+
+      const activeMaxHands = handsRef.current?._maxNumHands || 1;
+      if (activeMaxHands === 1) {
         let lms = results.multiHandLandmarks?.[0];
         const handedness = results.multiHandedness?.[0]?.label || 'Right';
         if (lms) {
-          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: accent + '60', lineWidth: 2 });
-          drawLandmarks(ctx, lms, { color: accent, lineWidth: 1, radius: 3 });
+          const drawColor = '#C0392B'; // Vermillion
+          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: drawColor + '60', lineWidth: 2 });
+          drawLandmarks(ctx, lms, { color: drawColor, lineWidth: 1, radius: 3 });
           if (handedness === 'Left') {
             lms = lms.map(pt => ({ ...pt, x: 1.0 - pt.x }));
           }
         }
         landmarksRef.current = lms || null;
       } else {
-        const handsList = results.multiHandedness || [];
-        let modifiedLmsList = results.multiHandLandmarks ? [...results.multiHandLandmarks] : [];
-        handsList.forEach((h, i) => {
-          if (h.label === 'Left' && modifiedLmsList[i]) {
-            modifiedLmsList[i] = modifiedLmsList[i].map(pt => ({ ...pt, x: 1.0 - pt.x }));
-          }
-        });
-        landmarksRef.current = { multiHandLandmarks: modifiedLmsList };
+        const handLandmarks = results.multiHandLandmarks || [];
+        const handednessList = results.multiHandedness || [];
+        let leftLms = null;
+        let rightLms = null;
 
-        (results.multiHandLandmarks || []).forEach(lms => {
-          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: C.teal + '60', lineWidth: 2 });
-          drawLandmarks(ctx, lms, { color: C.teal, lineWidth: 1, radius: 3 });
-        });
+        if (handLandmarks.length === 2) {
+          const label0 = handednessList[0]?.label || 'Right';
+          const label1 = handednessList[1]?.label || 'Left';
+          if (label0 !== label1) {
+            if (label0 === 'Left') {
+              leftLms = handLandmarks[0];
+              rightLms = handLandmarks[1];
+            } else {
+              rightLms = handLandmarks[0];
+              leftLms = handLandmarks[1];
+            }
+          } else {
+            // Collision fallback: smaller x is Left, larger x is Right
+            if (handLandmarks[0][0].x < handLandmarks[1][0].x) {
+              leftLms = handLandmarks[0];
+              rightLms = handLandmarks[1];
+            } else {
+              leftLms = handLandmarks[1];
+              rightLms = handLandmarks[0];
+            }
+          }
+        } else if (handLandmarks.length === 1) {
+          const label = handednessList[0]?.label || 'Right';
+          if (label === 'Left') leftLms = handLandmarks[0];
+          else rightLms = handLandmarks[0];
+        }
+
+        // Store them as left_landmarks and right_landmarks
+        landmarksRef.current = {
+          left_landmarks: leftLms,
+          right_landmarks: rightLms
+        };
+
+        if (leftLms) {
+          const drawColor = '#2A7F7F'; // Teal
+          drawConnectors(ctx, leftLms, HAND_CONNECTIONS, { color: drawColor + '60', lineWidth: 2 });
+          drawLandmarks(ctx, leftLms, { color: drawColor, lineWidth: 1, radius: 3 });
+        }
+        if (rightLms) {
+          const drawColor = '#2A7F7F'; // Teal
+          drawConnectors(ctx, rightLms, HAND_CONNECTIONS, { color: drawColor + '60', lineWidth: 2 });
+          drawLandmarks(ctx, rightLms, { color: drawColor, lineWidth: 1, radius: 3 });
+        }
       }
       ctx.restore();
     });
     handsRef.current = h;
     return true;
-  }, [accent]);
+  }, []);
 
   useEffect(() => {
     if (!cameraOn || !videoRef.current) return;
@@ -527,6 +593,7 @@ export default function MudraDetect() {
         const success = await initHands(numHands);
         if (!success) throw new Error('Hands engine failed');
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+        window.localStream = stream;
         setWebcamError(null);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -581,6 +648,9 @@ export default function MudraDetect() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      if (window.localStream) {
+        window.localStream.getTracks().forEach(track => track.stop());
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
@@ -603,10 +673,9 @@ export default function MudraDetect() {
   const stopCamera = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     clearInterval(intervalRef.current);
+    if (window.localStream) { window.localStream.getTracks().forEach(track => track.stop()); }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
     if (videoRef.current) videoRef.current.srcObject = null;
-    handsRef.current?.close();
-    handsRef.current = null;
     landmarksRef.current = null;
     bufferRef.current = [];
     setCameraOn(false); setHandPresent(false); setDetectedKey(null);

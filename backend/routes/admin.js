@@ -160,7 +160,8 @@ const storage = multer.diskStorage({
         // Try to get mudraName from body or query
         const mudraName = req.body.mudraName || req.query.mudraName || 'unknown';
         const type = file.mimetype.startsWith('image') ? 'images' : 'videos';
-        const dir = path.join(__dirname, `../uploads/mudras/${mudraName}/${type}/`);
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+        const dir = path.join(__dirname, `../uploads/mudras/${safeMudraName}/${type}/`);
         fs.mkdirSync(dir, { recursive: true });
         cb(null, dir);
     },
@@ -225,11 +226,12 @@ router.post('/mudra/create', adminAuth, async (req, res) => {
 // @desc    Get content for a specific mudra
 router.get('/mudra/content/:mudraName', adminAuth, async (req, res) => {
     try {
-        let content = await MudraContent.findOne({ mudraName: req.params.mudraName });
+        const safeMudraName = path.basename(req.params.mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+        let content = await MudraContent.findOne({ mudraName: safeMudraName });
         if (!content) {
             // Check if it's one of the default 28 or let it be created as single by default
             content = new MudraContent({
-                mudraName: req.params.mudraName,
+                mudraName: safeMudraName,
                 handType: 'single' // Default for legacy/default list
             });
             await content.save();
@@ -248,7 +250,9 @@ router.post('/mudra/upload-image', adminAuth, upload.single('imageFile'), async 
         const { mudraName, isPrimary } = req.body;
         const filename = req.file.filename;
 
-        const content = await MudraContent.findOne({ mudraName });
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+
+        const content = await MudraContent.findOne({ mudraName: safeMudraName });
         content.images.push(filename);
         if (isPrimary === 'true') {
             content.primaryImage = filename;
@@ -269,7 +273,9 @@ router.post('/mudra/upload-video', adminAuth, upload.single('videoFile'), async 
         const { mudraName, isPrimary } = req.body;
         const filename = req.file.filename;
 
-        const content = await MudraContent.findOne({ mudraName });
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+
+        const content = await MudraContent.findOne({ mudraName: safeMudraName });
         content.videos.push(filename);
         if (isPrimary === 'true') {
             content.primaryVideo = filename;
@@ -287,7 +293,9 @@ router.post('/mudra/upload-video', adminAuth, upload.single('videoFile'), async 
 router.post('/mudra/set-primary-image', adminAuth, async (req, res) => {
     try {
         const { mudraName, imageName } = req.body;
-        await MudraContent.findOneAndUpdate({ mudraName }, { primaryImage: imageName, updatedAt: Date.now() });
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+        const safeImageName = path.basename(imageName);
+        await MudraContent.findOneAndUpdate({ mudraName: safeMudraName }, { primaryImage: safeImageName, updatedAt: Date.now() });
         res.json({ success: true });
     } catch (err) {
         res.status(500).send('Server Error');
@@ -298,7 +306,9 @@ router.post('/mudra/set-primary-image', adminAuth, async (req, res) => {
 router.post('/mudra/set-primary-video', adminAuth, async (req, res) => {
     try {
         const { mudraName, videoName } = req.body;
-        await MudraContent.findOneAndUpdate({ mudraName }, { primaryVideo: videoName, updatedAt: Date.now() });
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+        const safeVideoName = path.basename(videoName);
+        await MudraContent.findOneAndUpdate({ mudraName: safeMudraName }, { primaryVideo: safeVideoName, updatedAt: Date.now() });
         res.json({ success: true });
     } catch (err) {
         res.status(500).send('Server Error');
@@ -311,18 +321,21 @@ router.delete('/mudra/delete-image', adminAuth, async (req, res) => {
         const { mudraName, imageName } = req.body;
 
         // Path validation to prevent traversal
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
+        const safeImageName = path.basename(imageName);
+
         const baseDir = path.resolve(__dirname, '../uploads/mudras');
-        const filePath = path.resolve(baseDir, mudraName, 'images', imageName);
+        const filePath = path.resolve(baseDir, safeMudraName, 'images', safeImageName);
 
         if (!filePath.startsWith(baseDir)) {
             return res.status(400).json({ msg: 'Invalid file path' });
         }
 
-        const content = await MudraContent.findOne({ mudraName });
+        const content = await MudraContent.findOne({ mudraName: safeMudraName });
         if (content) {
             // Remove from DB
-            content.images = content.images.filter(img => img !== imageName);
-            if (content.primaryImage === imageName) content.primaryImage = "";
+            content.images = content.images.filter(img => img !== safeImageName);
+            if (content.primaryImage === safeImageName) content.primaryImage = "";
             await content.save();
         }
 
@@ -339,8 +352,9 @@ router.delete('/mudra/delete-image', adminAuth, async (req, res) => {
 router.put('/mudra/update-description', adminAuth, async (req, res) => {
     try {
         const { mudraName, meaning, fingerPosition, usage, culturalSignificance, steps } = req.body;
+        const safeMudraName = path.basename(mudraName).replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase() || 'unknown';
         await MudraContent.findOneAndUpdate(
-            { mudraName },
+            { mudraName: safeMudraName },
             {
                 description: { meaning, fingerPosition, usage, culturalSignificance, steps },
                 updatedAt: Date.now()

@@ -196,8 +196,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start_live_session', (classId) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized start_live_session attempt by ${socket.id}`);
             return;
         }
@@ -231,8 +232,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('set_target_mudra', async (data) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized set_target_mudra attempt by ${socket.id}`);
             return;
         }
@@ -269,8 +271,9 @@ io.on('connection', (socket) => {
 
     // NEW: Real-Time Teacher-Controlled Spotlight
     socket.on('update_class_state', async (data) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized update_class_state attempt by ${socket.id}`);
             return;
         }
@@ -311,8 +314,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('modules_changed', (data) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized modules_changed attempt by ${socket.id}`);
             return;
         }
@@ -329,8 +333,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('class_ended', (classId) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized class_ended attempt by ${socket.id}`);
             return;
         }
@@ -382,8 +387,9 @@ io.on('connection', (socket) => {
 
     // ── AI Voice Proxy ────────────────────────────────────────
     socket.on('proxy_voice_instruction', (data) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
         const registry = socketRegistry.get(socket.id);
-        if (!registry || !registry.isTeacher) {
+        if (!isAuthorized || !registry || !registry.isTeacher) {
             console.warn(`[Socket] Unauthorized proxy_voice_instruction attempt by ${socket.id}`);
             return;
         }

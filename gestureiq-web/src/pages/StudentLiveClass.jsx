@@ -7,6 +7,10 @@ import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import { checkGeometricAnchors } from '../utils/geometricRules';
 import { getSocket } from '../utils/socket';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
+import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
+
+let Hands, HAND_CONNECTIONS;
+let drawConnectors, drawLandmarks;
 
 const RTC_CONFIG = {
   iceServers: [
@@ -18,8 +22,6 @@ const RTC_CONFIG = {
   ]
 };
 
-const { Hands, HAND_CONNECTIONS } = window;
-const { drawConnectors, drawLandmarks } = window;
 
 const formatTime = (seconds) => {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -107,8 +109,8 @@ const StudentLiveClass = () => {
   const consecutiveRef = useRef({ name: null, count: 0 });
   const preStabilityRef = useRef({ name: null, count: 0 });
   const graceRef = useRef(0); // For stability grace window (hysteresis)
-  const STABILITY_THRESHOLD = 10;
-  const STABILITY_THRESHOLD_DOUBLE = 6;
+  const STABILITY_THRESHOLD = 2;
+  const STABILITY_THRESHOLD_DOUBLE = 2;
   const smoothedScoreRef = useRef(0);
   const holdTimerRef = useRef(null);
   const frameBufferRef = useRef([]);
@@ -436,96 +438,117 @@ const StudentLiveClass = () => {
 
   // ── 2. MediaPipe Setup ─────────────────────────────────────
   useEffect(() => {
-    if (!Hands) return;
-    handsRef.current = new Hands({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
-    handsRef.current.setOptions({
-      maxNumHands: 2, modelComplexity: 1,
-      minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
-    });
-    handsRef.current.onResults((results) => {
-      lastResultTimeRef.current = Date.now();
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
-      
-      // FIX: Use activeModulesRef to avoid stale closure in onResults
-      if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
-        const hList = results.multiHandLandmarks;
-        const hness = results.multiHandedness || [];
-        
-        // Landmark average smoothing (simplified for multi-hand)
-        const averagedLms = hList.map(h => h.map((lm, i) => lm)); // for now just pass through
-        
-        landmarksRef.current = { 
-          multiHandLandmarks: hList, 
-          multiHandedness: hness.map((h, i) => {
-              // [RECTIFICATION] Support spatial-relative identity tracking
-              if (hList.length === 2) {
-                  return { ...h, label: hList[i][0].x < 0.5 ? 'Right' : 'Left' };
-              }
-              return h;
-          }),
-          landmarks: hList[0], // backward compat for single hand logic
-          handedness: hness[0]?.label || 'Right'
-        };
+    let active = true;
+    const init = async () => {
+      try {
+        const mp = await loadMediaPipeScripts();
+        if (!active) return;
+        Hands = mp.Hands;
+        HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
+        drawConnectors = mp.drawConnectors;
+        drawLandmarks = mp.drawLandmarks;
 
-        lastLandmarkTimeRef.current = Date.now();
-        
-        hList.forEach((lms, handIdx) => {
-          // 1. Draw Connectors (Base Layer)
-          const baseColor = handIdx === 0 ? '#7C3AED' : '#10B981';
-          drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: baseColor, lineWidth: 3 });
+        console.log('[MediaPipe] Scripts loaded successfully in StudentLiveClass');
 
-          // 2. Draw Landmarks (Correction Layer)
-          const deviations = fingerDeviationsRef.current;
+        handsRef.current = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        handsRef.current.setOptions({
+          maxNumHands: 2, modelComplexity: 1,
+          minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
+        });
+        handsRef.current.onResults((results) => {
+          lastResultTimeRef.current = Date.now();
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          ctx.save();
+          ctx.scale(-1, 1);
+          ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
           
-          if (deviations) {
-            // Finger-to-Landmark Index Mapping
-            const fingerMap = {
-              thumb: [1, 2, 3, 4],
-              index: [5, 6, 7, 8],
-              middle: [9, 10, 11, 12],
-              ring: [13, 14, 15, 16],
-              pinky: [17, 18, 19, 20]
+          // FIX: Use activeModulesRef to avoid stale closure in onResults
+          if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
+            const hList = results.multiHandLandmarks;
+            const hness = results.multiHandedness || [];
+            
+            // Landmark average smoothing (simplified for multi-hand)
+            const averagedLms = hList.map(h => h.map((lm, i) => lm)); // for now just pass through
+            
+            landmarksRef.current = { 
+              multiHandLandmarks: hList, 
+              multiHandedness: hness.map((h, i) => {
+                  // [RECTIFICATION] Support spatial-relative identity tracking
+                  if (hList.length === 2) {
+                      return { ...h, label: hList[i][0].x < 0.5 ? 'Right' : 'Left' };
+                  }
+                  return h;
+              }),
+              landmarks: hList[0], // backward compat for single hand logic
+              handedness: hness[0]?.label || 'Right'
             };
 
-            // Draw individual joints with correction colors
-            lms.forEach((lm, lmIdx) => {
-              let jointColor = '#ffffff'; // Default: white
+            lastLandmarkTimeRef.current = Date.now();
+            
+            hList.forEach((lms, handIdx) => {
+              // 1. Draw Connectors (Base Layer)
+              const baseColor = handIdx === 0 ? '#7C3AED' : '#10B981';
+              drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: baseColor, lineWidth: 3 });
 
-              // Check which finger this landmark belongs to
-              for (const [fingerName, indices] of Object.entries(fingerMap)) {
-                if (indices.includes(lmIdx)) {
-                  jointColor = deviations[fingerName] || '#ffffff';
-                  break;
-                }
+              // 2. Draw Landmarks (Correction Layer)
+              const deviations = fingerDeviationsRef.current;
+              
+              if (deviations) {
+                // Finger-to-Landmark Index Mapping
+                const fingerMap = {
+                  thumb: [1, 2, 3, 4],
+                  index: [5, 6, 7, 8],
+                  middle: [9, 10, 11, 12],
+                  ring: [13, 14, 15, 16],
+                  pinky: [17, 18, 19, 20]
+                };
+
+                // Draw individual joints with correction colors
+                lms.forEach((lm, lmIdx) => {
+                  let jointColor = '#ffffff'; // Default: white
+
+                  // Check which finger this landmark belongs to
+                  for (const [fingerName, indices] of Object.entries(fingerMap)) {
+                    if (indices.includes(lmIdx)) {
+                      jointColor = deviations[fingerName] || '#ffffff';
+                      break;
+                    }
+                  }
+
+                  drawLandmarks(ctx, [lm], { 
+                    color: jointColor, 
+                    lineWidth: 1, 
+                    radius: lmIdx === 0 ? 4 : 3 // Larger wrist
+                  });
+                });
+              } else {
+                // fallback to default white if no deviations data
+                drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
               }
-
-              drawLandmarks(ctx, [lm], { 
-                color: jointColor, 
-                lineWidth: 1, 
-                radius: lmIdx === 0 ? 4 : 3 // Larger wrist
-              });
             });
           } else {
-            // fallback to default white if no deviations data
-            drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
+            landmarksRef.current = null;
+            lastLandmarkTimeRef.current = 0;
+            smoothingBuffer.current = [];
           }
-        });
-      } else {
-        landmarksRef.current = null;
-        lastLandmarkTimeRef.current = 0;
-        smoothingBuffer.current = [];
-      }
 
-      ctx.restore();
-    });
-    return () => { handsRef.current?.close(); };
+          ctx.restore();
+        });
+      } catch (err) {
+        console.error('[MediaPipe] Initialization failed:', err);
+      }
+    };
+
+    init();
+
+    return () => {
+      active = false;
+      handsRef.current?.close();
+    };
   }, []);
 
   // ── 3. Webcam control ──────────────────────────────────────
@@ -723,13 +746,30 @@ const StudentLiveClass = () => {
       
       if (isTargetDouble) {
           let rightLm = null, leftLm = null;
-          lmData.multiHandLandmarks.forEach((lms, idx) => {
-              let label = lmData.multiHandedness?.[idx]?.label || 'Right';
-              if (lmData.multiHandLandmarks.length === 2) {
-                  label = lms[0].x < 0.5 ? 'Right' : 'Left';
+          const labels = (lmData.multiHandedness || []).map(h => h.label);
+          
+          if (lmData.multiHandLandmarks.length === 2) {
+              if (labels[0] && labels[1] && labels[0] !== labels[1]) {
+                  lmData.multiHandLandmarks.forEach((lms, idx) => {
+                      const label = labels[idx];
+                      if (label === 'Right') rightLm = lms; else leftLm = lms;
+                  });
+              } else {
+                  const lms0 = lmData.multiHandLandmarks[0];
+                  const lms1 = lmData.multiHandLandmarks[1];
+                  if (lms0[0].x < lms1[0].x) {
+                      leftLm = lms0;
+                      rightLm = lms1;
+                  } else {
+                      leftLm = lms1;
+                      rightLm = lms0;
+                  }
               }
+          } else {
+              const lms = lmData.multiHandLandmarks[0];
+              const label = labels[0] || 'Right';
               if (label === 'Right') rightLm = lms; else leftLm = lms;
-          });
+          }
           body = { right_landmarks: rightLm, left_landmarks: leftLm, targetMudra: targetMudra };
       } else {
           body = {
@@ -819,15 +859,6 @@ const StudentLiveClass = () => {
       const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
       
       if (consecutiveRef.current.count >= currentThreshold && detected) {
-        // 🚨 TARGET-CONSTRAINED SCORE GATE (Strict 85% Precision)
-        if (score < 85) {
-          frameBufferRef.current = [];
-          smoothedScoreRef.current = 0;
-          setAiScore(0);
-          aiScoreRef.current = 0;
-          return;
-        }
-        
         frameBufferRef.current.push(score);
         if (frameBufferRef.current.length > 5) frameBufferRef.current.shift();
         

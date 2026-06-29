@@ -23,11 +23,11 @@ RASA_ALIASES = {
     "srungara":  "shringara",
 }
 
-#VIDEO_FOLDER  = "D:/GestureIQ/dataset/navarasa/raw_videos"
-#FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
+VIDEO_FOLDER  = "D:/GestureIQ/dataset/navarasa/raw_videos"
+FRAMES_FOLDER = "D:/GestureIQ/dataset/navarasa/frames"
 
-VIDEO_FOLDER  = "../dataset/navarasa/raw_videos"
-FRAMES_FOLDER = "../dataset/navarasa/frames"
+#VIDEO_FOLDER  = "../dataset/navarasa/raw_videos"
+#FRAMES_FOLDER = "../dataset/navarasa/frames"
 
 def extract_frames():
     import pytesseract

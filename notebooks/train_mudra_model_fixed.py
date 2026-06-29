@@ -23,13 +23,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
 # ── Paths ─────────────────────────────────────────────────────────────────
-DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
-OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-MODEL_PATH  = "../models/mudra_model.pkl"
+#DATA_FOLDER = "../dataset/bharatanatyam_mudras/sorted_mudras"
+#OUTPUT_CSV  = "../dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+#MODEL_PATH  = "../models/mudra_model.pkl"
 
-#DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
-#OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-#MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
+DATA_FOLDER = "D:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
+OUTPUT_CSV  = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+MODEL_PATH  = "D:/GestureIQ/models/mudra_model.pkl"
 # ── Balance settings ──────────────────────────────────────────────────────
 MIN_SAMPLES = 50 # drop mudras with fewer samples (vyaghra=30, palli=25 → removed)
 MAX_SAMPLES = 700   # cap overrepresented mudras (katakamukha 1572 → 700)
@@ -54,9 +54,8 @@ def get_augmented_versions(img):
 def process_image_both_hands(args):
     """
     For each image, try detecting a hand.
-    Save TWO rows per image: one treated as Right hand, one as Left hand.
-    This ensures the model sees both mirror variants during training,
-    matching how /api/predict works at inference time.
+    Save ONE row per image treating it as the detected hand (with actual handedness).
+    Ensures zero identical duplicate twin rows in training data.
     """
     img_path, mudra_name = args
     img = cv2.imread(img_path)
@@ -65,6 +64,12 @@ def process_image_both_hands(args):
 
     mp_hands = mp.solutions.hands
     rows = []
+    
+    filename = os.path.basename(img_path)
+    if "_frame_" in filename:
+        group = filename.split("_frame_")[0]
+    else:
+        group = filename.split(".")[0]
 
     with mp_hands.Hands(
         static_image_mode=True,
@@ -78,18 +83,15 @@ def process_image_both_hands(args):
                 continue
 
             lms = result.multi_hand_landmarks[0].landmark
-            # Raw points
             pts = [[lm.x, lm.y, lm.z] for lm in lms]
 
-            # Save as Right
-            row_r = [mudra_name] + [v for p in pts for v in p] + ['Right']
-            rows.append(row_r)
+            if result.multi_handedness:
+                hand_label = result.multi_handedness[0].classification[0].label
+            else:
+                hand_label = "Right"
 
-            # Save as Left (mirror X so training sees both orientations)
-            pts_l = [[1.0 - p[0], p[1], p[2]] for p in pts]
-            row_l = [mudra_name] + [v for p in pts_l for v in p] + ['Left']
-            rows.append(row_l)
-
+            row = [mudra_name] + [v for p in pts for v in p] + [hand_label, group]
+            rows.append(row)
             break  # one good detection per image is enough
 
     return rows
@@ -115,7 +117,7 @@ def extract_all_landmarks():
             if i % 200 == 0:
                 print(f"  {i}/{len(tasks)} images ... {len(all_rows)} rows so far")
 
-    header = ['mudra_name'] + [f'{c}{i}' for i in range(21) for c in ('x','y','z')] + ['hand_label']
+    header = ['mudra_name'] + [f'{c}{i}' for i in range(21) for c in ('x','y','z')] + ['hand_label', 'group']
     print(f"[extract] Saving {len(all_rows)} rows -> {OUTPUT_CSV}")
     with open(OUTPUT_CSV, 'w', newline='') as f:
         csv.writer(f).writerow(header)
@@ -152,32 +154,40 @@ def build_features(csv_path):
     print(df['mudra_name'].value_counts().to_string())
     print(f"[features] Total rows: {len(df)}")
 
-    X, y = [], []
+    X, y, groups = [], [], []
     for _, row in df.iterrows():
-        vals  = row.drop(['mudra_name', 'hand_label']).values
+        vals  = row.drop(['mudra_name', 'hand_label', 'group']).values
         label = row['hand_label']
+        group = row['group']
         pts   = [[vals[i*3], vals[i*3+1], vals[i*3+2]] for i in range(21)]
         try:
             feats = extract_features(pts, label=label)
             X.append(feats)
             y.append(row['mudra_name'])
+            groups.append(group)
         except Exception as e:
             print(f"  [warn] feature error: {e}")
 
-    return np.array(X), np.array(y)
+    return np.array(X), np.array(y), np.array(groups)
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # STEP 3: Train
 # ─────────────────────────────────────────────────────────────────────────
 
-def train(X, y):
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+def train(X, y, groups):
+    from sklearn.model_selection import StratifiedGroupKFold
+    from sklearn.calibration import CalibratedClassifierCV
+    
+    sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+    train_idx, test_idx = next(sgkf.split(X, y, groups=groups))
+    
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+    
     print(f"\n[train] Training on {len(X_train)} samples, testing on {len(X_test)} …")
 
-    model = RandomForestClassifier(
+    rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=25,
         min_samples_leaf=2,
@@ -185,6 +195,8 @@ def train(X, y):
         random_state=42,
         n_jobs=-1,
     )
+    
+    model = CalibratedClassifierCV(estimator=rf, method='sigmoid', cv=5)
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
@@ -214,14 +226,14 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("STEP 2: Building feature matrix")
     print("=" * 60)
-    X, y = build_features(OUTPUT_CSV)
+    X, y, groups = build_features(OUTPUT_CSV)
     print(f"[features] Feature matrix: {X.shape}")
 
     # Step 3 — train
     print("\n" + "=" * 60)
     print("STEP 3: Training model")
     print("=" * 60)
-    model = train(X, y)
+    model = train(X, y, groups)
 
     # Save
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)

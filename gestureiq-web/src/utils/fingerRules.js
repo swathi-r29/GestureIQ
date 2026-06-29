@@ -49,7 +49,7 @@ export const isTrishula = (lms) => {
 };
 
 export const logFingerStates = (lms) => {
-  if (!lms || lms.length < 21) return;
+  if (!lms || typeof lms.length !== 'number' || lms.length < 21) return;
   console.log('--- Mudra Rule Debug ---', {
     thumb: isThumbUp(lms),
     index: isFingerUp(lms[8], lms[6]),

@@ -12,11 +12,11 @@ import mediapipe as mp
 import numpy as np
 from multiprocessing import Pool, cpu_count
 
-#SORTED_FRAMES_DIR = "D:/GestureIQ/dataset/double_handed_mudras/sorted_frames"
-#OUTPUT_CSV        = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
+SORTED_FRAMES_DIR = "D:/GestureIQ/dataset/double_handed_mudras/sorted_frames"
+OUTPUT_CSV        = "D:/GestureIQ/dataset/double_handed_mudras/landmarks_double.csv"
 
-SORTED_FRAMES_DIR = "../dataset/double_handed_mudras/sorted_frames"
-OUTPUT_CSV        = "../dataset/double_handed_mudras/landmarks_double.csv"
+#SORTED_FRAMES_DIR = "../dataset/double_handed_mudras/sorted_frames"
+#OUTPUT_CSV        = "../dataset/double_handed_mudras/landmarks_double.csv"
 
 mp_hands_mod = mp.solutions.hands
 
@@ -48,6 +48,12 @@ def process_image(args):
     if img is None:
         return None
 
+    filename = os.path.basename(img_path)
+    if "_frame_" in filename:
+        group = filename.split("_frame_")[0]
+    else:
+        group = filename.split(".")[0]
+
     # Try to detect hands from multiple brightness variants
     global hands_worker
     for variant in brightness_variants(img):
@@ -57,11 +63,37 @@ def process_image(args):
         if result.multi_hand_landmarks and len(result.multi_hand_landmarks) >= 1:
             # Build hand dict: label → landmarks
             hand_dict = {}
-            for idx, hand_lm in enumerate(result.multi_hand_landmarks):
+            if len(result.multi_hand_landmarks) == 2:
+                # If we have 2 hands, check if there's a label collision
+                labels = []
+                for idx in range(2):
+                    if result.multi_handedness and idx < len(result.multi_handedness):
+                        labels.append(result.multi_handedness[idx].classification[0].label)
+                    else:
+                        labels.append("Right" if idx == 0 else "Left")
+                
+                # If both are the same, resolve by spatial position
+                if labels[0] == labels[1]:
+                    lms0 = result.multi_hand_landmarks[0]
+                    lms1 = result.multi_hand_landmarks[1]
+                    # The hand with the smaller x coordinate (wrist is landmark 0) is on the left
+                    if lms0.landmark[0].x < lms1.landmark[0].x:
+                        hand_dict["Left"] = lms0
+                        hand_dict["Right"] = lms1
+                    else:
+                        hand_dict["Left"] = lms1
+                        hand_dict["Right"] = lms0
+                else:
+                    hand_dict[labels[0]] = result.multi_hand_landmarks[0]
+                    hand_dict[labels[1]] = result.multi_hand_landmarks[1]
+            else:
+                # 1 hand
+                idx = 0
+                hand_lm = result.multi_hand_landmarks[0]
                 if result.multi_handedness and idx < len(result.multi_handedness):
                     label = result.multi_handedness[idx].classification[0].label
                 else:
-                    label = "Right" if idx == 0 else "Left"
+                    label = "Right"
                 hand_dict[label] = hand_lm
 
             right_lm = hand_dict.get("Right")
@@ -88,7 +120,7 @@ def process_image(args):
 
             # Only save if at least one real hand detected
             if right_lm or left_lm:
-                return row
+                return row + [group]
 
     return None   # no hand detected in any variant
 
@@ -137,6 +169,7 @@ def main():
             for i in range(21):
                 header += [f'{side}_x{i}', f'{side}_y{i}', f'{side}_z{i}']
             header.append(f'{side}_label')
+        header.append('group')
         writer.writerow(header)
         writer.writerows(results)
 

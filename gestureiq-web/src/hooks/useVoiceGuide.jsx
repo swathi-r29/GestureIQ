@@ -330,9 +330,18 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             if (err.name === 'AbortError') return;
 
             console.error("[VOICE] Backend synthesis failed:", err);
+            // Cancel any queued utterances before falling back, to prevent stacking
             window.speechSynthesis.cancel();
             const utt = new SpeechSynthesisUtterance(message);
             utt.lang = langCode(langRef.current);
+            utt.rate = 1.0;
+            utt.onerror = (event) => {
+                if (event.error === 'not-allowed') {
+                    console.warn('[VOICE] Speech blocked by browser autoplay policy. Awaiting user interaction.');
+                } else {
+                    console.warn('[VOICE] SpeechSynthesis error:', event.error);
+                }
+            };
             window.speechSynthesis.speak(utt);
         } finally {
             isFetchingRef.current = false;

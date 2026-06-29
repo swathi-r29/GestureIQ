@@ -381,7 +381,15 @@ export const evaluateDoubleMudra = (multiHandLandmarks, targetMudraName = null) 
     return { name: targetMudraName, confidence: 90, corrections: [] };
   }
 
-  return { name: h1.name === h2.name ? h1.name : null, confidence: (h1.confidence + h2.confidence) / 2, corrections: [] };
+  const candidate = h1.name === h2.name ? h1.name : null;
+  const validDoubleKeys = [
+    'anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 
+    'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 
+    'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 
+    'sivalinga', 'svastika', 'utsanga', 'varaha'
+  ];
+  const doubleName = (candidate && validDoubleKeys.includes(candidate)) ? candidate : null;
+  return { name: doubleName, confidence: (h1.confidence + h2.confidence) / 2, corrections: [] };
 };
 
 /**
@@ -426,7 +434,7 @@ export const checkGeometricAnchors = (mudraName, multiHandLandmarks) => {
   }
 
   if (INTERLOCKED_MUDRAS.includes(name)) {
-    const valid = d2(h1[8], h2[8]) < 0.30 || d2(h1[12], h2[12]) < 0.30;
+    const valid = d2(h1[8], h2[8]) < 0.30 || d2(h1[12], h2[12]) < 0.30 || d2(h1[20], h2[20]) < 0.30;
     return { isValid: valid, corrections: valid ? [] : ['Hook or interlock your fingertips together'] };
   }
 
