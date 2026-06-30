@@ -519,6 +519,11 @@ export default function Learn() {
 
                 attemptsRef.current += 1;
 
+                let capturedFaceFrame = null;
+                if (videoRef.current && activeModulesRef.current.face) {
+                    capturedFaceFrame = captureFrame(); // Uses your built-in fast snapshot utility
+                }
+
                 let endpoint = `/api/detect_landmarks`;
                 let body = {};
 
@@ -534,11 +539,13 @@ export default function Learn() {
                     const lmArray = Array.from(dataObj).map(lm => ({
                         x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
                     }));
+                    endpoint = `/api/detect_holistic`;
                     body = {
-                        landmarks: lmArray,
+                        hand_landmarks: lmArray,
                         handedness: meta.handedness || 'Right',
                         presenceScore: meta.score || 1.0,
                         targetMudra: selectedMudra.folder,
+                        faceFrame: capturedFaceFrame
                     };
                 }
 

@@ -8,7 +8,7 @@ import pickle
 # ── Load CSV ───────────────────────────────────────────────────────────────
 
 
-CSV  = "D:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
+CSV  = "E:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
 df   = pd.read_csv(CSV)
 print("Shape:", df.shape)
 print("\nSamples per rasa:")
@@ -56,10 +56,10 @@ print(classification_report(y_test, y_pred))
 
 # ── Save ───────────────────────────────────────────────────────────────────
 import os
-os.makedirs("D:/GestureIQ/models", exist_ok=True)
+os.makedirs("E:/GestureIQ/models", exist_ok=True)
 
-with open("D:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
+with open("E:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-print("[OK] Saved: D:/GestureIQ/models/navarasa_model.pkl")
+print("[OK] Saved: E:/GestureIQ/models/navarasa_model.pkl")
 print("Training complete!")

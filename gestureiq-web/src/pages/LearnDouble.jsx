@@ -17,9 +17,10 @@ import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
 import { checkGeometricAnchors, MERGEABLE_MUDRAS } from '../utils/geometricRules';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
 
-const { Hands, HAND_CONNECTIONS } = window;
-const { drawConnectors, drawLandmarks } = window;
+let Hands, HAND_CONNECTIONS;
+let drawConnectors, drawLandmarks;
 
 // ── Samyuta mudra list ──────────────────────────────────────────────────────
 const DOUBLE_MUDRA_CONFIG = {
@@ -358,64 +359,80 @@ export default function LearnDouble() {
     useEffect(() => {
         if (!cameraOn) return;
 
-        handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        handsRef.current.setOptions({
-            maxNumHands: 2,          // ← KEY CHANGE: detect both hands
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-        });
+        let active = true;
+        const initMediaPipe = async () => {
+            try {
+                const mp = await loadMediaPipeScripts();
+                if (!active) return;
+                Hands = mp.Hands;
+                HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
+                drawConnectors = mp.drawConnectors;
+                drawLandmarks = mp.drawLandmarks;
 
-        handsRef.current.onResults((results) => {
-            lastResultTimeRef.current = Date.now();
-            const canvas = canvasRef.current;
-            const video = videoRef.current;
-            if (!canvas || !video) return;
-
-            const ctx = canvas.getContext('2d');
-            canvas.width = video.clientWidth;
-            canvas.height = video.clientHeight;
-            ctx.save();
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-
-            if (results.multiHandLandmarks?.length > 0) {
-                const handMap = {};
-                const numFound = results.multiHandLandmarks.length;
-
-                results.multiHandLandmarks.forEach((lms, idx) => {
-                    // FIX: Don't rely solely on MediaPipe's label. Force assignment if 2 hands seen.
-                    const mpLabel = results.multiHandedness?.[idx]?.label;
-                    let label = mpLabel;
-
-                    // If we found two hands but they are both labeled the same, force them into separate slots
-                    if (numFound === 2 && idx === 1 && mpLabel === results.multiHandedness?.[0]?.label) {
-                        label = mpLabel === 'Right' ? 'Left' : 'Right';
-                    }
-
-                    // Draw
-                    const color = label === 'Right' ? '#f59e0b' : '#60a5fa';
-                    drawConnectors(ctx, lms, HAND_CONNECTIONS, { color, lineWidth: 3 });
-                    drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
-
-                    handMap[label] = { landmarks: lms };
+                handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                handsRef.current.setOptions({
+                    maxNumHands: 2,          // ← KEY CHANGE: detect both hands
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5,
                 });
 
-                // Fail-safe: If 2 hands detected but only 1 label slot filled, split them
-                if (numFound === 2 && Object.keys(handMap).length < 2) {
-                    handMap['Right'] = { landmarks: results.multiHandLandmarks[0] };
-                    handMap['Left'] = { landmarks: results.multiHandLandmarks[1] };
-                }
+                handsRef.current.onResults((results) => {
+                    lastResultTimeRef.current = Date.now();
+                    const canvas = canvasRef.current;
+                    const video = videoRef.current;
+                    if (!canvas || !video) return;
 
-                landmarksRef.current = handMap;
-                setHandsDetected(prev => (prev !== numFound ? numFound : prev));
-            } else {
-                landmarksRef.current = null;
-                setHandsDetected(prev => (prev !== 0 ? 0 : prev));
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = video.clientWidth;
+                    canvas.height = video.clientHeight;
+                    ctx.save();
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-canvas.width, 0);
+
+                    if (results.multiHandLandmarks?.length > 0) {
+                        const handMap = {};
+                        const numFound = results.multiHandLandmarks.length;
+
+                        results.multiHandLandmarks.forEach((lms, idx) => {
+                            // FIX: Don't rely solely on MediaPipe's label. Force assignment if 2 hands seen.
+                            const mpLabel = results.multiHandedness?.[idx]?.label;
+                            let label = mpLabel;
+
+                            // If we found two hands but they are both labeled the same, force them into separate slots
+                            if (numFound === 2 && idx === 1 && mpLabel === results.multiHandedness?.[0]?.label) {
+                                label = mpLabel === 'Right' ? 'Left' : 'Right';
+                            }
+
+                            // Draw
+                            const color = label === 'Right' ? '#f59e0b' : '#60a5fa';
+                            drawConnectors(ctx, lms, HAND_CONNECTIONS, { color, lineWidth: 3 });
+                            drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 2 });
+
+                            handMap[label] = { landmarks: lms };
+                        });
+
+                        // Fail-safe: If 2 hands detected but only 1 label slot filled, split them
+                        if (numFound === 2 && Object.keys(handMap).length < 2) {
+                            handMap['Right'] = { landmarks: results.multiHandLandmarks[0] };
+                            handMap['Left'] = { landmarks: results.multiHandLandmarks[1] };
+                        }
+
+                        landmarksRef.current = handMap;
+                        setHandsDetected(prev => (prev !== numFound ? numFound : prev));
+                    } else {
+                        landmarksRef.current = null;
+                        setHandsDetected(prev => (prev !== 0 ? 0 : prev));
+                    }
+                    ctx.restore();
+                });
+            } catch (err) {
+                console.error('[LearnDouble] MediaPipe init error:', err);
             }
-            ctx.restore();
-        });
+        };
+
+        initMediaPipe();
 
         recoveryRef.current = setInterval(() => {
             if (cameraOn && Date.now() - lastResultTimeRef.current > 3000)
@@ -423,8 +440,14 @@ export default function LearnDouble() {
         }, 1000);
 
         return () => {
+            active = false;
             if (recoveryRef.current) clearInterval(recoveryRef.current);
-            if (handsRef.current) { handsRef.current.close(); handsRef.current = null; }
+            if (handsRef.current) {
+                try {
+                    handsRef.current.close();
+                } catch (_) {}
+                handsRef.current = null;
+            }
         };
     }, [cameraOn]);
 

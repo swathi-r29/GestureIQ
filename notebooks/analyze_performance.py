@@ -19,8 +19,8 @@ def p(r):
     return extract_features(pts, label=label)
 
 print("Loading dataset and model...")
-df = pd.read_csv("D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv")
-with open("D:/GestureIQ/models/mudra_model.pkl", "rb") as f:
+df = pd.read_csv("E:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv")
+with open("E:/GestureIQ/models/mudra_model.pkl", "rb") as f:
     m = pickle.load(f)
     
 print("Preparing data...")

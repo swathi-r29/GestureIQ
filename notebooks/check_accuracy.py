@@ -10,8 +10,11 @@ from sklearn.metrics import accuracy_score, classification_report
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
-csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
-model_path = "D:/GestureIQ/models/mudra_model.pkl"
+#csv_path = "D:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+#model_path = "D:/GestureIQ/models/mudra_model.pkl"
+
+csv_path = "E:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv"
+model_path = "E:/GestureIQ/models/mudra_model.pkl"
 
 if not os.path.exists(csv_path):
     print(f"Error: {csv_path} not found. Run train_mudra_model_fixed.py first.")
