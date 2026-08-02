@@ -8,3 +8,5 @@ eventlet
 pandas
 scikit-learn
 psutil
+yt-dlp
+scikit-image

@@ -148,6 +148,7 @@ export default function Learn() {
     const recoveryRef = useRef(null);
     const lastResultTimeRef = useRef(Date.now());
     const holdAccumulatorRef = useRef(0);
+    const peakAccuracyRef = useRef(0);
     const lastFrameTimeRef = useRef(0);
     const graceRef = useRef(0);
     const lowAccuracyFramesRef = useRef(0); // [PHASE 10] Blink Protection
@@ -230,12 +231,17 @@ export default function Learn() {
                 }
 
                 const mp = await loadMediaPipeScripts();
-                Hands = mp.Hands;
+                const HandsConstructor = mp?.Hands || window.Hands;
+                if (typeof HandsConstructor !== 'function') {
+                    console.error('[Learn] MediaPipe Hands constructor unavailable.');
+                    return;
+                }
+
                 HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
                 drawConnectors = mp.drawConnectors;
                 drawLandmarks = mp.drawLandmarks;
 
-                const hands = new Hands({
+                const hands = new HandsConstructor({
                     locateFile: (file) =>
                         `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
                 });
@@ -609,6 +615,7 @@ export default function Learn() {
                 if (isGoodFrame) {
                     holdAccumulatorRef.current = Math.min(holdMs, holdAccumulatorRef.current + dt);
                     lowAccuracyFramesRef.current = 0;
+                    peakAccuracyRef.current = Math.max(peakAccuracyRef.current || 0, accuracy);
                 } else {
                     lowAccuracyFramesRef.current++;
 
@@ -616,6 +623,7 @@ export default function Learn() {
                         // [PHASE 18] Wrong mudra or low accuracy — drain instantly
                         holdAccumulatorRef.current = 0;
                         lowAccuracyFramesRef.current = 0;
+                        peakAccuracyRef.current = 0;
                     } else if (lowAccuracyFramesRef.current > 10) {
                         // Maintain fallback for consistency drops
                         const isPartialGood = data.detected && !wrongMsg && accuracy >= 62;
@@ -649,7 +657,7 @@ export default function Learn() {
                         masteredRef.current = true;
                         saveInProgressRef.current = true;
                         successLockRef.current = true; // Lock UI at 100%
-                        handleMudraMastered(selectedMudraRef.current?.folder, accuracy);
+                        handleMudraMastered(selectedMudraRef.current?.folder, peakAccuracyRef.current || accuracy);
                     }, 1500);
                 }
 
@@ -675,8 +683,10 @@ export default function Learn() {
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get('/api/user/progress', { headers: { 'x-auth-token': token } });
-            setProgress(res.data.progress.detectedMudras || []);
-            setBestScores(res.data.progress.mudraScores || {});
+            const p = res.data?.progress?.detectedMudras || res.data?.detectedMudras || [];
+            const s = res.data?.progress?.mudraScores || res.data?.mudraScores || {};
+            setProgress(Array.isArray(p) ? p : []);
+            setBestScores(typeof s === 'object' && s !== null ? s : {});
         } catch (error) { } finally { setLoading(false); }
     };
 
@@ -774,7 +784,7 @@ export default function Learn() {
 
         // Synchronous History Flush: Ensure registry is wiped BEFORE detection starts
         try {
-            await axios.post('/api/clear_history');
+            await axios.post(`${FLASK_URL}/api/clear_history`);
             console.log('[Learn] Registry flushed successfully.');
         } catch (e) {
             console.error('[Learn] Flush failed:', e);
@@ -949,24 +959,53 @@ export default function Learn() {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                         {MUDRAS.filter(m => m.level === selectedLevel && m.type === selectedType).map((mudra, idx) => {
-                            const isMastered = progress.includes(mudra.folder);
+                            const isMastered = progress.some(p => {
+                                if (!p) return false;
+                                const cleanP = String(p).toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const cleanF = mudra.folder.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const cleanN = mudra.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                return cleanP === cleanF || cleanP === cleanN;
+                            });
+                            const scoreVal = bestScores[mudra.folder] || bestScores[mudra.name] || bestScores[mudra.folder.toLowerCase()];
+
                             return (
                                 <div key={mudra.folder} onClick={() => enterPractice(mudra)}
-                                    className="p-5 border rounded-lg cursor-pointer hover:border-accent group hover:shadow-md transition-all relative overflow-hidden"
-                                    style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                                    <div className="text-[10px] tracking-[3px] uppercase mb-3 opacity-50" style={{ color: 'var(--text-muted)' }}>{idx + 1}</div>
-                                    <h4 className="font-bold tracking-wider mb-1" style={{ color: 'var(--text)' }}>{mudra.name}</h4>
-                                    <p className="text-[10px] italic" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
+                                    className="p-4 border rounded-2xl cursor-pointer group hover:border-[#8B263E] hover:shadow-xl transition-all duration-300 relative overflow-hidden flex flex-col justify-between"
+                                    style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', boxShadow: '0 4px 18px rgba(44,26,14,0.06)' }}>
+                                    <div>
+                                        <div className="w-full h-32 mb-3 rounded-xl overflow-hidden border flex items-center justify-center bg-black/5 relative shadow-inner"
+                                            style={{ borderColor: 'var(--border)' }}>
+                                            <img
+                                                src={`/uploads/mudras/${mudra.folder}/images/${mudra.folder}.jpg`}
+                                                onError={(e) => {
+                                                    e.target.onerror = null;
+                                                    e.target.src = `/crt images/${mudra.folder}.jpg`;
+                                                }}
+                                                alt={mudra.name}
+                                                className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-500"
+                                            />
+                                        </div>
+                                        <div className="text-[10px] tracking-[3px] uppercase mb-1 opacity-60 font-bold" style={{ color: 'var(--text-muted)' }}>Mudra #{idx + 1}</div>
+                                        <h4 className="font-extrabold tracking-wider mb-1 text-base" style={{ color: 'var(--text)' }}>{mudra.name}</h4>
+                                        <p className="text-xs italic line-clamp-1" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
+                                    </div>
                                     {isMastered && (
-                                        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
-                                            <CheckCircle2 size={16} className="text-green-500" fill="currentColor" />
-                                            {bestScores[mudra.folder] && (
-                                                <span className="text-[8px] font-bold bg-green-500/10 text-green-600 px-1 rounded">{bestScores[mudra.folder]}%</span>
+                                        <div className="absolute top-3 right-3 flex items-center gap-1 bg-green-500/20 border border-green-500/40 px-2.5 py-1 rounded-full backdrop-blur-md shadow-sm">
+                                            <CheckCircle2 size={13} className="text-green-600" fill="currentColor" />
+                                            {scoreVal !== undefined && (
+                                                <span className="text-[10px] font-black text-green-700">{scoreVal}%</span>
                                             )}
                                         </div>
                                     )}
-                                    <div className="mt-4 flex justify-end">
-                                        <span className="text-[9px] tracking-widest uppercase font-bold group-hover:text-accent transition-colors" style={{ color: 'var(--text-muted)' }}>Learn →</span>
+                                    <div className="mt-4">
+                                        <button className="w-full py-2.5 px-3 rounded-xl text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-all duration-300 shadow-md group-hover:bg-[#C4881A] group-hover:border-[#C4881A] text-white"
+                                            style={{
+                                                backgroundColor: '#8B263E',
+                                                border: '1.5px solid #8B263E'
+                                            }}>
+                                            <span>Practice Mudra</span>
+                                            <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                        </button>
                                     </div>
                                 </div>
                             );

@@ -24,8 +24,12 @@ powershell -Command "(Get-Content '%ENV_FILE%') -replace 'VITE_PUBLIC_URL=.*', '
 
 if %ERRORLEVEL% EQU 0 (
     echo.
-    echo ✅ SUCCESS! Public URL updated.
-    echo ⚠️  IMPORTANT: You MUST restart the Vite terminal for this to take effect.
+    echo [SUCCESS] Public URL updated in .env!
+    echo [BUILDING] Rebuilding frontend with new URL...
+    cd gestureiq-web && npm run build && cd ..
+    echo.
+    echo ✅ SUCCESS! Frontend rebuilt with new URL.
+    echo ⚠️  IMPORTANT: Please restart the Vite preview terminal window for changes to apply.
     echo.
 ) else (
     echo.

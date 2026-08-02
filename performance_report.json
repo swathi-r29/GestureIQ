@@ -1,0 +1,339 @@
+{
+  "dance_item": "Alarippu",
+  "overall_accuracy_score": 53.7,
+  "grade": "Needs Practice",
+  "evaluated_frames": 450,
+  "discrepancies_count": 339,
+  "discrepancies_detail": [
+    {
+      "timestamp": "00:11.22",
+      "score": 59.4,
+      "student_angles": {
+        "left_knee": 157.8,
+        "right_knee": 160.7,
+        "left_elbow": 150.2,
+        "right_elbow": 149.4,
+        "torso_tilt": 0.6
+      },
+      "reference_angles": {
+        "left_knee": 145.5,
+        "right_knee": 84.8,
+        "left_elbow": 167.0,
+        "right_elbow": 73.0,
+        "torso_tilt": 2.1
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:11.83",
+      "score": 63.5,
+      "student_angles": {
+        "left_knee": 158.7,
+        "right_knee": 163.0,
+        "left_elbow": 150.7,
+        "right_elbow": 143.0,
+        "torso_tilt": 1.3
+      },
+      "reference_angles": {
+        "left_knee": 139.0,
+        "right_knee": 82.8,
+        "left_elbow": 162.4,
+        "right_elbow": 153.3,
+        "torso_tilt": 34.0
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:12.03",
+      "score": 66.4,
+      "student_angles": {
+        "left_knee": 156.7,
+        "right_knee": 162.9,
+        "left_elbow": 151.0,
+        "right_elbow": 145.4,
+        "torso_tilt": 0.2
+      },
+      "reference_angles": {
+        "left_knee": 134.1,
+        "right_knee": 94.7,
+        "left_elbow": 158.0,
+        "right_elbow": 159.0,
+        "torso_tilt": 32.8
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:12.23",
+      "score": 67.7,
+      "student_angles": {
+        "left_knee": 157.0,
+        "right_knee": 161.4,
+        "left_elbow": 149.2,
+        "right_elbow": 145.1,
+        "torso_tilt": 0.4
+      },
+      "reference_angles": {
+        "left_knee": 125.8,
+        "right_knee": 95.5,
+        "left_elbow": 153.3,
+        "right_elbow": 144.0,
+        "torso_tilt": 23.9
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:12.43",
+      "score": 65.2,
+      "student_angles": {
+        "left_knee": 159.5,
+        "right_knee": 160.0,
+        "left_elbow": 149.2,
+        "right_elbow": 145.3,
+        "torso_tilt": 0.6
+      },
+      "reference_angles": {
+        "left_knee": 112.4,
+        "right_knee": 104.2,
+        "left_elbow": 138.7,
+        "right_elbow": 146.1,
+        "torso_tilt": 23.0
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:12.63",
+      "score": 52.3,
+      "student_angles": {
+        "left_knee": 163.0,
+        "right_knee": 165.7,
+        "left_elbow": 149.7,
+        "right_elbow": 145.1,
+        "torso_tilt": 1.0
+      },
+      "reference_angles": {
+        "left_knee": 102.6,
+        "right_knee": 83.4,
+        "left_elbow": 156.7,
+        "right_elbow": 157.3,
+        "torso_tilt": 20.8
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:12.83",
+      "score": 56.0,
+      "student_angles": {
+        "left_knee": 162.6,
+        "right_knee": 164.8,
+        "left_elbow": 149.0,
+        "right_elbow": 147.9,
+        "torso_tilt": 1.5
+      },
+      "reference_angles": {
+        "left_knee": 100.4,
+        "right_knee": 94.5,
+        "left_elbow": 157.3,
+        "right_elbow": 131.7,
+        "torso_tilt": 7.2
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)"
+      ]
+    },
+    {
+      "timestamp": "00:13.03",
+      "score": 59.8,
+      "student_angles": {
+        "left_knee": 160.6,
+        "right_knee": 162.3,
+        "left_elbow": 148.9,
+        "right_elbow": 144.4,
+        "torso_tilt": 0.8
+      },
+      "reference_angles": {
+        "left_knee": 113.8,
+        "right_knee": 93.9,
+        "left_elbow": 153.5,
+        "right_elbow": 114.9,
+        "torso_tilt": 5.6
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:13.23",
+      "score": 40.6,
+      "student_angles": {
+        "left_knee": 160.6,
+        "right_knee": 162.5,
+        "left_elbow": 152.1,
+        "right_elbow": 145.7,
+        "torso_tilt": 0.4
+      },
+      "reference_angles": {
+        "left_knee": 88.2,
+        "right_knee": 74.6,
+        "left_elbow": 158.2,
+        "right_elbow": 79.8,
+        "torso_tilt": 5.5
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:13.43",
+      "score": 58.9,
+      "student_angles": {
+        "left_knee": 160.5,
+        "right_knee": 163.4,
+        "left_elbow": 150.5,
+        "right_elbow": 145.0,
+        "torso_tilt": 1.2
+      },
+      "reference_angles": {
+        "left_knee": 123.5,
+        "right_knee": 95.4,
+        "left_elbow": 153.2,
+        "right_elbow": 84.7,
+        "torso_tilt": 2.8
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:13.63",
+      "score": 73.2,
+      "student_angles": {
+        "left_knee": 160.9,
+        "right_knee": 164.7,
+        "left_elbow": 149.8,
+        "right_elbow": 144.7,
+        "torso_tilt": 0.4
+      },
+      "reference_angles": {
+        "left_knee": 143.5,
+        "right_knee": 127.6,
+        "left_elbow": 161.2,
+        "right_elbow": 88.8,
+        "torso_tilt": 4.4
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:16.44",
+      "score": 69.6,
+      "student_angles": {
+        "left_knee": 163.2,
+        "right_knee": 168.0,
+        "left_elbow": 150.5,
+        "right_elbow": 146.9,
+        "torso_tilt": 0.2
+      },
+      "reference_angles": {
+        "left_knee": 135.8,
+        "right_knee": 127.5,
+        "left_elbow": 165.7,
+        "right_elbow": 171.6,
+        "torso_tilt": 40.2
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy",
+        "Spine vertical tilt imbalance"
+      ]
+    },
+    {
+      "timestamp": "00:18.44",
+      "score": 59.8,
+      "student_angles": {
+        "left_knee": 157.3,
+        "right_knee": 163.1,
+        "left_elbow": 147.1,
+        "right_elbow": 142.5,
+        "torso_tilt": 1.8
+      },
+      "reference_angles": {
+        "left_knee": 101.2,
+        "right_knee": 109.4,
+        "left_elbow": 103.9,
+        "right_elbow": 138.3,
+        "torso_tilt": 0.6
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:18.64",
+      "score": 50.3,
+      "student_angles": {
+        "left_knee": 156.4,
+        "right_knee": 163.9,
+        "left_elbow": 148.2,
+        "right_elbow": 143.2,
+        "torso_tilt": 0.6
+      },
+      "reference_angles": {
+        "left_knee": 98.5,
+        "right_knee": 83.7,
+        "left_elbow": 107.2,
+        "right_elbow": 154.2,
+        "torso_tilt": 4.9
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    },
+    {
+      "timestamp": "00:19.84",
+      "score": 67.4,
+      "student_angles": {
+        "left_knee": 159.8,
+        "right_knee": 166.9,
+        "left_elbow": 149.4,
+        "right_elbow": 142.1,
+        "torso_tilt": 0.7
+      },
+      "reference_angles": {
+        "left_knee": 162.5,
+        "right_knee": 86.3,
+        "left_elbow": 105.8,
+        "right_elbow": 149.3,
+        "torso_tilt": 0.6
+      },
+      "feedback": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level balance discrepancy"
+      ]
+    }
+  ]
+}

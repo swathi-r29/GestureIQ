@@ -161,7 +161,8 @@ router.post('/login', async (req, res) => {
     );
     res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role, status: user.status, learning_mode: user.learning_mode } });
   } catch (err) {
-    res.status(500).json({ msg: 'Server error' });
+    console.error('Login Error:', err);
+    res.status(500).json({ msg: 'Server error', error: err.message });
   }
 });
 

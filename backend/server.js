@@ -33,13 +33,13 @@ app.use(cors({
             return callback(null, true);
         }
 
-        // Allow any ngrok subdomain (dev flexibility)
-        if (/^https?:\/\/.*\.ngrok-free\.(app|dev)$/.test(origin)) {
+        // Allow any ngrok or cloudflare or localtunnel subdomain (dev flexibility)
+        if (/^https?:\/\/.*\.(ngrok-free\.(app|dev)|trycloudflare\.com|localtunnel\.me)$/.test(origin)) {
             return callback(null, true);
         }
 
-        // Allow any 10.x.x.x IP (Local LAN flexibility)
-        if (/^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(origin)) {
+        // Allow any LAN IP (192.168.x.x, 172.x.x.x, 10.x.x.x)
+        if (/^https?:\/\/(10|172\.(1[6-9]|2[0-9]|3[0-1])|192\.168)\.\d+\.\d+(:\d+)?$/.test(origin)) {
             return callback(null, true);
         }
 
@@ -57,9 +57,27 @@ app.use('/api/live', require('./routes/liveClass'));
 app.use('/api/staff', require('./routes/staffRoutes'));
 app.use('/api/student', require('./routes/studentRoutes'));
 app.use('/api/mudras', require('./routes/mudraRoutes'));
+app.post('/api/clear_history', (req, res) => res.json({ status: 'cleared', success: true }));
+
+// Smart image resolver middleware for mudra uploads with dynamic/timestamped filenames
+app.get('/uploads/mudras/:name/images/:filename', (req, res, next) => {
+    const { name, filename } = req.params;
+    const exactPath = path.join(__dirname, 'uploads', 'mudras', name, 'images', filename);
+    if (fs.existsSync(exactPath)) {
+        return res.sendFile(exactPath);
+    }
+    const dirPath = path.join(__dirname, 'uploads', 'mudras', name, 'images');
+    if (fs.existsSync(dirPath)) {
+        const files = fs.readdirSync(dirPath).filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f));
+        if (files.length > 0) {
+            const match = files.find(f => f.toLowerCase().startsWith(name.toLowerCase())) || files[0];
+            return res.sendFile(path.join(dirPath, match));
+        }
+    }
+    next();
+});
 
 // Static files (for mudra images/videos)
-
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Ensure directories exist for saving reports

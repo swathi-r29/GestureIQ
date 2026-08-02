@@ -1,0 +1,22 @@
+[
+  {
+    "label": "Araimandi",
+    "outDir": "out_araimandi",
+    "results": [
+      {
+        "frame": 0,
+        "landmarks": []
+      }
+    ]
+  },
+  {
+    "label": "Mukthaya",
+    "outDir": "out_mukthaya",
+    "results": [
+      {
+        "frame": 0,
+        "landmarks": []
+      }
+    ]
+  }
+]

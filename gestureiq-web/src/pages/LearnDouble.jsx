@@ -18,9 +18,9 @@ import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoice
 import { checkGeometricAnchors, MERGEABLE_MUDRAS } from '../utils/geometricRules';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
+import { BASE_URL, SOCKET_URL, FLASK_URL } from '../utils/constants';
 
-let Hands, HAND_CONNECTIONS;
-let drawConnectors, drawLandmarks;
+let Hands, HAND_CONNECTIONS, drawConnectors, drawLandmarks;
 
 // ── Samyuta mudra list ──────────────────────────────────────────────────────
 const DOUBLE_MUDRA_CONFIG = {
@@ -363,13 +363,17 @@ export default function LearnDouble() {
         const initMediaPipe = async () => {
             try {
                 const mp = await loadMediaPipeScripts();
-                if (!active) return;
-                Hands = mp.Hands;
-                HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
-                drawConnectors = mp.drawConnectors;
-                drawLandmarks = mp.drawLandmarks;
+                const HandsConstructor = mp?.Hands || window.Hands;
+                if (!active || typeof HandsConstructor !== 'function') {
+                    console.error('[LearnDouble] MediaPipe Hands constructor unavailable.');
+                    return;
+                }
 
-                handsRef.current = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                HAND_CONNECTIONS = mp?.HAND_CONNECTIONS || window.HAND_CONNECTIONS;
+                drawConnectors = mp?.drawConnectors || window.drawConnectors;
+                drawLandmarks = mp?.drawLandmarks || window.drawLandmarks;
+
+                handsRef.current = new HandsConstructor({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
                 handsRef.current.setOptions({
                     maxNumHands: 2,          // ← KEY CHANGE: detect both hands
                     modelComplexity: 1,
@@ -434,6 +438,9 @@ export default function LearnDouble() {
 
         initMediaPipe();
 
+        };
+        initMediaPipe();
+
         recoveryRef.current = setInterval(() => {
             if (cameraOn && Date.now() - lastResultTimeRef.current > 3000)
                 lastResultTimeRef.current = Date.now();
@@ -443,9 +450,7 @@ export default function LearnDouble() {
             active = false;
             if (recoveryRef.current) clearInterval(recoveryRef.current);
             if (handsRef.current) {
-                try {
-                    handsRef.current.close();
-                } catch (_) {}
+                try { handsRef.current.close(); } catch (e) {}
                 handsRef.current = null;
             }
         };
@@ -676,15 +681,6 @@ export default function LearnDouble() {
                 const activeThreshold = MUDRA_THRESHOLDS[selectedMudra.folder] || ACCURACY_THRESHOLD;
                 const locallyStable = !!detectedName && accuracy >= activeThreshold && !wrongMsg;
 
-                // ── STATLESS INSTANT TRIGGER (Matching Detect.jsx) ─────────────
-                // If this frame is perfect, we master instantly without the 1s hold
-                const isPerfectFrame = data.detected && accuracy >= activeThreshold && !wrongMsg && locallyStable;
-                if (isPerfectFrame && !saveMutexRef.current) {
-                    saveMutexRef.current = true;
-                    handleMudraMastered(selectedMudra.folder, accuracy);
-                    isDetectingRef.current = false;
-                    return;
-                }
 
                 // --- RESTORED VOICE CORRECTIONS LOGIC ---
                 if (voiceEnabledRef.current) {
@@ -851,8 +847,10 @@ export default function LearnDouble() {
         try {
             const token = localStorage.getItem('token');
             const res = await axios.get('/api/user/progress', { headers: { 'x-auth-token': token } });
-            setProgress(res.data.progress.detectedMudras || []);
-            setBestScores(res.data.progress.mudraScores || {});
+            const p = res.data?.progress?.detectedMudras || res.data?.detectedMudras || [];
+            const s = res.data?.progress?.mudraScores || res.data?.mudraScores || {};
+            setProgress(Array.isArray(p) ? p : []);
+            setBestScores(typeof s === 'object' && s !== null ? s : {});
         } catch (err) {
             console.warn('[LearnDouble] fetchProgress error:', err);
         } finally {
@@ -1044,24 +1042,53 @@ export default function LearnDouble() {
 
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                         {DOUBLE_MUDRAS.filter(m => m.level === selectedLevel).map((mudra, idx) => {
-                            const isMastered = progress.includes(mudra.folder);
+                            const isMastered = progress.some(p => {
+                                if (!p) return false;
+                                const cleanP = String(p).toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const cleanF = mudra.folder.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const cleanN = mudra.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                return cleanP === cleanF || cleanP === cleanN;
+                            });
+                            const scoreVal = bestScores[mudra.folder] || bestScores[mudra.name] || bestScores[mudra.folder.toLowerCase()];
+
                             return (
                                 <div key={mudra.folder} onClick={() => enterPractice(mudra)}
-                                    className="p-5 border rounded-lg cursor-pointer hover:border-accent group hover:shadow-md transition-all relative overflow-hidden"
-                                    style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                                    <div className="text-[10px] tracking-[3px] uppercase mb-3 opacity-50" style={{ color: 'var(--text-muted)' }}>{idx + 1}</div>
-                                    <h4 className="font-bold tracking-wider mb-1" style={{ color: 'var(--text)' }}>{mudra.name}</h4>
-                                    <p className="text-[10px] italic" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
+                                    className="p-4 border rounded-2xl cursor-pointer group hover:border-[#8B263E] hover:shadow-xl transition-all duration-300 relative overflow-hidden flex flex-col justify-between"
+                                    style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)', boxShadow: '0 4px 18px rgba(44,26,14,0.06)' }}>
+                                    <div>
+                                        <div className="w-full h-32 mb-3 rounded-xl overflow-hidden border flex items-center justify-center bg-black/5 relative shadow-inner"
+                                            style={{ borderColor: 'var(--border)' }}>
+                                            <img
+                                                src={`/uploads/mudras/${mudra.folder}/images/${mudra.folder}.jpg`}
+                                                onError={(e) => {
+                                                    e.target.onerror = null;
+                                                    e.target.src = `/crt images/${mudra.folder}.jpg`;
+                                                }}
+                                                alt={mudra.name}
+                                                className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-500"
+                                            />
+                                        </div>
+                                        <div className="text-[10px] tracking-[3px] uppercase mb-1 opacity-60 font-bold" style={{ color: 'var(--text-muted)' }}>Mudra #{idx + 1}</div>
+                                        <h4 className="font-extrabold tracking-wider mb-1 text-base" style={{ color: 'var(--text)' }}>{mudra.name}</h4>
+                                        <p className="text-xs italic line-clamp-1" style={{ color: 'var(--text-muted)' }}>{mudra.meaning}</p>
+                                    </div>
                                     {isMastered && (
-                                        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
-                                            <CheckCircle2 size={16} className="text-green-500" fill="currentColor" />
-                                            {bestScores[mudra.folder] && (
-                                                <span className="text-[8px] font-bold bg-green-500/10 text-green-600 px-1 rounded">{bestScores[mudra.folder]}%</span>
+                                        <div className="absolute top-3 right-3 flex items-center gap-1 bg-green-500/20 border border-green-500/40 px-2.5 py-1 rounded-full backdrop-blur-md shadow-sm">
+                                            <CheckCircle2 size={13} className="text-green-600" fill="currentColor" />
+                                            {scoreVal !== undefined && (
+                                                <span className="text-[10px] font-black text-green-700">{scoreVal}%</span>
                                             )}
                                         </div>
                                     )}
-                                    <div className="mt-4 flex justify-end">
-                                        <span className="text-[9px] tracking-widest uppercase font-bold group-hover:text-accent transition-colors" style={{ color: 'var(--text-muted)' }}>Learn →</span>
+                                    <div className="mt-4">
+                                        <button className="w-full py-2.5 px-3 rounded-xl text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-all duration-300 shadow-md group-hover:bg-[#C4881A] group-hover:border-[#C4881A] text-white"
+                                            style={{
+                                                backgroundColor: '#8B263E',
+                                                border: '1.5px solid #8B263E'
+                                            }}>
+                                            <span>Practice Mudra</span>
+                                            <span className="group-hover:translate-x-1 transition-transform">→</span>
+                                        </button>
                                     </div>
                                 </div>
                             );

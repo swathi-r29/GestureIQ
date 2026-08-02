@@ -1,0 +1,299 @@
+{
+  "master_video": "short1_asamyuta.mp4",
+  "student_video": "short2_asamyuta.mp4",
+  "overall_posture_match": 78.6,
+  "analyzed_frames": 120,
+  "significant_deviations_count": 26,
+  "deviations_timeline": [
+    {
+      "timestamp": "00:00.20",
+      "timestamp_sec": 0.2,
+      "similarity_score": 72.7,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)"
+      ],
+      "master_knee_angle": 138.2,
+      "student_knee_angle": 175.2
+    },
+    {
+      "timestamp": "00:00.80",
+      "timestamp_sec": 0.8,
+      "similarity_score": 71.9,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)"
+      ],
+      "master_knee_angle": 126.7,
+      "student_knee_angle": 167.6
+    },
+    {
+      "timestamp": "00:02.00",
+      "timestamp_sec": 2.0,
+      "similarity_score": 65.4,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 113.1,
+      "student_knee_angle": 154.4
+    },
+    {
+      "timestamp": "00:03.60",
+      "timestamp_sec": 3.6,
+      "similarity_score": 42.6,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 99.6,
+      "student_knee_angle": 142.7
+    },
+    {
+      "timestamp": "00:05.40",
+      "timestamp_sec": 5.4,
+      "similarity_score": 72.0,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)"
+      ],
+      "master_knee_angle": 130.2,
+      "student_knee_angle": 160.9
+    },
+    {
+      "timestamp": "00:06.20",
+      "timestamp_sec": 6.2,
+      "similarity_score": 67.2,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 135.8,
+      "student_knee_angle": 161.9
+    },
+    {
+      "timestamp": "00:08.40",
+      "timestamp_sec": 8.4,
+      "similarity_score": 70.4,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 151.0,
+      "student_knee_angle": 129.4
+    },
+    {
+      "timestamp": "00:09.20",
+      "timestamp_sec": 9.2,
+      "similarity_score": 28.6,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 53.7,
+      "student_knee_angle": 161.2
+    },
+    {
+      "timestamp": "00:09.60",
+      "timestamp_sec": 9.6,
+      "similarity_score": 62.5,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)"
+      ],
+      "master_knee_angle": 110.6,
+      "student_knee_angle": 168.7
+    },
+    {
+      "timestamp": "00:10.40",
+      "timestamp_sec": 10.4,
+      "similarity_score": 53.5,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 147.9,
+      "student_knee_angle": 94.7
+    },
+    {
+      "timestamp": "00:13.40",
+      "timestamp_sec": 13.4,
+      "similarity_score": 72.6,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 160.8,
+      "student_knee_angle": 125.0
+    },
+    {
+      "timestamp": "00:13.80",
+      "timestamp_sec": 13.8,
+      "similarity_score": 55.4,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 166.3,
+      "student_knee_angle": 103.4
+    },
+    {
+      "timestamp": "00:14.00",
+      "timestamp_sec": 14.0,
+      "similarity_score": 54.0,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 166.9,
+      "student_knee_angle": 104.8
+    },
+    {
+      "timestamp": "00:14.20",
+      "timestamp_sec": 14.2,
+      "similarity_score": 71.7,
+      "issues": [
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 168.2,
+      "student_knee_angle": 163.6
+    },
+    {
+      "timestamp": "00:14.80",
+      "timestamp_sec": 14.8,
+      "similarity_score": 69.1,
+      "issues": [
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 169.5,
+      "student_knee_angle": 156.6
+    },
+    {
+      "timestamp": "00:15.00",
+      "timestamp_sec": 15.0,
+      "similarity_score": 74.3,
+      "issues": [
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 166.0,
+      "student_knee_angle": 165.8
+    },
+    {
+      "timestamp": "00:16.20",
+      "timestamp_sec": 16.2,
+      "similarity_score": 66.5,
+      "issues": [
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 150.4,
+      "student_knee_angle": 140.4
+    },
+    {
+      "timestamp": "00:17.80",
+      "timestamp_sec": 17.8,
+      "similarity_score": 63.2,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 107.8,
+      "student_knee_angle": 156.9
+    },
+    {
+      "timestamp": "00:19.60",
+      "timestamp_sec": 19.6,
+      "similarity_score": 66.7,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 156.4,
+      "student_knee_angle": 111.1
+    },
+    {
+      "timestamp": "00:19.80",
+      "timestamp_sec": 19.8,
+      "similarity_score": 58.6,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 175.9,
+      "student_knee_angle": 125.9
+    },
+    {
+      "timestamp": "00:20.00",
+      "timestamp_sec": 20.0,
+      "similarity_score": 64.0,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 170.8,
+      "student_knee_angle": 133.9
+    },
+    {
+      "timestamp": "00:20.20",
+      "timestamp_sec": 20.2,
+      "similarity_score": 74.2,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 171.0,
+      "student_knee_angle": 150.2
+    },
+    {
+      "timestamp": "00:20.60",
+      "timestamp_sec": 20.6,
+      "similarity_score": 73.0,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy",
+        "Spine tilt imbalance"
+      ],
+      "master_knee_angle": 169.6,
+      "student_knee_angle": 152.2
+    },
+    {
+      "timestamp": "00:20.80",
+      "timestamp_sec": 20.8,
+      "similarity_score": 70.5,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 162.1,
+      "student_knee_angle": 129.2
+    },
+    {
+      "timestamp": "00:21.00",
+      "timestamp_sec": 21.0,
+      "similarity_score": 71.5,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 166.7,
+      "student_knee_angle": 127.8
+    },
+    {
+      "timestamp": "00:22.20",
+      "timestamp_sec": 22.2,
+      "similarity_score": 69.7,
+      "issues": [
+        "Knee bend discrepancy (check Araimandi depth)",
+        "Arm / elbow level discrepancy"
+      ],
+      "master_knee_angle": 156.2,
+      "student_knee_angle": 162.6
+    }
+  ]
+}

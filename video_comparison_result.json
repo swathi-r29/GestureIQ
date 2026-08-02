@@ -1,0 +1,8 @@
+{
+  "master_video": "Alarippu.mp4",
+  "student_video": "Alarippu.mp4",
+  "overall_posture_match": 100.0,
+  "analyzed_frames": 1192,
+  "significant_deviations_count": 0,
+  "deviations_timeline": []
+}

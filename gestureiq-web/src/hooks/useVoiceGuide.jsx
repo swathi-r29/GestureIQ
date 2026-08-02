@@ -525,7 +525,22 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             }
             return null;
         },
-        resetWrongGate: () => { wrongMudraCountRef.current = 0; }
+        resetWrongGate: () => { wrongMudraCountRef.current = 0; },
+        poseFeedback: (feedbacks = []) => {
+            if (!feedbacks || feedbacks.length === 0) return null;
+            const lang = langRef.current;
+            const now = Date.now();
+            const primaryFeedback = feedbacks[0];
+            const translated = translate(lang, primaryFeedback);
+
+            if (translated !== lastCorrectionRef.current || now - lastCorrectionTimeRef.current > 4000) {
+                lastCorrectionRef.current = translated;
+                lastCorrectionTimeRef.current = now;
+                _doSpeak(translated, PRIO.MEDIUM);
+                return translated;
+            }
+            return null;
+        }
     }), [getInstruction, _doSpeak, speak]);
 
     return { 

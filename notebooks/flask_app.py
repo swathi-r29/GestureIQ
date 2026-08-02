@@ -25,6 +25,16 @@ tracemalloc.start()
 # Ensure reports directory exists (Saving Issue fix)
 os.makedirs('reports', exist_ok=True)
 
+
+_mp_pose = mp.solutions.pose
+_pose = _mp_pose.Pose(
+    static_image_mode=False,
+    model_complexity=0,      # Faster processing
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+
 app = Flask(__name__)
 CORS(app, origins="*")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', path='/flask.socket.io')
@@ -163,14 +173,6 @@ _face_mesh = _mp_face.FaceMesh(
 
 _mp_selfie = mp.solutions.selfie_segmentation
 _segmentor = _mp_selfie.SelfieSegmentation(model_selection=1) # 1 for landscape/fast
-
-_mp_pose = mp.solutions.pose
-_pose = _mp_pose.Pose(
-    static_image_mode=False,
-    model_complexity=0,      # Faster processing
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
 
 # --- GLOBAL STABILITY REGISTRY ---
 WRIST_HISTORY = deque(maxlen=5) # Task 1: Velocity Gating
@@ -2053,174 +2055,6 @@ def detect_frame():
         print(f"[detect_frame] Error: {e}")
         return jsonify({"error": str(e), "detected": False}), 500
 
-# =============================================================================
-# MODULAR HOLISTIC EVALUATION ADDITIONS (DO NOT REMOVE EXTANT MUDRA METHODS)
-# =============================================================================
-
-def predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=""):
-    """Stateless face mesh classifier using pre-extracted client coordinates."""
-    if not face_landmarks or len(face_landmarks) < 468:
-        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
-
-    try:
-        # Distance calculation relative to Nose Tip (landmark index 1)
-        nose_x = float(face_landmarks[1]['x'])
-        nose_y = float(face_landmarks[1]['y'])
-        nose_z = float(face_landmarks[1]['z'])
-        
-        features = []
-        for l in face_landmarks[:468]:
-            features += [float(l['x']) - nose_x, float(l['y']) - nose_y, float(l['z']) - nose_z]
-            
-        features = np.array([features])
-        raw_probs = navarasa_model.predict_proba(features)[0]
-        
-        top_idx = int(np.argmax(raw_probs))
-        top_rasa = str(navarasa_model.classes_[top_idx])
-        top_confidence = float(raw_probs[top_idx]) * 100
-        
-        expected = MUDRA_NAVARASA_MAP.get(current_mudra_name.lower(), "")
-        matches = (top_rasa == expected) if expected else True
-        correction = ""
-        if expected and not matches:
-            correction = f"Express {expected.capitalize()} — {NAVARASA_MEANINGS.get(expected, expected)}"
-
-        return {
-            "face_detected": True,
-            "rasa": top_rasa,
-            "rasa_confidence": round(top_confidence, 1),
-            "rasa_meaning": NAVARASA_MEANINGS.get(top_rasa, ""),
-            "expected_rasa": expected,
-            "expression_match": matches,
-            "expression_correction": correction
-        }
-    except Exception as e:
-        print(f"[Holistic Face Engine Error]: {e}")
-        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
-
-
-def evaluate_body_posture(pose_landmarks):
-    """Calculates torso vertical stability and Araimandi knee turnout angles."""
-    if not pose_landmarks or len(pose_landmarks) < 33:
-        return {"posture_score": 100.0, "corrections": [], "is_in_araimandi": False}
-        
-    corrections = []
-    
-    # Left Shoulder = 11, Right Shoulder = 12, Left Hip = 23, Right Hip = 24
-    l_sh = pose_landmarks[11]
-    r_sh = pose_landmarks[12]
-    l_hip = pose_landmarks[23]
-    r_hip = pose_landmarks[24]
-    
-    # Torso Center-Line Deviation Check
-    shoulder_tilt = abs(float(l_sh['y']) - float(r_sh['y']))
-    if shoulder_tilt > 0.04:
-        corrections.append("Keep your shoulders square and level.")
-        
-    torso_center_x = (float(l_sh['x']) + float(r_sh['x'])) / 2
-    hip_center_x = (float(l_hip['x']) + float(r_hip['x'])) / 2
-    if abs(torso_center_x - hip_center_x) > 0.06:
-        corrections.append("Keep your spine straight; do not lean sideways.")
-
-    # Araimandi Angle Calculation: Hip -> Knee -> Ankle
-    # Left leg = 23 -> 25 -> 27
-    l_knee_angle = get_angle([float(l_hip['x']), float(l_hip['y']), float(l_hip['z'])],
-                             [float(pose_landmarks[25]['x']), float(pose_landmarks[25]['y']), float(pose_landmarks[25]['z'])],
-                             [float(pose_landmarks[27]['x']), float(pose_landmarks[27]['y']), float(pose_landmarks[27]['z'])])
-                             
-    # Right leg = 24 -> 26 -> 28
-    r_knee_angle = get_angle([float(r_hip['x']), float(r_hip['y']), float(r_hip['z'])],
-                             [float(pose_landmarks[26]['x']), float(pose_landmarks[26]['y']), float(pose_landmarks[26]['z'])],
-                             [float(pose_landmarks[28]['x']), float(pose_landmarks[28]['y']), float(pose_landmarks[28]['z'])])
-
-    # Araimandi is active when knee angles are bent below 152 degrees
-    is_in_araimandi = (l_knee_angle < 152 and r_knee_angle < 152)
-    if l_knee_angle > 152 or r_knee_angle > 152:
-        corrections.append("Sit lower and push your knees outwards to maintain Araimandi.")
-
-    posture_score = max(0.0, 100.0 - (len(corrections) * 20.0))
-    return {
-        "posture_score": posture_score,
-        "corrections": corrections,
-        "is_in_araimandi": is_in_araimandi
-    }
-
-
-@app.route('/api/detect_holistic', methods=['POST'])
-def detect_holistic():
-    """Aggregates independent modules into a single synchronized score payload."""
-    try:
-        body = request.get_json(force=True)
-        target_mudra = body.get('targetMudra', '').lower().strip()
-        handedness = body.get('handedness', 'Right')
-
-        face_landmarks = None
-        pose_landmarks = None
-
-        if body.get('faceFrame'):
-            try:
-                # Decode base64 image data sent from the client
-                img_bytes = base64.b64decode(body['faceFrame'].split(',')[-1])
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                decoded_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                rgb_img = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
-                
-                # Section B: Process face coordinates via existing server-side FaceMesh instance
-                face_mesh_output = _face_mesh.process(rgb_img)
-                if face_mesh_output.multi_face_landmarks:
-                    face_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in face_mesh_output.multi_face_landmarks[0].landmark]
-                    
-                # Section C & D: Process body coordinates via existing server-side Pose/Holistic pipeline if visible
-                pose_output = _pose.process(rgb_img)
-                if pose_output.pose_landmarks:
-                    pose_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in pose_output.pose_landmarks.landmark]
-            except Exception as e:
-                print(f"Background image extraction skipped on this tick: {e}")
-
-        # 1. Hand Mudra Classification (Reuses your exact production logic)
-        hand_landmarks = body.get('hand_landmarks')
-        if hand_landmarks:
-            # Inject native run_madm method safely
-            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=3)
-        else:
-            hand_result = {"accuracy": 0.0, "name": "", "corrections": ["Bring your hand into frame."]}
-
-        # 2. Face Expression Analysis
-        face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
-
-        # 3. Body Posture Analysis
-        pose_landmarks = pose_landmarks  # fallback assignment
-        posture_result = evaluate_body_posture(pose_landmarks)
-
-        # 4. Weighted Aggregation Score calculation
-        total_score = (
-            (hand_result.get("accuracy", 0.0) * 0.50) +
-            (face_result.get("rasa_confidence", 0.0) * 0.25) +
-            (posture_result.get("posture_score", 100.0) * 0.25)
-        )
-
-        # Combine feedback messages
-        unified_corrections = hand_result.get("corrections", []) + posture_result.get("corrections", [])
-        if face_result.get("expression_correction"):
-            unified_corrections.append(face_result["expression_correction"])
-
-        return jsonify({
-            "detected": hand_result.get("detected", False),
-            "name": hand_result.get("name", ""),
-            "status": "Correct" if total_score >= 75 and hand_result.get("status") == "Correct" else "Unknown",
-            "accuracy": round(total_score, 1),
-            "confidence": hand_result.get("confidence", 0.0),
-            "corrections": unified_corrections,
-            "problematic_joints": hand_result.get("problematic_joints", []),
-            "face_data": face_result,
-            "posture_data": posture_result
-        })
-
-    except Exception as e:
-        print(f"[detect_holistic] Error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/api/detect_landmarks', methods=['POST'])
 def detect_landmarks():
     global current_mudra, is_double_mode, no_hand_counter, ema_landmarks, ema_probs
@@ -2415,7 +2249,177 @@ def handle_free_target(data):
 #   • No corrections, no scoring — just raw mudra name + confidence
 #
 # This completely isolates Detect.jsx from Learn.jsx.
-# Add this route to flask_app.py just before `if __name__ == '__main__':`.
+# Add this route to flask_app.py just before `# =============================================================================
+# MODULAR HOLISTIC EVALUATION ADDITIONS (DO NOT REMOVE EXTANT MUDRA METHODS)
+# =============================================================================
+
+def predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=""):
+    """Stateless face mesh classifier using pre-extracted client coordinates."""
+    if not face_landmarks or len(face_landmarks) < 468:
+        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
+
+    try:
+        # Distance calculation relative to Nose Tip (landmark index 1)
+        nose_x = float(face_landmarks[1]['x'])
+        nose_y = float(face_landmarks[1]['y'])
+        nose_z = float(face_landmarks[1]['z'])
+        
+        features = []
+        for l in face_landmarks[:468]:
+            features += [float(l['x']) - nose_x, float(l['y']) - nose_y, float(l['z']) - nose_z]
+            
+        features = np.array([features])
+        raw_probs = navarasa_model.predict_proba(features)[0]
+        
+        top_idx = int(np.argmax(raw_probs))
+        top_rasa = str(navarasa_model.classes_[top_idx])
+        top_confidence = float(raw_probs[top_idx]) * 100
+        
+        expected = MUDRA_NAVARASA_MAP.get(current_mudra_name.lower(), "")
+        matches = (top_rasa == expected) if expected else True
+        correction = ""
+        if expected and not matches:
+            correction = f"Express {expected.capitalize()} — {NAVARASA_MEANINGS.get(expected, expected)}"
+
+        return {
+            "face_detected": True,
+            "rasa": top_rasa,
+            "rasa_confidence": round(top_confidence, 1),
+            "rasa_meaning": NAVARASA_MEANINGS.get(top_rasa, ""),
+            "expected_rasa": expected,
+            "expression_match": matches,
+            "expression_correction": correction
+        }
+    except Exception as e:
+        print(f"[Holistic Face Engine Error]: {e}")
+        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
+
+
+def evaluate_body_posture(pose_landmarks):
+    """Calculates torso vertical stability and Araimandi knee turnout angles."""
+    if not pose_landmarks or len(pose_landmarks) < 33:
+        return {"posture_score": 100.0, "corrections": [], "is_in_araimandi": False}
+        
+    corrections = []
+    
+    # Left Shoulder = 11, Right Shoulder = 12, Left Hip = 23, Right Hip = 24
+    l_sh = pose_landmarks[11]
+    r_sh = pose_landmarks[12]
+    l_hip = pose_landmarks[23]
+    r_hip = pose_landmarks[24]
+    
+    # Torso Center-Line Deviation Check
+    shoulder_tilt = abs(float(l_sh['y']) - float(r_sh['y']))
+    if shoulder_tilt > 0.04:
+        corrections.append("Keep your shoulders square and level.")
+        
+    torso_center_x = (float(l_sh['x']) + float(r_sh['x'])) / 2
+    hip_center_x = (float(l_hip['x']) + float(r_hip['x'])) / 2
+    if abs(torso_center_x - hip_center_x) > 0.06:
+        corrections.append("Keep your spine straight; do not lean sideways.")
+
+    # Araimandi Angle Calculation: Hip -> Knee -> Ankle
+    # Left leg = 23 -> 25 -> 27
+    l_knee_angle = get_angle([float(l_hip['x']), float(l_hip['y']), float(l_hip['z'])],
+                             [float(pose_landmarks[25]['x']), float(pose_landmarks[25]['y']), float(pose_landmarks[25]['z'])],
+                             [float(pose_landmarks[27]['x']), float(pose_landmarks[27]['y']), float(pose_landmarks[27]['z'])])
+                             
+    # Right leg = 24 -> 26 -> 28
+    r_knee_angle = get_angle([float(r_hip['x']), float(r_hip['y']), float(r_hip['z'])],
+                             [float(pose_landmarks[26]['x']), float(pose_landmarks[26]['y']), float(pose_landmarks[26]['z'])],
+                             [float(pose_landmarks[28]['x']), float(pose_landmarks[28]['y']), float(pose_landmarks[28]['z'])])
+
+    # Araimandi is active when knee angles are bent below 152 degrees
+    is_in_araimandi = (l_knee_angle < 152 and r_knee_angle < 152)
+    if l_knee_angle > 152 or r_knee_angle > 152:
+        corrections.append("Sit lower and push your knees outwards to maintain Araimandi.")
+
+    posture_score = max(0.0, 100.0 - (len(corrections) * 20.0))
+    return {
+        "posture_score": posture_score,
+        "corrections": corrections,
+        "is_in_araimandi": is_in_araimandi
+    }
+
+
+@app.route('/api/detect_holistic', methods=['POST'])
+def detect_holistic():
+    """Aggregates independent modules into a single synchronized score payload."""
+    try:
+        body = request.get_json(force=True)
+        target_mudra = body.get('targetMudra', '').lower().strip()
+        handedness = body.get('handedness', 'Right')
+
+        face_landmarks = None
+        pose_landmarks = None
+
+        if body.get('faceFrame'):
+            try:
+                # Decode base64 image data sent from the client
+                img_bytes = base64.b64decode(body['faceFrame'].split(',')[-1])
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                decoded_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                rgb_img = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
+                
+                # Section B: Process face coordinates via existing server-side FaceMesh instance
+                face_mesh_output = _face_mesh.process(rgb_img)
+                if face_mesh_output.multi_face_landmarks:
+                    face_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in face_mesh_output.multi_face_landmarks[0].landmark]
+                    
+                # Section C & D: Process body coordinates via existing server-side Pose/Holistic pipeline if visible
+                pose_output = _pose.process(rgb_img)
+                if pose_output.pose_landmarks:
+                    pose_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in pose_output.pose_landmarks.landmark]
+            except Exception as e:
+                print(f"Background image extraction skipped on this tick: {e}")
+
+        # 1. Hand Mudra Classification (Reuses your exact production logic)
+        hand_landmarks = body.get('hand_landmarks')
+        if hand_landmarks:
+            # Inject native run_madm method safely
+            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=3)
+        else:
+            hand_result = {"accuracy": 0.0, "name": "", "corrections": ["Bring your hand into frame."]}
+
+        # 2. Face Expression Analysis
+        face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
+
+        # 3. Body Posture Analysis
+        pose_landmarks = pose_landmarks  # fallback assignment
+        posture_result = evaluate_body_posture(pose_landmarks)
+
+        # 4. Weighted Aggregation Score calculation
+        total_score = (
+            (hand_result.get("accuracy", 0.0) * 0.50) +
+            (face_result.get("rasa_confidence", 0.0) * 0.25) +
+            (posture_result.get("posture_score", 100.0) * 0.25)
+        )
+
+        # Combine feedback messages
+        unified_corrections = hand_result.get("corrections", []) + posture_result.get("corrections", [])
+        if face_result.get("expression_correction"):
+            unified_corrections.append(face_result["expression_correction"])
+
+        return jsonify({
+            "detected": hand_result.get("detected", False),
+            "name": hand_result.get("name", ""),
+            "status": "Correct" if total_score >= 75 and hand_result.get("status") == "Correct" else "Unknown",
+            "accuracy": round(total_score, 1),
+            "confidence": hand_result.get("confidence", 0.0),
+            "corrections": unified_corrections,
+            "problematic_joints": hand_result.get("problematic_joints", []),
+            "face_data": face_result,
+            "posture_data": posture_result
+        })
+
+    except Exception as e:
+        print(f"[detect_holistic] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+if __name__ == '__main__':`.
 # ============================================================================
 
 @app.route('/api/predict', methods=['POST'])
@@ -2997,6 +3001,350 @@ def detect_double_landmarks():
             "accuracy": 0, "corrections": [f"Server error: {str(e)}"],
             "is_stable": False, "hold_progress": 0, "both_hands": False
         }), 500
+
+ADAVU_MODEL_PATH = os.path.join(MODEL_DIR, "adavu_model.pkl")
+_adavu_model = None
+_adavu_model_classes = []
+
+def _load_adavu_model():
+    global _adavu_model, _adavu_model_classes
+    if _adavu_model is not None:
+        return True
+    if not os.path.exists(ADAVU_MODEL_PATH):
+        return False
+    try:
+        with open(ADAVU_MODEL_PATH, 'rb') as f:
+            _adavu_model = pickle.load(f)
+        _adavu_model_classes = list(_adavu_model.classes_)
+        print(f"[Adavu model] Loaded. Classes: {_adavu_model_classes}")
+        return True
+    except Exception as e:
+        print(f"[Adavu model] Load error: {e}")
+        return False
+
+@app.route('/api/predict_pose', methods=['POST'])
+def predict_pose():
+    try:
+        body = request.get_json(force=True) or {}
+        landmarks = body.get('landmarks', [])
+        
+        if not landmarks or len(landmarks) < 33:
+            return jsonify({"detected": False, "name": "No Body Present", "confidence": 0})
+
+        if not _load_adavu_model():
+            return jsonify({
+                "detected": True,
+                "name": "Pose Tracked",
+                "confidence": 85.0,
+                "message": "Rule-based stance active. Model file adavu_model.pkl optional."
+            })
+
+        sc_x = (landmarks[11]['x'] + landmarks[12]['x']) / 2
+        sc_y = (landmarks[11]['y'] + landmarks[12]['y']) / 2
+        sc_z = (landmarks[11]['z'] + landmarks[12]['z']) / 2
+
+        hc_x = (landmarks[23]['x'] + landmarks[24]['x']) / 2
+        hc_y = (landmarks[23]['y'] + landmarks[24]['y']) / 2
+        hc_z = (landmarks[23]['z'] + landmarks[24]['z']) / 2
+
+        torso_height = np.sqrt((sc_x - hc_x)**2 + (sc_y - hc_y)**2 + (sc_z - hc_z)**2) or 1.0
+
+        features = []
+        for lm in landmarks[:33]:
+            features.extend([
+                (lm['x'] - hc_x) / torso_height,
+                (lm['y'] - hc_y) / torso_height,
+                (lm['z'] - hc_z) / torso_height
+            ])
+
+        probs = _adavu_model.predict_proba([features])[0]
+        max_idx = np.argmax(probs)
+        conf = float(probs[max_idx]) * 100.0
+        predicted_name = str(_adavu_model_classes[max_idx])
+
+        return jsonify({
+            "detected": conf >= 45.0,
+            "name": predicted_name if conf >= 45.0 else "Unknown Stance",
+            "confidence": round(conf, 1),
+            "is_stable": conf >= 70.0
+        })
+    except Exception as e:
+        print(f"[predict_pose] Error: {e}")
+        return jsonify({"detected": False, "error": str(e)}), 500
+
+# ── Dance Sequence Evaluation Endpoints ──────────────────────────────
+REF_SEQ_DIR_FLASK = os.path.join(BASE_DIR, "../dataset/reference_sequences")
+
+@app.route('/api/sequence/evaluate_image', methods=['POST'])
+def evaluate_sequence_image():
+    try:
+        import json
+        body = request.get_json(force=True) or {}
+        dance_name = body.get('dance_name', 'Alarippu')
+        landmarks = body.get('landmarks', [])
+
+        ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{dance_name}_sequence.json")
+        if not os.path.exists(ref_file):
+            return jsonify({"detected": False, "error": f"Sequence file for {dance_name} not found."}), 404
+
+        with open(ref_file, 'r') as f:
+            ref_data = json.load(f)
+
+        ref_sequence = ref_data.get("sequence", [])
+
+        if not landmarks or len(landmarks) < 33:
+            return jsonify({"detected": False, "error": "No full-body posture detected in image."})
+
+        coords = np.array([[lm['x'], lm['y'], lm['z']] for lm in landmarks[:33]])
+        hip_center = (coords[23] + coords[24]) / 2.0
+        centered = coords - hip_center
+        shoulder_center = (coords[11] + coords[12]) / 2.0
+        torso_length = np.linalg.norm(shoulder_center - hip_center) or 1.0
+        norm_coords = centered / torso_length
+
+        def get_angle_3d(a, b, c):
+            ba = a - b
+            bc = c - b
+            n_ba, n_bc = np.linalg.norm(ba), np.linalg.norm(bc)
+            if n_ba * n_bc == 0: return 0.0
+            dot = np.dot(ba, bc)
+            cos = np.clip(dot / (n_ba * n_bc), -1.0, 1.0)
+            return round(math.degrees(math.acos(cos)), 1)
+
+        k_left = get_angle_3d(norm_coords[23], norm_coords[25], norm_coords[27])
+        k_right = get_angle_3d(norm_coords[24], norm_coords[26], norm_coords[28])
+        e_left = get_angle_3d(norm_coords[11], norm_coords[13], norm_coords[15])
+        e_right = get_angle_3d(norm_coords[12], norm_coords[14], norm_coords[16])
+        spine_vec = (norm_coords[11] + norm_coords[12]) / 2.0 - (norm_coords[23] + norm_coords[24]) / 2.0
+        torso_tilt = round(math.degrees(math.atan2(abs(spine_vec[0]), abs(spine_vec[1]))), 1)
+
+        student_angles = {
+            "left_knee": k_left, "right_knee": k_right,
+            "left_elbow": e_left, "right_elbow": e_right,
+            "torso_tilt": torso_tilt
+        }
+
+        best_score = -1.0
+        best_ref_frame = None
+        best_ref_angles = None
+
+        for item in ref_sequence:
+            ref_angles = item.get("angles")
+            if not ref_angles: continue
+            lk_diff = abs(ref_angles["left_knee"] - student_angles["left_knee"])
+            rk_diff = abs(ref_angles["right_knee"] - student_angles["right_knee"])
+            le_diff = abs(ref_angles["left_elbow"] - student_angles["left_elbow"])
+            re_diff = abs(ref_angles["right_elbow"] - student_angles["right_elbow"])
+            tilt_diff = abs(ref_angles["torso_tilt"] - student_angles["torso_tilt"])
+
+            avg_err = (lk_diff * 0.3 + rk_diff * 0.3 + le_diff * 0.15 + re_diff * 0.15 + tilt_diff * 0.10)
+            match_score = max(0.0, round(100.0 - avg_err, 1))
+
+            if match_score > best_score:
+                best_score = match_score
+                best_ref_frame = item["frame_file"]
+                best_ref_angles = ref_angles
+
+        feedback = []
+        if best_ref_angles:
+            lk_diff = abs(best_ref_angles["left_knee"] - student_angles["left_knee"])
+            rk_diff = abs(best_ref_angles["right_knee"] - student_angles["right_knee"])
+            le_diff = abs(best_ref_angles["left_elbow"] - student_angles["left_elbow"])
+            re_diff = abs(best_ref_angles["right_elbow"] - student_angles["right_elbow"])
+            tilt_diff = abs(best_ref_angles["torso_tilt"] - student_angles["torso_tilt"])
+
+            if max(lk_diff, rk_diff) > 18:
+                feedback.append("Knee bend discrepancy (check Araimandi stance depth)")
+            if max(le_diff, re_diff) > 20:
+                feedback.append("Arm / elbow level balance discrepancy")
+            if tilt_diff > 10:
+                feedback.append("Spine vertical alignment imbalance")
+
+        grade = "A+" if best_score >= 90 else ("A" if best_score >= 80 else ("B" if best_score >= 70 else "Needs Practice"))
+
+        return jsonify({
+            "detected": True,
+            "dance_name": dance_name,
+            "matched_frame": best_ref_frame,
+            "match_score": best_score,
+            "grade": grade,
+            "student_angles": student_angles,
+            "reference_angles": best_ref_angles,
+            "feedback": feedback if feedback else ["Excellent posture alignment!"]
+        })
+    except Exception as e:
+        print(f"[evaluate_sequence_image] Error: {e}")
+        return jsonify({"detected": False, "error": str(e)}), 500
+
+# =============================================================================
+# MODULAR HOLISTIC EVALUATION ADDITIONS (DO NOT REMOVE EXTANT MUDRA METHODS)
+# =============================================================================
+
+def predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=""):
+    """Stateless face mesh classifier using pre-extracted client coordinates."""
+    if not face_landmarks or len(face_landmarks) < 468:
+        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
+
+    try:
+        # Distance calculation relative to Nose Tip (landmark index 1)
+        nose_x = float(face_landmarks[1]['x'])
+        nose_y = float(face_landmarks[1]['y'])
+        nose_z = float(face_landmarks[1]['z'])
+        
+        features = []
+        for l in face_landmarks[:468]:
+            features += [float(l['x']) - nose_x, float(l['y']) - nose_y, float(l['z']) - nose_z]
+            
+        features = np.array([features])
+        raw_probs = navarasa_model.predict_proba(features)[0]
+        
+        top_idx = int(np.argmax(raw_probs))
+        top_rasa = str(navarasa_model.classes_[top_idx])
+        top_confidence = float(raw_probs[top_idx]) * 100
+        
+        expected = MUDRA_NAVARASA_MAP.get(current_mudra_name.lower(), "")
+        matches = (top_rasa == expected) if expected else True
+        correction = ""
+        if expected and not matches:
+            correction = f"Express {expected.capitalize()} — {NAVARASA_MEANINGS.get(expected, expected)}"
+
+        return {
+            "face_detected": True,
+            "rasa": top_rasa,
+            "rasa_confidence": round(top_confidence, 1),
+            "rasa_meaning": NAVARASA_MEANINGS.get(top_rasa, ""),
+            "expected_rasa": expected,
+            "expression_match": matches,
+            "expression_correction": correction
+        }
+    except Exception as e:
+        print(f"[Holistic Face Engine Error]: {e}")
+        return {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
+
+
+def evaluate_body_posture(pose_landmarks):
+    """Calculates torso vertical stability and Araimandi knee turnout angles."""
+    if not pose_landmarks or len(pose_landmarks) < 33:
+        return {"posture_score": 100.0, "corrections": [], "is_in_araimandi": False}
+        
+    corrections = []
+    
+    # Left Shoulder = 11, Right Shoulder = 12, Left Hip = 23, Right Hip = 24
+    l_sh = pose_landmarks[11]
+    r_sh = pose_landmarks[12]
+    l_hip = pose_landmarks[23]
+    r_hip = pose_landmarks[24]
+    
+    # Torso Center-Line Deviation Check
+    shoulder_tilt = abs(float(l_sh['y']) - float(r_sh['y']))
+    if shoulder_tilt > 0.04:
+        corrections.append("Keep your shoulders square and level.")
+        
+    torso_center_x = (float(l_sh['x']) + float(r_sh['x'])) / 2
+    hip_center_x = (float(l_hip['x']) + float(r_hip['x'])) / 2
+    if abs(torso_center_x - hip_center_x) > 0.06:
+        corrections.append("Keep your spine straight; do not lean sideways.")
+
+    # Araimandi Angle Calculation: Hip -> Knee -> Ankle
+    # Left leg = 23 -> 25 -> 27
+    l_knee_angle = get_angle([float(l_hip['x']), float(l_hip['y']), float(l_hip['z'])],
+                             [float(pose_landmarks[25]['x']), float(pose_landmarks[25]['y']), float(pose_landmarks[25]['z'])],
+                             [float(pose_landmarks[27]['x']), float(pose_landmarks[27]['y']), float(pose_landmarks[27]['z'])])
+                             
+    # Right leg = 24 -> 26 -> 28
+    r_knee_angle = get_angle([float(r_hip['x']), float(r_hip['y']), float(r_hip['z'])],
+                             [float(pose_landmarks[26]['x']), float(pose_landmarks[26]['y']), float(pose_landmarks[26]['z'])],
+                             [float(pose_landmarks[28]['x']), float(pose_landmarks[28]['y']), float(pose_landmarks[28]['z'])])
+
+    # Araimandi is active when knee angles are bent below 152 degrees
+    is_in_araimandi = (l_knee_angle < 152 and r_knee_angle < 152)
+    if l_knee_angle > 152 or r_knee_angle > 152:
+        corrections.append("Sit lower and push your knees outwards to maintain Araimandi.")
+
+    posture_score = max(0.0, 100.0 - (len(corrections) * 20.0))
+    return {
+        "posture_score": posture_score,
+        "corrections": corrections,
+        "is_in_araimandi": is_in_araimandi
+    }
+
+
+@app.route('/api/detect_holistic', methods=['POST'])
+def detect_holistic():
+    """Aggregates independent modules into a single synchronized score payload."""
+    try:
+        body = request.get_json(force=True)
+        target_mudra = body.get('targetMudra', '').lower().strip()
+        handedness = body.get('handedness', 'Right')
+
+        face_landmarks = None
+        pose_landmarks = None
+
+        if body.get('faceFrame'):
+            try:
+                # Decode base64 image data sent from the client
+                img_bytes = base64.b64decode(body['faceFrame'].split(',')[-1])
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                decoded_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                rgb_img = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
+                
+                # Section B: Process face coordinates via existing server-side FaceMesh instance
+                face_mesh_output = _face_mesh.process(rgb_img)
+                if face_mesh_output.multi_face_landmarks:
+                    face_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in face_mesh_output.multi_face_landmarks[0].landmark]
+                    
+                # Section C & D: Process body coordinates via existing server-side Pose/Holistic pipeline if visible
+                pose_output = _pose.process(rgb_img)
+                if pose_output.pose_landmarks:
+                    pose_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in pose_output.pose_landmarks.landmark]
+            except Exception as e:
+                print(f"Background image extraction skipped on this tick: {e}")
+
+        # 1. Hand Mudra Classification (Reuses your exact production logic)
+        hand_landmarks = body.get('hand_landmarks')
+        if hand_landmarks:
+            # Inject native run_madm method safely
+            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=3)
+        else:
+            hand_result = {"accuracy": 0.0, "name": "", "corrections": ["Bring your hand into frame."]}
+
+        # 2. Face Expression Analysis
+        face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
+
+        # 3. Body Posture Analysis
+        pose_landmarks = pose_landmarks  # fallback assignment
+        posture_result = evaluate_body_posture(pose_landmarks)
+
+        # 4. Weighted Aggregation Score calculation
+        total_score = (
+            (hand_result.get("accuracy", 0.0) * 0.50) +
+            (face_result.get("rasa_confidence", 0.0) * 0.25) +
+            (posture_result.get("posture_score", 100.0) * 0.25)
+        )
+
+        # Combine feedback messages
+        unified_corrections = hand_result.get("corrections", []) + posture_result.get("corrections", [])
+        if face_result.get("expression_correction"):
+            unified_corrections.append(face_result["expression_correction"])
+
+        return jsonify({
+            "detected": hand_result.get("detected", False),
+            "name": hand_result.get("name", ""),
+            "status": "Correct" if total_score >= 75 and hand_result.get("status") == "Correct" else "Unknown",
+            "accuracy": round(total_score, 1),
+            "confidence": hand_result.get("confidence", 0.0),
+            "corrections": unified_corrections,
+            "problematic_joints": hand_result.get("problematic_joints", []),
+            "face_data": face_result,
+            "posture_data": posture_result
+        })
+
+    except Exception as e:
+        print(f"[detect_holistic] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+
 
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")

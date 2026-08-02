@@ -15,8 +15,8 @@ echo [3/4] Starting Vite Frontend (port 5173)...
 start cmd /k "cd /d E:\GestureIQ\gestureiq-web && npm run dev"
 timeout /t 3 /nobreak
 
-echo [4/4] Starting ngrok tunnel...
-start cmd /k "ngrok http 5173 --request-header-remove=X-Frame-Options"
+echo [4/4] Starting ngrok tunnel on your permanent domain...
+start cmd /k "ngrok http 5173 --url https://acutely-oxidation-unlimited.ngrok-free.dev"
 timeout /t 5 /nobreak
 
 echo.
@@ -24,9 +24,8 @@ echo ================================================
 echo  ALL SERVICES STARTED!
 echo.
 echo  NEXT STEPS:
-echo  1. Copy the https:// URL from the ngrok window
-echo  2. Run:  update_url.bat https://xxxx.ngrok-free.app
-echo  3. Restart Vite (close Vite window, rerun step 3)
-echo  4. Create new class and share the join link
+echo  1. Copy the https://xxxx.trycloudflare.com URL from the Cloudflare window
+echo  2. Run:  update_url.bat https://xxxx.trycloudflare.com
+echo  3. Open your site - NO warning pages or MIME errors!
 echo ================================================
 pause

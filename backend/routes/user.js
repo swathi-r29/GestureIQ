@@ -51,19 +51,27 @@ router.get('/progress', auth, async (req, res) => {
     const { isLocalMode } = require('../utils/dbFallback');
     let user;
     if (isLocalMode()) {
-       // Return empty mock progress for resilience mode
-       user = { progress: { detectedMudras: [], mudraScores: {} } };
+       user = await User.findById(req.user.id).select('-password').catch(() => null);
+       if (!user) {
+         user = { progress: { detectedMudras: [], mudraScores: {} } };
+       }
     } else {
-       user = await User.findById(req.user.id).select('-password').maxTimeMS(2000);
+       user = await User.findById(req.user.id).select('-password');
     }
     
     if (!user) {
       console.warn(`User with ID ${req.user.id} not found in database`);
       return res.status(404).json({ msg: 'User not found' });
     }
-    res.json(user);
+
+    const responseObj = user.toObject ? user.toObject() : user;
+    if (responseObj.progress && responseObj.progress.mudraScores instanceof Map) {
+      responseObj.progress.mudraScores = Object.fromEntries(responseObj.progress.mudraScores);
+    }
+
+    res.json(responseObj);
   } catch (err) {
-    console.warn('[Warning] Database Error in [/progress], falling back to resilience empty state:', err.message);
+    console.warn('[Warning] Database Error in [/progress]:', err.message);
     res.json({ progress: { detectedMudras: [], mudraScores: {} } });
   }
 });

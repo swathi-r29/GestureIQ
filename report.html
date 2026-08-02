@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Posture Comparison Analytics Report</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #faf7f2; color: #2c1a0e; margin: 0; padding: 40px; }
+        .container { max-width: 900px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+        h1 { color: #7b1c1c; font-size: 28px; margin-bottom: 8px; }
+        .subtitle { color: #856040; font-size: 14px; margin-bottom: 24px; }
+        .score-card { display: flex; gap: 20px; background: #fbf7ef; padding: 24px; border-radius: 12px; border: 1px solid #ede3cc; margin-bottom: 30px; align-items: center; }
+        .badge { font-size: 48px; font-weight: bold; color: #f39c12; font-family: Georgia, serif; }
+        .details { flex: 1; }
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; font-size: 13.5px; }
+        th { background: #7b1c1c; color: #ffffff; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+        tr:nth-child(even) { background: #fafafa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bharatanatyam Posture Comparison Analytics</h1>
+        <div class="subtitle">Master Video: <strong>short1_asamyuta.mp4</strong> | Student Video: <strong>short2_asamyuta.mp4</strong></div>
+        
+        <div class="score-card">
+            <div class="badge">78.6%</div>
+            <div class="details">
+                <h3 style="margin:0 0 6px 0; color:#7b1c1c;">Overall Posture Alignment Match</h3>
+                <p style="margin:0; color:#6b3a2a; font-size:13px;">
+                    Analyzed <strong>120</strong> frames across performance clip. Found <strong>26</strong> deviation moments needing posture adjustment.
+                </p>
+            </div>
+        </div>
+
+        <h3 style="color:#7b1c1c; margin-top:30px;">Frame-by-Frame Posture Deviation Timeline</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Match Score</th>
+                    <th>Master Knee Angle</th>
+                    <th>Student Knee Angle</th>
+                    <th>Coaching Feedback & Correction</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+            <td><strong>00:00.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">72.7%</span></td>
+            <td>138.2°</td>
+            <td>175.2°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:00.80</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">71.9%</span></td>
+            <td>126.7°</td>
+            <td>167.6°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:02.00</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">65.4%</span></td>
+            <td>113.1°</td>
+            <td>154.4°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:03.60</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">42.6%</span></td>
+            <td>99.6°</td>
+            <td>142.7°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:05.40</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">72.0%</span></td>
+            <td>130.2°</td>
+            <td>160.9°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:06.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">67.2%</span></td>
+            <td>135.8°</td>
+            <td>161.9°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:08.40</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">70.4%</span></td>
+            <td>151.0°</td>
+            <td>129.4°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:09.20</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">28.6%</span></td>
+            <td>53.7°</td>
+            <td>161.2°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:09.60</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">62.5%</span></td>
+            <td>110.6°</td>
+            <td>168.7°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:10.40</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">53.5%</span></td>
+            <td>147.9°</td>
+            <td>94.7°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:13.40</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">72.6%</span></td>
+            <td>160.8°</td>
+            <td>125.0°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:13.80</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">55.4%</span></td>
+            <td>166.3°</td>
+            <td>103.4°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:14.00</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">54.0%</span></td>
+            <td>166.9°</td>
+            <td>104.8°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:14.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">71.7%</span></td>
+            <td>168.2°</td>
+            <td>163.6°</td>
+            <td style="color: #c0392b;">• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:14.80</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">69.1%</span></td>
+            <td>169.5°</td>
+            <td>156.6°</td>
+            <td style="color: #c0392b;">• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:15.00</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">74.3%</span></td>
+            <td>166.0°</td>
+            <td>165.8°</td>
+            <td style="color: #c0392b;">• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:16.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">66.5%</span></td>
+            <td>150.4°</td>
+            <td>140.4°</td>
+            <td style="color: #c0392b;">• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:17.80</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">63.2%</span></td>
+            <td>107.8°</td>
+            <td>156.9°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:19.60</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">66.7%</span></td>
+            <td>156.4°</td>
+            <td>111.1°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:19.80</strong></td>
+            <td><span style="color: #e74c3c; font-weight: bold;">58.6%</span></td>
+            <td>175.9°</td>
+            <td>125.9°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:20.00</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">64.0%</span></td>
+            <td>170.8°</td>
+            <td>133.9°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:20.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">74.2%</span></td>
+            <td>171.0°</td>
+            <td>150.2°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:20.60</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">73.0%</span></td>
+            <td>169.6°</td>
+            <td>152.2°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy<br>• Spine tilt imbalance</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:20.80</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">70.5%</span></td>
+            <td>162.1°</td>
+            <td>129.2°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:21.00</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">71.5%</span></td>
+            <td>166.7°</td>
+            <td>127.8°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+        <tr>
+            <td><strong>00:22.20</strong></td>
+            <td><span style="color: #f39c12; font-weight: bold;">69.7%</span></td>
+            <td>156.2°</td>
+            <td>162.6°</td>
+            <td style="color: #c0392b;">• Knee bend discrepancy (check Araimandi depth)<br>• Arm / elbow level discrepancy</td>
+        </tr>
+        
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
