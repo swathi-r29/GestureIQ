@@ -14,7 +14,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features, get_angle, get_distance
 from utils.double_feature_engineering import extract_double_features
-from utils.pose_feature_engineering import normalize_landmarks, extract_body_angles, check_full_body_visibility
+from utils.pose_feature_engineering import normalize_landmarks, extract_body_angles, check_full_body_visibility, evaluate_body_posture_normalized
 from scipy.spatial.distance import cosine
 import tracemalloc
 import atexit
@@ -2345,70 +2345,64 @@ def evaluate_body_posture(pose_landmarks):
 
 @app.route('/api/detect_holistic', methods=['POST'])
 def detect_holistic():
-    """Aggregates independent modules into a single synchronized score payload."""
+    """
+    Stateless holistic analyzer combining Pose, Hand Mudras, and Navarasa.
+    Receives JSON landmark coordinate arrays extracted in the browser.
+    """
     try:
-        body = request.get_json(force=True)
+        body = request.get_json(force=True) or {}
         target_mudra = body.get('targetMudra', '').lower().strip()
         handedness = body.get('handedness', 'Right')
 
-        face_landmarks = None
-        pose_landmarks = None
-
-        if body.get('faceFrame'):
-            try:
-                # Decode base64 image data sent from the client
-                img_bytes = base64.b64decode(body['faceFrame'].split(',')[-1])
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                decoded_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                rgb_img = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
-                
-                # Section B: Process face coordinates via existing server-side FaceMesh instance
-                face_mesh_output = _face_mesh.process(rgb_img)
-                if face_mesh_output.multi_face_landmarks:
-                    face_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in face_mesh_output.multi_face_landmarks[0].landmark]
-                    
-                # Section C & D: Process body coordinates via existing server-side Pose/Holistic pipeline if visible
-                pose_output = _pose.process(rgb_img)
-                if pose_output.pose_landmarks:
-                    pose_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in pose_output.pose_landmarks.landmark]
-            except Exception as e:
-                print(f"Background image extraction skipped on this tick: {e}")
-
-        # 1. Hand Mudra Classification (Reuses your exact production logic)
         hand_landmarks = body.get('hand_landmarks')
-        if hand_landmarks:
-            # Inject native run_madm method safely
-            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=3)
+        face_landmarks = body.get('face_landmarks')
+        pose_landmarks = body.get('pose_landmarks')
+
+        # 1. Mudra Evaluation (Single or Double Hand)
+        if hand_landmarks and len(hand_landmarks) == 21:
+            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=2)
         else:
-            hand_result = {"accuracy": 0.0, "name": "", "corrections": ["Bring your hand into frame."]}
+            hand_result = {"accuracy": 0.0, "name": "", "confidence": 0.0, "corrections": ["Bring hands into view."]}
 
-        # 2. Face Expression Analysis
-        face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
+        # 2. Navarasa Face Evaluation
+        if face_landmarks and len(face_landmarks) >= 468:
+            face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
+        else:
+            face_result = {"face_detected": False, "rasa": "", "rasa_confidence": 0.0, "expression_correction": ""}
 
-        # 3. Body Posture Analysis
-        pose_landmarks = pose_landmarks  # fallback assignment
-        posture_result = evaluate_body_posture(pose_landmarks)
+        # 3. Posture Evaluation (Normalized)
+        if pose_landmarks and len(pose_landmarks) >= 27:
+            posture_result = evaluate_body_posture_normalized(pose_landmarks)
+        else:
+            posture_result = {"posture_score": 0.0, "corrections": ["Full body not visible."], "is_in_araimandi": False, "detected_stance": "Unknown"}
 
-        # 4. Weighted Aggregation Score calculation
-        total_score = (
-            (hand_result.get("accuracy", 0.0) * 0.50) +
-            (face_result.get("rasa_confidence", 0.0) * 0.25) +
-            (posture_result.get("posture_score", 100.0) * 0.25)
-        )
+        # 4. Harmonized Weighted Score
+        # Weighting: Mudra (45%) + Posture (35%) + Navarasa (20%)
+        m_score = hand_result.get("accuracy", 0.0)
+        p_score = posture_result.get("posture_score", 0.0)
+        f_score = face_result.get("rasa_confidence", 0.0) if face_result.get("expression_match") else (face_result.get("rasa_confidence", 0.0) * 0.5)
 
-        # Combine feedback messages
-        unified_corrections = hand_result.get("corrections", []) + posture_result.get("corrections", [])
+        total_score = round((m_score * 0.45) + (p_score * 0.35) + (f_score * 0.20), 1)
+
+        # Consolidate Feedback
+        unified_corrections = []
+        if hand_result.get("corrections"):
+            unified_corrections.extend(hand_result["corrections"])
+        if posture_result.get("corrections") and posture_result["corrections"] != ["Excellent posture alignment!"]:
+            unified_corrections.extend(posture_result["corrections"])
         if face_result.get("expression_correction"):
             unified_corrections.append(face_result["expression_correction"])
 
         return jsonify({
-            "detected": hand_result.get("detected", False),
+            "detected": hand_result.get("detected", False) or posture_result.get("posture_score", 0) > 40,
             "name": hand_result.get("name", ""),
-            "status": "Correct" if total_score >= 75 and hand_result.get("status") == "Correct" else "Unknown",
-            "accuracy": round(total_score, 1),
-            "confidence": hand_result.get("confidence", 0.0),
-            "corrections": unified_corrections,
-            "problematic_joints": hand_result.get("problematic_joints", []),
+            "status": "Correct" if total_score >= 75 else "Needs Adjustment",
+            "accuracy": total_score,
+            "mudra_score": m_score,
+            "posture_score": p_score,
+            "navarasa_score": f_score,
+            "current_stance": posture_result.get("detected_stance", "Unknown"),
+            "corrections": unified_corrections if unified_corrections else ["Excellent harmony of expression, stance, and mudra!"],
             "face_data": face_result,
             "posture_data": posture_result
         })

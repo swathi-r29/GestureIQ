@@ -190,3 +190,64 @@ def extract_body_angles(norm_coords):
     angles["feature_vector"] = [k_left, k_right, e_left, e_right, torso_tilt, ankle_distance * 100.0]
 
     return angles
+
+
+def evaluate_body_posture_normalized(landmarks_33):
+    """
+    Scale-invariant posture analysis using normalized 3D coordinates.
+    """
+    if not landmarks_33 or len(landmarks_33) < 27:
+        return {"posture_score": 0.0, "corrections": ["Full body not detected."], "is_in_araimandi": False}
+
+    # 1. Visibility Check
+    is_visible, missing = check_full_body_visibility(landmarks_33)
+    if not is_visible:
+        return {
+            "posture_score": 0.0,
+            "corrections": [f"⚠️ Step back: {', '.join(missing)}"],
+            "is_in_araimandi": False,
+            "partial_body": True,
+            "detected_stance": "Incomplete Frame"
+        }
+
+    # 2. Extract 3D Scale-Normalized Geometry
+    norm = normalize_landmarks(landmarks_33)
+    angles = extract_body_angles(norm)
+    if not angles:
+        return {"posture_score": 0.0, "corrections": ["Unable to compute 3D posture geometry."], "is_in_araimandi": False}
+
+    corrections = []
+
+    # Scale-invariant shoulder level check
+    if angles["shoulder_tilt"] > 0.08:
+        corrections.append("Keep your shoulders square and level.")
+
+    # Vertical Spine Tilt Check (Target < 12°)
+    if angles["torso_tilt"] > 14.0:
+        corrections.append(f"Straighten your spine ({int(angles['torso_tilt'])}° tilt detected).")
+
+    # Stance & Araimandi Depth Check
+    lk, rk = angles["left_knee"], angles["right_knee"]
+    is_in_araimandi = (100.0 <= lk <= 145.0 and 100.0 <= rk <= 145.0)
+
+    if lk > 148.0 or rk > 148.0:
+        corrections.append(f"Sit lower into Araimandi (Current: {int((lk+rk)/2)}°, Target: 115°-130°).")
+    elif lk < 95.0 and rk < 95.0:
+        corrections.append("You are in Muzhumandi (Full Squat). Rise slightly for Araimandi.")
+
+    # Calculate final score
+    penalties = 0.0
+    if angles["shoulder_tilt"] > 0.08: penalties += 20.0
+    if angles["torso_tilt"] > 14.0: penalties += min(30.0, (angles["torso_tilt"] - 14.0) * 2.0)
+    if not is_in_araimandi: penalties += min(40.0, abs(((lk + rk) / 2.0) - 120.0) * 0.8)
+
+    posture_score = max(0.0, round(100.0 - penalties, 1))
+
+    return {
+        "posture_score": posture_score,
+        "corrections": corrections if corrections else ["Excellent posture alignment!"],
+        "is_in_araimandi": is_in_araimandi,
+        "detected_stance": angles["detected_stance"],
+        "angles": angles,
+        "partial_body": False
+    }

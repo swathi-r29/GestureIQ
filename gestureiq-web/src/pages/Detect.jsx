@@ -819,6 +819,22 @@ export default function MudraDetect() {
         setDetectedKey(stanceToSet);
         setConfidence(evalResult.combinedScore > 0 ? evalResult.combinedScore : 85);
 
+        // Dispatch lightweight JSON landmark arrays to Flask /api/detect_holistic (No Base64 decoding overhead)
+        axios.post(`${FLASK_URL}/api/detect_holistic`, {
+          targetMudra: '',
+          handedness: 'Right',
+          pose_landmarks: results.poseLandmarks ? results.poseLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z, visibility: l.visibility || 1.0 })) : null,
+          face_landmarks: results.faceLandmarks ? results.faceLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z })) : null,
+          hand_landmarks: (results.rightHandLandmarks || results.leftHandLandmarks) ? (results.rightHandLandmarks || results.leftHandLandmarks).map(l => ({ x: l.x, y: l.y, z: l.z })) : null,
+        }).then(res => {
+          if (res.data) {
+            if (res.data.current_stance && res.data.current_stance !== 'Unknown') {
+              setDetectedKey(res.data.current_stance);
+            }
+            if (res.data.accuracy) setConfidence(res.data.accuracy);
+          }
+        }).catch(err => console.error("Holistic API dispatch error:", err));
+
         // Voice coaching
         if (evalResult.feedbacks?.length) {
           voiceGuide.announce.poseFeedback(evalResult.feedbacks);
