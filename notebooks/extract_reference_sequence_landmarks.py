@@ -9,63 +9,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
 REF_SEQ_DIR = os.path.join(DATASET_DIR, "reference_sequences")
 
-def normalize_landmarks(landmarks):
-    """Normalizes 33 pose landmarks relative to hip center and torso length."""
-    if not landmarks:
-        return None
-    
-    coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-    
-    # Hips center (joints 23 & 24)
-    hip_center = (coords[23] + coords[24]) / 2.0
-    centered = coords - hip_center
-    
-    # Torso length (distance between hip center and shoulder center 11 & 12)
-    shoulder_center = (coords[11] + coords[12]) / 2.0
-    torso_length = np.linalg.norm(shoulder_center - hip_center)
-    
-    if torso_length > 0:
-        normalized = centered / torso_length
-    else:
-        normalized = centered
-        
-    return normalized.tolist()
+import sys
+import argparse
 
-def calculate_angle_3d(a, b, c):
-    """Calculates 3D joint angle in degrees."""
-    a, b, c = np.array(a), np.array(b), np.array(c)
-    ba = a - b
-    bc = c - b
-    norm_ba = np.linalg.norm(ba)
-    norm_bc = np.linalg.norm(bc)
-    if norm_ba * norm_bc == 0:
-        return 0.0
-    dot = np.dot(ba, bc)
-    cosine = np.clip(dot / (norm_ba * norm_bc), -1.0, 1.0)
-    return round(math.degrees(math.acos(cosine)), 1)
-
-def extract_body_angles(norm_coords):
-    """Extracts key anatomical Bharatanatyam posture angles."""
-    if norm_coords is None:
-        return None
-    
-    nc = np.array(norm_coords)
-    k_left = calculate_angle_3d(nc[23], nc[25], nc[27])
-    k_right = calculate_angle_3d(nc[24], nc[26], nc[28])
-    e_left = calculate_angle_3d(nc[11], nc[13], nc[15])
-    e_right = calculate_angle_3d(nc[12], nc[14], nc[16])
-    
-    # Spine / Torso tilt relative to vertical Y axis
-    spine_vec = (nc[11] + nc[12]) / 2.0 - (nc[23] + nc[24]) / 2.0
-    torso_tilt = round(math.degrees(math.atan2(abs(spine_vec[0]), abs(spine_vec[1]))), 1)
-    
-    return {
-        "left_knee": k_left,
-        "right_knee": k_right,
-        "left_elbow": e_left,
-        "right_elbow": e_right,
-        "torso_tilt": torso_tilt
-    }
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.pose_feature_engineering import normalize_landmarks, calculate_angle_3d, extract_body_angles
 
 def process_dance_folder(dance_name):
     folder_path = os.path.join(DATASET_DIR, dance_name)
@@ -133,10 +81,17 @@ def process_dance_folder(dance_name):
     print(f"  [OK] Saved landmark sequence to: {out_file}\n")
 
 def main():
+    parser = argparse.ArgumentParser(description="Extract reference pose sequence from image frames.")
+    parser.add_argument("--name", type=str, default=None, help="Specific dance folder name (e.g. Alarippu)")
+    args = parser.parse_args()
+
     print("Starting GestureIQ Reference Landmark Extraction...")
-    dance_items = ["Alarippu", "Pushpanjali"]
-    for dance in dance_items:
-        process_dance_folder(dance)
+    if args.name:
+        process_dance_folder(args.name)
+    else:
+        dance_items = ["Alarippu", "Pushpanjali"]
+        for dance in dance_items:
+            process_dance_folder(dance)
 
 if __name__ == "__main__":
     main()

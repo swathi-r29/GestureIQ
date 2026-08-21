@@ -5,10 +5,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 import pickle
 
-# ── Load CSV ───────────────────────────────────────────────────────────────
+import os
 
-
-CSV  = "E:/GestureIQ/dataset/navarasa/navarasa_landmarks.csv"
+BASE_DIR = os.path.dirname(__file__)
+CSV = os.path.abspath(os.path.join(BASE_DIR, "..", "dataset", "navarasa", "navarasa_landmarks.csv"))
 df   = pd.read_csv(CSV)
 print("Shape:", df.shape)
 print("\nSamples per rasa:")
@@ -55,11 +55,12 @@ print("\nPer-class results:")
 print(classification_report(y_test, y_pred))
 
 # ── Save ───────────────────────────────────────────────────────────────────
-import os
-os.makedirs("E:/GestureIQ/models", exist_ok=True)
+models_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "models"))
+os.makedirs(models_dir, exist_ok=True)
+model_save_path = os.path.join(models_dir, "navarasa_model.pkl")
 
-with open("E:/GestureIQ/models/navarasa_model.pkl", "wb") as f:
+with open(model_save_path, "wb") as f:
     pickle.dump(model, f)
 
-print("[OK] Saved: E:/GestureIQ/models/navarasa_model.pkl")
+print(f"[OK] Saved: {model_save_path}")
 print("Training complete!")

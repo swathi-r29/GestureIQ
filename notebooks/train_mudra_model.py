@@ -11,8 +11,9 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
-csv_path = "E:/GestureIQ/dataset/bharatanatyam_mudras/landmarks.csv"
-model_path = "E:/GestureIQ/models/mudra_model.pkl"
+BASE_DIR = os.path.dirname(__file__)
+csv_path = os.path.abspath(os.path.join(BASE_DIR, "..", "dataset", "bharatanatyam_mudras", "landmarks.csv"))
+model_path = os.path.abspath(os.path.join(BASE_DIR, "..", "models", "mudra_model.pkl"))
 
 #csv_path = "../dataset/bharatanatyam_mudras/landmarks.csv"
 #model_path = "../models/mudra_model.pkl"

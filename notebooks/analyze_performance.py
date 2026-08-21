@@ -18,9 +18,13 @@ def p(r):
     label = r.values[63] # hand_label is at the end
     return extract_features(pts, label=label)
 
+BASE_DIR = os.path.dirname(__file__)
+csv_path = os.path.abspath(os.path.join(BASE_DIR, "..", "dataset", "bharatanatyam_mudras", "landmarks_fixed.csv"))
+model_path = os.path.abspath(os.path.join(BASE_DIR, "..", "models", "mudra_model.pkl"))
+
 print("Loading dataset and model...")
-df = pd.read_csv("E:/GestureIQ/dataset/bharatanatyam_mudras/landmarks_fixed.csv")
-with open("E:/GestureIQ/models/mudra_model.pkl", "rb") as f:
+df = pd.read_csv(csv_path)
+with open(model_path, "rb") as f:
     m = pickle.load(f)
     
 print("Preparing data...")

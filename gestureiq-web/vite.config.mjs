@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
 
   const proxyConfig = {
     // ── AI Services Priority Regex (Port 5001) ──
-    '^/api/(predict|predict_double|predict_pose|detect_frame|detect_landmarks|detect_double_landmarks|evaluate_session|session_report|landmarks|mudra_data|clear_history|reset_registry|get_voice)': {
+    '^/api/(predict|predict_double|predict_pose|detect_frame|detect_landmarks|detect_double_landmarks|evaluate_session|session_report|landmarks|mudra_data|clear_history|reset_registry|get_voice|sequence)': {
       target: 'http://127.0.0.1:5001',
       changeOrigin: true,
       configure: (proxy, options) => {

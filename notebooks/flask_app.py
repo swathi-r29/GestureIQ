@@ -14,6 +14,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features, get_angle, get_distance
 from utils.double_feature_engineering import extract_double_features
+from utils.pose_feature_engineering import normalize_landmarks, extract_body_angles, check_full_body_visibility
 from scipy.spatial.distance import cosine
 import tracemalloc
 import atexit
@@ -2418,10 +2419,6 @@ def detect_holistic():
 
 
 
-
-if __name__ == '__main__':`.
-# ============================================================================
-
 @app.route('/api/predict', methods=['POST'])
 def predict_mudra():
     """
@@ -3073,98 +3070,121 @@ def predict_pose():
         return jsonify({"detected": False, "error": str(e)}), 500
 
 # ── Dance Sequence Evaluation Endpoints ──────────────────────────────
-REF_SEQ_DIR_FLASK = os.path.join(BASE_DIR, "../dataset/reference_sequences")
+REF_SEQ_DIR_FLASK = os.path.abspath(os.path.join(BASE_DIR, "dataset", "reference_sequences"))
+if not os.path.exists(REF_SEQ_DIR_FLASK):
+    REF_SEQ_DIR_FLASK = os.path.abspath(os.path.join(BASE_DIR, "../dataset/reference_sequences"))
+
+BENCHMARKS_CACHE = {}
+
+def load_cached_benchmarks():
+    """Pre-caches all reference JSON dance items into memory for fast matching."""
+    if not os.path.exists(REF_SEQ_DIR_FLASK):
+        return
+    for fname in os.listdir(REF_SEQ_DIR_FLASK):
+        if fname.endswith("_sequence.json"):
+            dance_key = fname.replace("_sequence.json", "")
+            try:
+                with open(os.path.join(REF_SEQ_DIR_FLASK, fname), 'r') as fp:
+                    data = json.load(fp)
+                    BENCHMARKS_CACHE[dance_key] = data.get("sequence", [])
+                    print(f"[BENCHMARK] Loaded {dance_key} ({len(BENCHMARKS_CACHE[dance_key])} frames)")
+            except Exception as ex:
+                print(f"[BENCHMARK ERROR] Could not load {fname}: {ex}")
+
+load_cached_benchmarks()
+
 
 @app.route('/api/sequence/evaluate_image', methods=['POST'])
 def evaluate_sequence_image():
+    """Evaluates an uploaded static frame against a selected dance benchmark item."""
     try:
-        import json
         body = request.get_json(force=True) or {}
         dance_name = body.get('dance_name', 'Alarippu')
         landmarks = body.get('landmarks', [])
 
-        ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{dance_name}_sequence.json")
-        if not os.path.exists(ref_file):
+        ref_sequence = BENCHMARKS_CACHE.get(dance_name)
+        if not ref_sequence:
+            ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{dance_name}_sequence.json")
+            if os.path.exists(ref_file):
+                with open(ref_file, 'r') as f:
+                    ref_data = json.load(f)
+                    ref_sequence = ref_data.get("sequence", [])
+                    BENCHMARKS_CACHE[dance_name] = ref_sequence
+
+        if not ref_sequence:
             return jsonify({"detected": False, "error": f"Sequence file for {dance_name} not found."}), 404
 
-        with open(ref_file, 'r') as f:
-            ref_data = json.load(f)
-
-        ref_sequence = ref_data.get("sequence", [])
-
-        if not landmarks or len(landmarks) < 33:
+        if not landmarks or len(landmarks) < 27:
             return jsonify({"detected": False, "error": "No full-body posture detected in image."})
 
-        coords = np.array([[lm['x'], lm['y'], lm['z']] for lm in landmarks[:33]])
-        hip_center = (coords[23] + coords[24]) / 2.0
-        centered = coords - hip_center
-        shoulder_center = (coords[11] + coords[12]) / 2.0
-        torso_length = np.linalg.norm(shoulder_center - hip_center) or 1.0
-        norm_coords = centered / torso_length
+        # Check visibility guard
+        is_visible, missing_parts = check_full_body_visibility(landmarks)
+        if not is_visible:
+            return jsonify({
+                "detected": False,
+                "error": f"Step back: {', '.join(missing_parts)}",
+                "feedback": [f"Step back: {part}" for part in missing_parts]
+            })
 
-        def get_angle_3d(a, b, c):
-            ba = a - b
-            bc = c - b
-            n_ba, n_bc = np.linalg.norm(ba), np.linalg.norm(bc)
-            if n_ba * n_bc == 0: return 0.0
-            dot = np.dot(ba, bc)
-            cos = np.clip(dot / (n_ba * n_bc), -1.0, 1.0)
-            return round(math.degrees(math.acos(cos)), 1)
+        norm_coords = normalize_landmarks(landmarks)
+        student_angles = extract_body_angles(norm_coords)
 
-        k_left = get_angle_3d(norm_coords[23], norm_coords[25], norm_coords[27])
-        k_right = get_angle_3d(norm_coords[24], norm_coords[26], norm_coords[28])
-        e_left = get_angle_3d(norm_coords[11], norm_coords[13], norm_coords[15])
-        e_right = get_angle_3d(norm_coords[12], norm_coords[14], norm_coords[16])
-        spine_vec = (norm_coords[11] + norm_coords[12]) / 2.0 - (norm_coords[23] + norm_coords[24]) / 2.0
-        torso_tilt = round(math.degrees(math.atan2(abs(spine_vec[0]), abs(spine_vec[1]))), 1)
-
-        student_angles = {
-            "left_knee": k_left, "right_knee": k_right,
-            "left_elbow": e_left, "right_elbow": e_right,
-            "torso_tilt": torso_tilt
-        }
+        if not student_angles:
+            return jsonify({"detected": False, "error": "Unable to compute 3D body angles."})
 
         best_score = -1.0
         best_ref_frame = None
         best_ref_angles = None
+        best_ref_item = None
 
         for item in ref_sequence:
             ref_angles = item.get("angles")
-            if not ref_angles: continue
-            lk_diff = abs(ref_angles["left_knee"] - student_angles["left_knee"])
-            rk_diff = abs(ref_angles["right_knee"] - student_angles["right_knee"])
-            le_diff = abs(ref_angles["left_elbow"] - student_angles["left_elbow"])
-            re_diff = abs(ref_angles["right_elbow"] - student_angles["right_elbow"])
-            tilt_diff = abs(ref_angles["torso_tilt"] - student_angles["torso_tilt"])
+            if not ref_angles:
+                continue
 
-            avg_err = (lk_diff * 0.3 + rk_diff * 0.3 + le_diff * 0.15 + re_diff * 0.15 + tilt_diff * 0.10)
+            r_lk = ref_angles.get("left_knee", 180)
+            r_rk = ref_angles.get("right_knee", 180)
+            r_le = ref_angles.get("left_elbow", 180)
+            r_re = ref_angles.get("right_elbow", 180)
+            r_tilt = ref_angles.get("torso_tilt", 0)
+
+            lk_diff = abs(r_lk - student_angles["left_knee"])
+            rk_diff = abs(r_rk - student_angles["right_knee"])
+            le_diff = abs(r_le - student_angles["left_elbow"])
+            re_diff = abs(r_re - student_angles["right_elbow"])
+            tilt_diff = abs(r_tilt - student_angles["torso_tilt"])
+
+            avg_err = (lk_diff * 0.30 + rk_diff * 0.30 + le_diff * 0.15 + re_diff * 0.15 + tilt_diff * 0.10)
             match_score = max(0.0, round(100.0 - avg_err, 1))
 
             if match_score > best_score:
                 best_score = match_score
-                best_ref_frame = item["frame_file"]
+                best_ref_frame = item.get("frame_file") or f"Step #{item.get('step_index', 0)} ({item.get('timestamp_sec', 0.0)}s)"
                 best_ref_angles = ref_angles
+                best_ref_item = item
 
         feedback = []
         if best_ref_angles:
-            lk_diff = abs(best_ref_angles["left_knee"] - student_angles["left_knee"])
-            rk_diff = abs(best_ref_angles["right_knee"] - student_angles["right_knee"])
-            le_diff = abs(best_ref_angles["left_elbow"] - student_angles["left_elbow"])
-            re_diff = abs(best_ref_angles["right_elbow"] - student_angles["right_elbow"])
-            tilt_diff = abs(best_ref_angles["torso_tilt"] - student_angles["torso_tilt"])
+            lk_diff = abs(best_ref_angles.get("left_knee", 180) - student_angles["left_knee"])
+            rk_diff = abs(best_ref_angles.get("right_knee", 180) - student_angles["right_knee"])
+            le_diff = abs(best_ref_angles.get("left_elbow", 180) - student_angles["left_elbow"])
+            re_diff = abs(best_ref_angles.get("right_elbow", 180) - student_angles["right_elbow"])
+            tilt_diff = abs(best_ref_angles.get("torso_tilt", 0) - student_angles["torso_tilt"])
 
+            detected_stance = student_angles.get("detected_stance", "Araimandi Stance")
             if max(lk_diff, rk_diff) > 18:
-                feedback.append("Knee bend discrepancy (check Araimandi stance depth)")
+                feedback.append(f"Knee angle off by {int(max(lk_diff, rk_diff))}° — adjust {detected_stance} depth")
             if max(le_diff, re_diff) > 20:
-                feedback.append("Arm / elbow level balance discrepancy")
+                feedback.append("Level both arms in Natyarambham line")
             if tilt_diff > 10:
-                feedback.append("Spine vertical alignment imbalance")
+                feedback.append("Straighten spine vertical center line")
 
         grade = "A+" if best_score >= 90 else ("A" if best_score >= 80 else ("B" if best_score >= 70 else "Needs Practice"))
 
         return jsonify({
             "detected": True,
             "dance_name": dance_name,
+            "current_stance": student_angles.get("detected_stance", "Unknown"),
             "matched_frame": best_ref_frame,
             "match_score": best_score,
             "grade": grade,
@@ -3175,6 +3195,79 @@ def evaluate_sequence_image():
     except Exception as e:
         print(f"[evaluate_sequence_image] Error: {e}")
         return jsonify({"detected": False, "error": str(e)}), 500
+
+
+@app.route('/api/sequence/evaluate_frame', methods=['POST'])
+def evaluate_sequence_frame():
+    """Real-time live frame matcher with adaptive window search for webcam feeds."""
+    try:
+        body = request.get_json(force=True) or {}
+        dance_name = body.get('sequence_name', 'Alarippu')
+        landmarks = body.get('landmarks', [])
+        frame_idx = body.get('frame_index', 0)
+
+        ref_sequence = BENCHMARKS_CACHE.get(dance_name)
+        if not ref_sequence:
+            return jsonify({"status": "error", "message": f"Dance sequence {dance_name} not found"}), 404
+
+        if not landmarks or len(landmarks) < 27:
+            return jsonify({"status": "no_body", "message": "No full body in frame"}), 200
+
+        # Visibility Guard
+        is_visible, missing = check_full_body_visibility(landmarks)
+        if not is_visible:
+            return jsonify({
+                "status": "partial_body",
+                "message": f"⚠️ STEP BACK: {', '.join(missing)}"
+            }), 200
+
+        norm_coords = normalize_landmarks(landmarks)
+        angles = extract_body_angles(norm_coords)
+        if not angles:
+            return jsonify({"status": "error", "message": "Angle extraction failed"}), 200
+
+        # Search window around expected playback frame
+        window_size = 30
+        start = max(0, frame_idx - window_size)
+        end = min(len(ref_sequence), frame_idx + window_size)
+        search_space = ref_sequence[start:end] if (end - start) > 5 else ref_sequence
+
+        best_score = -1.0
+        best_step = 0
+        best_ref = None
+
+        for item in search_space:
+            ref_a = item.get("angles", {})
+            if not ref_a: continue
+            
+            err = (
+                abs(ref_a.get("left_knee", 180) - angles["left_knee"]) * 0.30 +
+                abs(ref_a.get("right_knee", 180) - angles["right_knee"]) * 0.30 +
+                abs(ref_a.get("left_elbow", 180) - angles["left_elbow"]) * 0.15 +
+                abs(ref_a.get("right_elbow", 180) - angles["right_elbow"]) * 0.15 +
+                abs(ref_a.get("torso_tilt", 0) - angles["torso_tilt"]) * 0.10
+            )
+            score = max(0.0, round(100.0 - err, 1))
+            if score > best_score:
+                best_score = score
+                best_step = item.get("step_index", 0)
+                best_ref = ref_a
+
+        grade = "A+" if best_score >= 90 else ("A" if best_score >= 80 else ("B" if best_score >= 70 else "Needs Practice"))
+
+        return jsonify({
+            "status": "success",
+            "current_stance": angles.get("detected_stance", "Unknown"),
+            "match_score": best_score,
+            "grade": grade,
+            "matched_step": f"Step #{best_step}",
+            "angles": angles,
+            "reference_angles": best_ref
+        })
+
+    except Exception as e:
+        print(f"[evaluate_sequence_frame] Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # =============================================================================
 # MODULAR HOLISTIC EVALUATION ADDITIONS (DO NOT REMOVE EXTANT MUDRA METHODS)
@@ -3267,85 +3360,6 @@ def evaluate_body_posture(pose_landmarks):
         "corrections": corrections,
         "is_in_araimandi": is_in_araimandi
     }
-
-
-@app.route('/api/detect_holistic', methods=['POST'])
-def detect_holistic():
-    """Aggregates independent modules into a single synchronized score payload."""
-    try:
-        body = request.get_json(force=True)
-        target_mudra = body.get('targetMudra', '').lower().strip()
-        handedness = body.get('handedness', 'Right')
-
-        face_landmarks = None
-        pose_landmarks = None
-
-        if body.get('faceFrame'):
-            try:
-                # Decode base64 image data sent from the client
-                img_bytes = base64.b64decode(body['faceFrame'].split(',')[-1])
-                nparr = np.frombuffer(img_bytes, np.uint8)
-                decoded_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                rgb_img = cv2.cvtColor(decoded_frame, cv2.COLOR_BGR2RGB)
-                
-                # Section B: Process face coordinates via existing server-side FaceMesh instance
-                face_mesh_output = _face_mesh.process(rgb_img)
-                if face_mesh_output.multi_face_landmarks:
-                    face_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in face_mesh_output.multi_face_landmarks[0].landmark]
-                    
-                # Section C & D: Process body coordinates via existing server-side Pose/Holistic pipeline if visible
-                pose_output = _pose.process(rgb_img)
-                if pose_output.pose_landmarks:
-                    pose_landmarks = [{"x": l.x, "y": l.y, "z": l.z} for l in pose_output.pose_landmarks.landmark]
-            except Exception as e:
-                print(f"Background image extraction skipped on this tick: {e}")
-
-        # 1. Hand Mudra Classification (Reuses your exact production logic)
-        hand_landmarks = body.get('hand_landmarks')
-        if hand_landmarks:
-            # Inject native run_madm method safely
-            hand_result = run_madm(hand_landmarks, target_mudra, label=handedness, min_frames=3)
-        else:
-            hand_result = {"accuracy": 0.0, "name": "", "corrections": ["Bring your hand into frame."]}
-
-        # 2. Face Expression Analysis
-        face_result = predict_navarasa_from_landmarks(face_landmarks, current_mudra_name=hand_result.get("name", ""))
-
-        # 3. Body Posture Analysis
-        pose_landmarks = pose_landmarks  # fallback assignment
-        posture_result = evaluate_body_posture(pose_landmarks)
-
-        # 4. Weighted Aggregation Score calculation
-        total_score = (
-            (hand_result.get("accuracy", 0.0) * 0.50) +
-            (face_result.get("rasa_confidence", 0.0) * 0.25) +
-            (posture_result.get("posture_score", 100.0) * 0.25)
-        )
-
-        # Combine feedback messages
-        unified_corrections = hand_result.get("corrections", []) + posture_result.get("corrections", [])
-        if face_result.get("expression_correction"):
-            unified_corrections.append(face_result["expression_correction"])
-
-        return jsonify({
-            "detected": hand_result.get("detected", False),
-            "name": hand_result.get("name", ""),
-            "status": "Correct" if total_score >= 75 and hand_result.get("status") == "Correct" else "Unknown",
-            "accuracy": round(total_score, 1),
-            "confidence": hand_result.get("confidence", 0.0),
-            "corrections": unified_corrections,
-            "problematic_joints": hand_result.get("problematic_joints", []),
-            "face_data": face_result,
-            "posture_data": posture_result
-        })
-
-    except Exception as e:
-        print(f"[detect_holistic] Error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-
-
 if __name__ == '__main__':
     print("GestureIQ Flask API starting on http://0.0.0.0:5001")
     socketio.run(app, host='0.0.0.0', port=5001, debug=False,

@@ -9,9 +9,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.feature_engineering import extract_features
 
-# CONFIGURATION
-TARGET_MUDRA = "pataka" # Set target for validation (all lowercase)
-MODEL_PATH = "E:\\GestureIQ\\models\\mudra_model.pkl"
+BASE_DIR = os.path.dirname(__file__)
+MODEL_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "models", "mudra_model.pkl"))
 # Load model
 if not os.path.exists(MODEL_PATH):
     print(f"ERROR: Model not found at {MODEL_PATH}. Run train_mudra_model.py first.")

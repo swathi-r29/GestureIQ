@@ -438,9 +438,6 @@ export default function LearnDouble() {
 
         initMediaPipe();
 
-        };
-        initMediaPipe();
-
         recoveryRef.current = setInterval(() => {
             if (cameraOn && Date.now() - lastResultTimeRef.current > 3000)
                 lastResultTimeRef.current = Date.now();

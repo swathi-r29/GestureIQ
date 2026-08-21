@@ -6,9 +6,9 @@ from PIL import Image
 # Tesseract path
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Paths
-raw_frames_folder = "E:/GestureIQ/dataset/bharatanatyam_mudras/raw_frames"
-sorted_folder = "E:/GestureIQ/dataset/bharatanatyam_mudras/sorted_mudras"
+BASE_DIR = os.path.dirname(__file__)
+raw_frames_folder = os.path.abspath(os.path.join(BASE_DIR, "..", "dataset", "bharatanatyam_mudras", "raw_frames"))
+sorted_folder = os.path.abspath(os.path.join(BASE_DIR, "..", "dataset", "bharatanatyam_mudras", "sorted_mudras"))
 
 #raw_frames_folder = "../dataset/bharatanatyam_mudras/raw_frames"
 #sorted_folder = "../dataset/bharatanatyam_mudras/sorted_mudras"

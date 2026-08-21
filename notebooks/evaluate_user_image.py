@@ -15,47 +15,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REF_SEQ_DIR = os.path.join(BASE_DIR, "dataset", "reference_sequences")
 
-def normalize_landmarks(landmarks):
-    if not landmarks:
-        return None
-    coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-    hip_center = (coords[23] + coords[24]) / 2.0
-    centered = coords - hip_center
-    shoulder_center = (coords[11] + coords[12]) / 2.0
-    torso_length = np.linalg.norm(shoulder_center - hip_center)
-    if torso_length > 0:
-        normalized = centered / torso_length
-    else:
-        normalized = centered
-    return normalized
-
-def calculate_angle_3d(a, b, c):
-    ba = a - b
-    bc = c - b
-    norm_ba = np.linalg.norm(ba)
-    norm_bc = np.linalg.norm(bc)
-    if norm_ba * norm_bc == 0:
-        return 0.0
-    dot = np.dot(ba, bc)
-    cosine = np.clip(dot / (norm_ba * norm_bc), -1.0, 1.0)
-    return round(math.degrees(math.acos(cosine)), 1)
-
-def extract_body_angles(norm_coords):
-    if norm_coords is None:
-        return None
-    k_left = calculate_angle_3d(norm_coords[23], norm_coords[25], norm_coords[27])
-    k_right = calculate_angle_3d(norm_coords[24], norm_coords[26], norm_coords[28])
-    e_left = calculate_angle_3d(norm_coords[11], norm_coords[13], norm_coords[15])
-    e_right = calculate_angle_3d(norm_coords[12], norm_coords[14], norm_coords[16])
-    spine_vec = (norm_coords[11] + norm_coords[12]) / 2.0 - (norm_coords[23] + norm_coords[24]) / 2.0
-    torso_tilt = round(math.degrees(math.atan2(abs(spine_vec[0]), abs(spine_vec[1]))), 1)
-    return {
-        "left_knee": k_left,
-        "right_knee": k_right,
-        "left_elbow": e_left,
-        "right_elbow": e_right,
-        "torso_tilt": torso_tilt
-    }
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.pose_feature_engineering import normalize_landmarks, calculate_angle_3d, extract_body_angles, check_full_body_visibility
 
 def evaluate_image_posture(image_path, dance_name="Alarippu"):
     if not os.path.exists(image_path):
@@ -109,7 +70,7 @@ def evaluate_image_posture(image_path, dance_name="Alarippu"):
 
         if match_score > best_score:
             best_score = match_score
-            best_ref_frame = item["frame_file"]
+            best_ref_frame = item.get("frame_file") or f"Timestamp {item.get('timestamp_sec', 0.0)}s (Step #{item.get('step_index', 0)})"
             best_ref_angles = ref_angles
 
     feedback = []

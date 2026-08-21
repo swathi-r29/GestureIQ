@@ -17,61 +17,9 @@ import json
 import sys
 import os
 
-def normalize_landmarks(landmarks):
-    """Normalizes 33 pose landmarks relative to hip center and torso length."""
-    if not landmarks:
-        return None
-    
-    coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-    
-    # Hips center (joints 23 & 24)
-    hip_center = (coords[23] + coords[24]) / 2.0
-    centered = coords - hip_center
-    
-    # Torso length (distance between hip center and shoulder center 11 & 12)
-    shoulder_center = (coords[11] + coords[12]) / 2.0
-    torso_length = np.linalg.norm(shoulder_center - hip_center)
-    
-    if torso_length > 0:
-        normalized = centered / torso_length
-    else:
-        normalized = centered
-        
-    return normalized
-
-def calculate_angle_np(a, b, c):
-    """Calculates 3D angle at joint b in degrees."""
-    ba = a - b
-    bc = c - b
-    norm_ba = np.linalg.norm(ba)
-    norm_bc = np.linalg.norm(bc)
-    if norm_ba * norm_bc == 0:
-        return 0.0
-    dot = np.dot(ba, bc)
-    cosine = np.clip(dot / (norm_ba * norm_bc), -1.0, 1.0)
-    return math.degrees(math.acos(cosine))
-
-def extract_body_angles(norm_coords):
-    """Extracts key anatomical angles (Left Knee, Right Knee, Left Elbow, Right Elbow, Torso Tilt)."""
-    if norm_coords is None:
-        return None
-    
-    k_left = calculate_angle_np(norm_coords[23], norm_coords[25], norm_coords[27])
-    k_right = calculate_angle_np(norm_coords[24], norm_coords[26], norm_coords[28])
-    e_left = calculate_angle_np(norm_coords[11], norm_coords[13], norm_coords[15])
-    e_right = calculate_angle_np(norm_coords[12], norm_coords[14], norm_coords[16])
-    
-    # Torso vertical tilt relative to Y axis
-    spine_vec = (norm_coords[11] + norm_coords[12]) / 2.0 - (norm_coords[23] + norm_coords[24]) / 2.0
-    torso_tilt = math.degrees(math.atan2(abs(spine_vec[0]), abs(spine_vec[1])))
-    
-    return {
-        "left_knee": round(k_left, 1),
-        "right_knee": round(k_right, 1),
-        "left_elbow": round(e_left, 1),
-        "right_elbow": round(e_right, 1),
-        "torso_tilt": round(torso_tilt, 1)
-    }
+# Add root directory to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.pose_feature_engineering import normalize_landmarks, calculate_angle_3d, extract_body_angles
 
 def get_video_angles_sequence(video_path, fps_sample=5):
     """Processes video file and returns frame-by-frame angle sequence."""

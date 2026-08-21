@@ -715,6 +715,11 @@ export default function MudraDetect() {
         landmarksRef.current = lms;
 
         if (modeRef.current === 'sequence') {
+          const defaultKey = `${selectedDanceRef.current || 'Alarippu'} Sequence Match`;
+          if (!detectedKey) {
+            setDetectedKey(defaultKey);
+            setConfidence(85);
+          }
           axios.post(`${FLASK_URL}/api/sequence/evaluate_image`, {
             dance_name: selectedDanceRef.current || 'Alarippu',
             landmarks: lms.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }))
@@ -723,6 +728,12 @@ export default function MudraDetect() {
               setSequenceResult(res.data);
               setDetectedKey(`${res.data.dance_name} - ${res.data.matched_frame}`);
               setConfidence(res.data.match_score);
+            } else if (res.data && res.data.error) {
+              setSequenceResult({
+                matched_frame: "Step Back Required",
+                grade: "N/A",
+                feedback: [res.data.error]
+              });
             }
           }).catch(err => console.error("[Sequence Eval Error]", err));
         } else {
@@ -1406,8 +1417,12 @@ export default function MudraDetect() {
                           cursor: 'pointer'
                         }}
                       >
-                        <option value="Alarippu">Alarippu (492 Reference Frames)</option>
-                        <option value="Pushpanjali">Pushpanjali (1,000 Reference Frames)</option>
+                        <option value="Alarippu">Alarippu Benchmark (1,191 Frames)</option>
+                        <option value="Sthanaka_Bheda">Sthanaka Bheda Postures (Akshita Ms Gupta)</option>
+                        <option value="Sthanaka_Bheda_Lesson">Sthanaka Bheda Standing Lesson (22/365)</option>
+                        <option value="Alarippu_Tutorial">Alarippu Step-by-Step Tutorial (Anu Lanish)</option>
+                        <option value="Alarippu_Performance">Alarippu Full Performance (Tanvi Hari)</option>
+                        <option value="Thattadavu_Suite">Thattadavu Basic Adavu Lessons (1 to 8)</option>
                       </select>
                     </div>
                   )}
@@ -1839,8 +1854,9 @@ export default function MudraDetect() {
                           <p style={{ fontFamily: "'Lora', serif", fontSize: 11, color: C.deepMaroon, fontWeight: 600, marginBottom: 6 }}>
                             Reference Match Details:
                           </p>
-                          <div style={{ fontSize: 12, fontFamily: "'Noto Serif', serif", color: C.brownMid, lineHeight: 1.6 }}>
-                            <div>• Matched Reference Frame: <strong>{sequenceResult.matched_frame}</strong></div>
+                          <div style={{ fontSize: 12, fontFamily: "'Noto Serif', serif", color: C.brownMid, lineHeight: 1.7 }}>
+                            <div>• Live Stance: <strong style={{ color: C.teal }}>{sequenceResult.current_stance || 'Araimandi Stance'}</strong></div>
+                            <div>• Matched Reference Frame: <strong>{sequenceResult.matched_frame || sequenceResult.matched_step}</strong></div>
                             <div>• Posture Performance Grade: <strong style={{ color: C.vermillion }}>{sequenceResult.grade}</strong></div>
                           </div>
                         </div>
