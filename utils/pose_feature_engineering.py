@@ -5,50 +5,65 @@ Centralized 3D Pose Feature Engineering, Normalization & Multi-Stance Classifier
 
 import math
 import numpy as np
-
-
 def check_full_body_visibility(landmarks, min_vis=0.45):
     """
-    Checks if key body parts (shoulders 11,12, hips 23,24, knees 25,26) are in camera frame.
-    Returns (is_visible, list_of_missing_parts).
+    Validates visibility and geometric sanity of lower body keypoints.
     """
     if not landmarks:
         return False, ["No body detected"]
 
     if hasattr(landmarks, 'landmark'):
-        lm_list = landmarks.landmark
-        if len(lm_list) < 27:
-            return False, ["Lower body not detected"]
+        lms = landmarks.landmark
+    elif isinstance(landmarks, list):
+        lms = landmarks
+    else:
+        return False, ["Invalid landmark structure"]
 
-        missing = []
-        if lm_list[11].visibility < min_vis or lm_list[12].visibility < min_vis:
-            missing.append("Shoulders out of frame")
-        if lm_list[23].visibility < min_vis or lm_list[24].visibility < min_vis:
-            missing.append("Hips out of frame")
-        if lm_list[25].visibility < min_vis or lm_list[26].visibility < min_vis:
-            missing.append("Knees out of frame")
+    if len(lms) < 27:
+        return False, ["Lower body landmarks missing"]
 
-        return len(missing) == 0, missing
+    def get_vis(idx):
+        if hasattr(lms[idx], 'visibility'):
+            return lms[idx].visibility
+        if isinstance(lms[idx], dict):
+            return lms[idx].get('visibility', 1.0)
+        return 1.0
 
-    elif isinstance(landmarks, list) and len(landmarks) >= 27:
-        missing = []
-        # Support dict format with 'visibility' key if provided by client
-        if isinstance(landmarks[0], dict) and 'visibility' in landmarks[0]:
-            if landmarks[11].get('visibility', 1.0) < min_vis or landmarks[12].get('visibility', 1.0) < min_vis:
-                missing.append("Shoulders out of frame")
-            if landmarks[23].get('visibility', 1.0) < min_vis or landmarks[24].get('visibility', 1.0) < min_vis:
-                missing.append("Hips out of frame")
-            if landmarks[25].get('visibility', 1.0) < min_vis or landmarks[26].get('visibility', 1.0) < min_vis:
-                missing.append("Knees out of frame")
-            return len(missing) == 0, missing
+    def get_y(idx):
+        if hasattr(lms[idx], 'y'):
+            return lms[idx].y
+        if isinstance(lms[idx], dict):
+            return lms[idx].get('y', 0.0)
+        if isinstance(lms[idx], (list, tuple)) and len(lms[idx]) > 1:
+            return lms[idx][1]
+        return 0.0
 
-    return True, []
+    missing = []
+    if get_vis(11) < min_vis or get_vis(12) < min_vis:
+        missing.append("Shoulders out of frame")
+    if get_vis(23) < min_vis or get_vis(24) < min_vis:
+        missing.append("Hips out of frame")
+    if get_vis(25) < min_vis or get_vis(26) < min_vis:
+        missing.append("Knees out of frame")
+
+    # Anatomical height sanity check (MediaPipe Y is 0 at top, 1 at bottom)
+    nose_y = get_y(0)
+    hip_y = (get_y(23) + get_y(24)) / 2.0
+    knee_y = (get_y(25) + get_y(26)) / 2.0
+
+    # If hips or knees are higher than or level with the nose, it is hallucinated onto the face
+    if hip_y <= nose_y + 0.10:
+        missing.append("Hips hallucinated on upper body/face")
+    if knee_y <= hip_y + 0.05:
+        missing.append("Knees collapsed on torso/face")
+
+    return len(missing) == 0, missing
 
 
 def normalize_landmarks(landmarks):
     """
-    Normalizes 33 MediaPipe pose landmarks relative to hip center and torso length.
-    Supports MediaPipe landmark objects, lists of dicts [{'x', 'y', 'z'}], or numpy arrays.
+    Normalizes 33 MediaPipe pose landmarks relative to hip center, torso scale,
+    and projects onto the dancer's anatomical coronal plane (Perspective Invariance).
     """
     if not landmarks:
         return None
@@ -70,20 +85,33 @@ def normalize_landmarks(landmarks):
     if len(coords) < 25:
         return None
 
-    # Hips center (joints 23 & 24)
+    # 1. Hips center origin (joints 23 & 24)
     hip_center = (coords[23] + coords[24]) / 2.0
     centered = coords - hip_center
 
-    # Torso length (distance between hip center and shoulder center 11 & 12)
+    # 2. Torso scale normalization
     shoulder_center = (coords[11] + coords[12]) / 2.0
-    torso_length = float(np.linalg.norm(shoulder_center - hip_center))
+    torso_vec = shoulder_center - hip_center
+    torso_length = float(np.linalg.norm(torso_vec))
 
     if torso_length > 1e-6:
-        normalized = centered / torso_length
+        scaled = centered / torso_length
     else:
-        normalized = centered
+        scaled = centered
 
-    return normalized
+    # 3. 3D Coronal Plane Rotation Matrix (Camera Tilt & Perspective Normalization)
+    v_spine = torso_vec / (np.linalg.norm(torso_vec) + 1e-8)
+    shoulder_lat = scaled[12] - scaled[11]
+    u_lat = shoulder_lat / (np.linalg.norm(shoulder_lat) + 1e-8)
+    w_depth = np.cross(u_lat, v_spine)
+    w_depth = w_depth / (np.linalg.norm(w_depth) + 1e-8)
+    u_lat_ortho = np.cross(v_spine, w_depth)
+
+    # 3D Orthogonal Rotation Matrix [u, v, w]
+    R = np.vstack([u_lat_ortho, -v_spine, w_depth])
+    projected = np.dot(scaled, R.T)
+
+    return projected
 
 
 def calculate_angle_3d(a, b, c):
@@ -167,8 +195,33 @@ def extract_body_angles(norm_coords):
     # Shoulder tilt (levelness)
     shoulder_tilt = round(float(abs(nc[11][1] - nc[12][1])), 3)
 
+    # Foot Turnout Angle (Outward Feet Alignment in Parshva position)
+    # Left foot vector (ankle 27 -> foot index 31), Right foot vector (ankle 28 -> foot index 32)
+    left_foot_turnout = 180.0
+    right_foot_turnout = 180.0
+    if len(nc) >= 33:
+        vec_lf = nc[31][:2] - nc[27][:2]
+        vec_rf = nc[32][:2] - nc[28][:2]
+        norm_lf = np.linalg.norm(vec_lf)
+        norm_rf = np.linalg.norm(vec_rf)
+        if norm_lf > 1e-4:
+            left_foot_turnout = round(float(math.degrees(math.atan2(abs(vec_lf[1]), abs(vec_lf[0])))), 1)
+        if norm_rf > 1e-4:
+            right_foot_turnout = round(float(math.degrees(math.atan2(abs(vec_rf[1]), abs(vec_rf[0])))), 1)
+    foot_turnout = round((left_foot_turnout + right_foot_turnout) / 2.0, 1)
+
+    # Attami (Neck-Head side isolation relative to hip center)
+    nose_x = nc[0][0] if len(nc) > 0 else 0.0
+    attami_neck_offset = round(float(abs(nose_x - hip_center[0])), 3)
+
+    # Natyarambham Elbow-Shoulder Drop Levelness
+    left_elbow_drop = round(float(nc[13][1] - nc[11][1]), 3)
+    right_elbow_drop = round(float(nc[14][1] - nc[12][1]), 3)
+
     # Geometric base distances
     ankle_distance = round(float(np.linalg.norm(nc[27] - nc[28])), 3)
+    knee_distance = round(float(np.linalg.norm(nc[25] - nc[26])), 3)
+    hip_distance = round(float(np.linalg.norm(nc[23] - nc[24])), 3)
     wrist_span = round(float(np.linalg.norm(nc[15] - nc[16])), 3)
 
     angles = {
@@ -178,7 +231,13 @@ def extract_body_angles(norm_coords):
         "right_elbow": e_right,
         "torso_tilt": torso_tilt,
         "shoulder_tilt": shoulder_tilt,
+        "foot_turnout": foot_turnout,
+        "attami_neck_offset": attami_neck_offset,
+        "left_elbow_drop": left_elbow_drop,
+        "right_elbow_drop": right_elbow_drop,
         "ankle_distance": ankle_distance,
+        "knee_distance": knee_distance,
+        "hip_distance": hip_distance,
         "wrist_span": wrist_span
     }
 
@@ -192,14 +251,46 @@ def extract_body_angles(norm_coords):
     return angles
 
 
+PREV_SMOOTHED_ANGLES = {}
+
+def apply_adaptive_ema_smoothing(angles):
+    """
+    Applies adaptive Exponential Moving Average (EMA) smoothing over joint angles.
+    alpha = 0.70 when dancer is moving rapidly.
+    alpha = 0.25 when holding stance to produce steady, jitter-free score output.
+    """
+    global PREV_SMOOTHED_ANGLES
+
+    if not angles:
+        return angles
+
+    if not PREV_SMOOTHED_ANGLES:
+        PREV_SMOOTHED_ANGLES = angles.copy()
+        return angles
+
+    delta = sum(abs(angles.get(k, 0) - PREV_SMOOTHED_ANGLES.get(k, 0)) for k in ["left_knee", "right_knee", "left_elbow", "right_elbow"]) / 4.0
+    alpha = 0.70 if delta > 5.0 else 0.25
+
+    smoothed = {}
+    for key, val in angles.items():
+        if isinstance(val, (int, float)):
+            prev_val = PREV_SMOOTHED_ANGLES.get(key, val)
+            smoothed[key] = round(float(alpha * val + (1.0 - alpha) * prev_val), 1)
+        else:
+            smoothed[key] = val
+
+    PREV_SMOOTHED_ANGLES = smoothed.copy()
+    return smoothed
+
+
 def evaluate_body_posture_normalized(landmarks_33):
     """
-    Scale-invariant posture analysis using normalized 3D coordinates.
+    Scale-invariant and perspective-normalized posture analysis with Biomechanical Fault Matrix.
     """
     if not landmarks_33 or len(landmarks_33) < 27:
         return {"posture_score": 0.0, "corrections": ["Full body not detected."], "is_in_araimandi": False}
 
-    # 1. Visibility Check
+    # 1. Visibility Guard
     is_visible, missing = check_full_body_visibility(landmarks_33)
     if not is_visible:
         return {
@@ -210,24 +301,48 @@ def evaluate_body_posture_normalized(landmarks_33):
             "detected_stance": "Incomplete Frame"
         }
 
-    # 2. Extract 3D Scale-Normalized Geometry
+    # 2. Extract 3D Scale & Perspective-Normalized Geometry
     norm = normalize_landmarks(landmarks_33)
-    angles = extract_body_angles(norm)
-    if not angles:
+    raw_angles = extract_body_angles(norm)
+    if not raw_angles:
         return {"posture_score": 0.0, "corrections": ["Unable to compute 3D posture geometry."], "is_in_araimandi": False}
+
+    # Apply adaptive EMA smoothing to eliminate score jitter
+    angles = apply_adaptive_ema_smoothing(raw_angles)
 
     corrections = []
 
-    # Scale-invariant shoulder level check
+    # 3. Biomechanical Fault Matrix
+    # Fault A: Knee Inward Sag (Valgus Collapse)
+    knee_dist = angles.get("knee_distance", 1.0)
+    hip_dist = angles.get("hip_distance", 0.5)
+    if hip_dist > 1e-4 and knee_dist < 0.85 * hip_dist:
+        corrections.append("Push your knees outward over your toes.")
+
+    # Fault B: Asymmetrical Araimandi Knee Depth
+    lk, rk = angles["left_knee"], angles["right_knee"]
+    if abs(lk - rk) > 15.0:
+        corrections.append("Distribute weight equally between both legs.")
+
+    # Fault C: Lumbar Arching (Depth offset check)
     if angles["shoulder_tilt"] > 0.08:
         corrections.append("Keep your shoulders square and level.")
 
-    # Vertical Spine Tilt Check (Target < 12°)
     if angles["torso_tilt"] > 14.0:
         corrections.append(f"Straighten your spine ({int(angles['torso_tilt'])}° tilt detected).")
 
-    # Stance & Araimandi Depth Check
-    lk, rk = angles["left_knee"], angles["right_knee"]
+    # Fault D: Drooping Elbows in Natyarambham Line
+    l_drop = angles.get("left_elbow_drop", 0.0)
+    r_drop = angles.get("right_elbow_drop", 0.0)
+    if l_drop > 0.12 or r_drop > 0.12:
+        corrections.append("Raise your elbows level with your shoulders in Natyarambham line.")
+
+    # Fault E: Foot Turnout Alignment (Parshva Feet Position)
+    foot_turnout = angles.get("foot_turnout", 180.0)
+    if angles["detected_stance"] == "Araimandi Stance" and foot_turnout < 110.0:
+        corrections.append("Turn your feet outward into Parshva position (180° turnout line).")
+
+    # Stance & Araimandi Depth Evaluation
     is_in_araimandi = (100.0 <= lk <= 145.0 and 100.0 <= rk <= 145.0)
 
     if lk > 148.0 or rk > 148.0:
@@ -235,11 +350,15 @@ def evaluate_body_posture_normalized(landmarks_33):
     elif lk < 95.0 and rk < 95.0:
         corrections.append("You are in Muzhumandi (Full Squat). Rise slightly for Araimandi.")
 
-    # Calculate final score
+    # Calculate weighted penalties
     penalties = 0.0
-    if angles["shoulder_tilt"] > 0.08: penalties += 20.0
-    if angles["torso_tilt"] > 14.0: penalties += min(30.0, (angles["torso_tilt"] - 14.0) * 2.0)
-    if not is_in_araimandi: penalties += min(40.0, abs(((lk + rk) / 2.0) - 120.0) * 0.8)
+    if angles["shoulder_tilt"] > 0.08: penalties += 15.0
+    if angles["torso_tilt"] > 14.0: penalties += min(25.0, (angles["torso_tilt"] - 14.0) * 2.0)
+    if abs(lk - rk) > 15.0: penalties += 15.0
+    if hip_dist > 1e-4 and knee_dist < 0.85 * hip_dist: penalties += 20.0
+    if l_drop > 0.12 or r_drop > 0.12: penalties += 10.0
+    if angles["detected_stance"] == "Araimandi Stance" and foot_turnout < 110.0: penalties += 10.0
+    if not is_in_araimandi: penalties += min(35.0, abs(((lk + rk) / 2.0) - 120.0) * 0.7)
 
     posture_score = max(0.0, round(100.0 - penalties, 1))
 
@@ -251,3 +370,179 @@ def evaluate_body_posture_normalized(landmarks_33):
         "angles": angles,
         "partial_body": False
     }
+
+
+def align_and_score_choreography(student_timeline, reference_timeline):
+    """
+    FastDTW non-linear dynamic time-warping sequence resynchronization.
+    student_timeline: List of feature vectors across time
+    reference_timeline: Master benchmark sequence feature vectors
+    """
+    if not student_timeline or not reference_timeline:
+        return {"choreography_score": 75.0, "tempo_accuracy": 100.0}
+
+    try:
+        from fastdtw import fastdtw
+        from scipy.spatial.distance import euclidean
+        distance, path = fastdtw(student_timeline, reference_timeline, dist=euclidean)
+        alignment_scores = []
+        for s_idx, r_idx in path:
+            s_feat = student_timeline[s_idx]
+            r_feat = reference_timeline[r_idx]
+            error = sum(abs(s - r) for s, r in zip(s_feat, r_feat)) / len(s_feat)
+            alignment_scores.append(max(0.0, 100.0 - (error * 1.5)))
+
+        return {
+            "choreography_score": round(sum(alignment_scores) / max(1, len(alignment_scores)), 1),
+            "tempo_accuracy": round((len(student_timeline) / max(1, len(reference_timeline))) * 100.0, 1)
+        }
+    except Exception:
+        errs = []
+        min_len = min(len(student_timeline), len(reference_timeline))
+        for i in range(min_len):
+            e = sum(abs(s - r) for s, r in zip(student_timeline[i], reference_timeline[i])) / len(student_timeline[i])
+            errs.append(max(0.0, 100.0 - (e * 1.5)))
+        avg_score = round(sum(errs) / max(1, len(errs)), 1) if errs else 75.0
+        return {"choreography_score": avg_score, "tempo_accuracy": 100.0}
+
+
+from collections import deque
+POSE_LANDMARK_BUFFER = deque(maxlen=5)
+
+def get_smoothed_or_fallback_landmarks(current_landmarks):
+    """
+    Returns smoothed landmarks if tracking is good.
+    If landmarks drop temporarily (grace period of 5 frames),
+    returns the last valid frame instead of failing.
+    """
+    global POSE_LANDMARK_BUFFER
+
+    is_valid = current_landmarks is not None and len(current_landmarks) >= 27
+
+    if is_valid:
+        POSE_LANDMARK_BUFFER.append(current_landmarks)
+        return current_landmarks, False  # (landmarks, is_fallback_used)
+
+    if len(POSE_LANDMARK_BUFFER) > 0:
+        # Fall back to the most recent valid frame
+        return POSE_LANDMARK_BUFFER[-1], True
+
+    return None, False
+
+
+class OneEuroFilter:
+    def __init__(self, t0, x0, min_cutoff=1.0, beta=0.007, d_cutoff=1.0):
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.x_prev = np.array(x0, dtype=float)
+        self.dx_prev = np.zeros_like(self.x_prev)
+        self.t_prev = float(t0)
+
+    def smoothing_factor(self, t_e, cutoff):
+        r = 2 * math.pi * cutoff * t_e
+        return r / (r + 1)
+
+    def exponential_smoothing(self, a, x, x_prev):
+        return a * x + (1 - a) * x_prev
+
+    def filter(self, t, x):
+        t_e = max(t - self.t_prev, 1e-4)
+        x = np.array(x, dtype=float)
+
+        # Estimate velocity
+        a_d = self.smoothing_factor(t_e, self.d_cutoff)
+        dx = (x - self.x_prev) / t_e
+        dx_hat = self.exponential_smoothing(a_d, dx, self.dx_prev)
+
+        # Adaptive cutoff frequency
+        cutoff = self.min_cutoff + self.beta * np.abs(dx_hat)
+        a = self.smoothing_factor(t_e, cutoff)
+        x_hat = self.exponential_smoothing(a, x, self.x_prev)
+
+        self.x_prev = x_hat
+        self.dx_prev = dx_hat
+        self.t_prev = float(t)
+        return x_hat
+
+
+_ONE_EURO_ANGLE_FILTER = None
+
+def apply_perspective_normalization(coords_33):
+    """
+    Rotates 3D landmarks onto the dancer's coronal anatomical plane.
+    Removes upward laptop tilt and lateral camera skew.
+    """
+    if coords_33 is None or len(coords_33) < 25:
+        return coords_33
+
+    coords = np.array(coords_33, dtype=float)
+    hip_center = (coords[23] + coords[24]) / 2.0
+    shoulder_center = (coords[11] + coords[12]) / 2.0
+
+    # 1. Vertical Spine Vector (Y-basis)
+    v_spine = shoulder_center - hip_center
+    v_spine_norm = np.linalg.norm(v_spine)
+    if v_spine_norm < 1e-6:
+        return coords
+    ey = v_spine / v_spine_norm
+
+    # 2. Horizontal Shoulder Vector (X-basis)
+    v_sh = coords[12] - coords[11]
+    v_sh_norm = np.linalg.norm(v_sh)
+    if v_sh_norm < 1e-6:
+        return coords
+    ex = v_sh / v_sh_norm
+
+    # 3. Depth Vector (Z-basis orthogonal to body plane)
+    ez = np.cross(ex, ey)
+    ez_norm = np.linalg.norm(ez)
+    if ez_norm < 1e-6:
+        return coords
+    ez = ez / ez_norm
+
+    # Re-orthogonalize X-basis
+    ex = np.cross(ey, ez)
+
+    # 3x3 Coronal Rotation Matrix
+    R = np.vstack([ex, ey, ez])
+
+    # Rotate origin-centered landmarks
+    centered = coords - hip_center
+    rotated = np.dot(centered, R.T)
+
+    # 4. Camera Upward Pitch Calibration (Laptop Desk Mode)
+    # Cancels vertical Z-depth offset caused by low upward-pointing camera
+    pitch = math.atan2(v_spine[2], max(1e-4, abs(v_spine[1])))
+    if abs(pitch) > 0.05: # > ~3 degrees
+        cos_p = math.cos(-pitch)
+        sin_p = math.sin(-pitch)
+        R_pitch = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, cos_p, -sin_p],
+            [0.0, sin_p, cos_p]
+        ])
+        rotated = np.dot(rotated, R_pitch.T)
+
+    return rotated
+
+
+def smooth_joint_angles(raw_angles_dict, timestamp_sec):
+    """
+    Applies adaptive One-Euro filtering across angular outputs.
+    """
+    global _ONE_EURO_ANGLE_FILTER
+    if not raw_angles_dict:
+        return raw_angles_dict
+
+    keys = ["left_knee", "right_knee", "left_elbow", "right_elbow", "torso_tilt", "shoulder_tilt"]
+    raw_vec = [raw_angles_dict.get(k, 180.0) for k in keys]
+
+    if _ONE_EURO_ANGLE_FILTER is None:
+        _ONE_EURO_ANGLE_FILTER = OneEuroFilter(timestamp_sec, raw_vec)
+        return raw_angles_dict
+
+    smoothed_vec = _ONE_EURO_ANGLE_FILTER.filter(timestamp_sec, raw_vec)
+    for i, k in enumerate(keys):
+        raw_angles_dict[k] = round(float(smoothed_vec[i]), 1)
+    return raw_angles_dict

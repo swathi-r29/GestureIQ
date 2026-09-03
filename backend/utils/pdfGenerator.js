@@ -84,4 +84,69 @@ const generateClassReportPDF = (sessionData, staffInfo, outputPath) => {
   });
 };
 
-module.exports = { generateClassReportPDF };
+const generateDanceReport = (sessionData, outputPath) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 45, size: 'A4' });
+    const dir = path.dirname(outputPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const writeStream = fs.createWriteStream(outputPath);
+
+    doc.pipe(writeStream);
+
+    // Header
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#78350f').text('GestureIQ Performance Scorecard', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#78716c').text('Bharatanatyam AI Analytics & Choreography Engine', { align: 'center' });
+    doc.moveDown(1.5);
+
+    // Metadata Table
+    const startY = doc.y;
+    doc.rect(45, startY, 505, 75).fillAndStroke('#fef3c7', '#d97706');
+    doc.fillColor('#1c1917').fontSize(11).font('Helvetica-Bold');
+    doc.text(`Student ID: ${sessionData.studentId || 'Anonymous'}`, 60, startY + 12);
+    doc.text(`Dance Item: ${sessionData.danceName}`, 60, startY + 30);
+    doc.text(`Date: ${new Date().toLocaleDateString()}`, 60, startY + 48);
+
+    doc.fontSize(26).font('Helvetica-Bold').fillColor('#b45309');
+    doc.text(`${sessionData.overallScore}%`, 420, startY + 12, { align: 'right', width: 110 });
+    doc.fontSize(12).fillColor('#047857').text(`Grade: ${sessionData.grade}`, 420, startY + 44, { align: 'right', width: 110 });
+
+    doc.y = startY + 95;
+    doc.moveDown(1);
+
+    // Stance Breakdown Section
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#78350f').text('1. Stance Retention Analysis');
+    doc.fontSize(10).font('Helvetica').fillColor('#44403c').text('Proportion of total performance time sustained in foundational postures:');
+    doc.moveDown(0.5);
+
+    Object.entries(sessionData.stanceBreakdown || {}).forEach(([stance, pct]) => {
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1c1917').text(`• ${stance}: `, { continued: true });
+      doc.font('Helvetica').fillColor('#b45309').text(`${pct}%`);
+    });
+
+    doc.moveDown(1.5);
+
+    // Biomechanical Corrections
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#78350f').text('2. Priority Biomechanical Corrections');
+    doc.moveDown(0.5);
+
+    const faults = sessionData.priorityFaults || ['Posture maintained with minimal angular deviation.'];
+    faults.forEach((fault, idx) => {
+      doc.fontSize(10).font('Helvetica').fillColor('#991b1b').text(`${idx + 1}. ${fault}`);
+    });
+
+    doc.moveDown(1.5);
+
+    // Guru's Evaluative Summary
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#78350f').text('3. Technical Summary & Guidance');
+    doc.fontSize(10).font('Helvetica-Oblique').fillColor('#292524').text(`"${sessionData.performanceSummary}"`);
+
+    doc.end();
+
+    writeStream.on('finish', () => resolve(outputPath));
+    writeStream.on('error', (err) => reject(err));
+  });
+};
+
+module.exports = { generateClassReportPDF, generateDanceReport };

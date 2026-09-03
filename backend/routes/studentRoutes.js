@@ -137,4 +137,32 @@ router.get('/classes/active', auth, async (req, res) => {
     }
 });
 
+// @route   POST /api/student/download_dance_report
+const { generateDanceReport } = require('../utils/pdfGenerator');
+const path = require('path');
+const fs = require('fs');
+
+router.post('/download_dance_report', async (req, res) => {
+  try {
+    const sessionData = req.body;
+    const reportsDir = path.join(__dirname, '../reports');
+    if (!fs.existsSync(reportsDir)) {
+      fs.mkdirSync(reportsDir, { recursive: true });
+    }
+
+    const fileName = `Report_${sessionData.danceName}_${Date.now()}.pdf`;
+    const filePath = path.join(reportsDir, fileName);
+
+    await generateDanceReport(sessionData, filePath);
+
+    res.download(filePath, fileName, (err) => {
+      if (err) console.error('Download error:', err);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    });
+  } catch (err) {
+    console.error('Report endpoint error:', err);
+    res.status(500).json({ error: 'Failed to generate PDF report' });
+  }
+});
+
 module.exports = router;

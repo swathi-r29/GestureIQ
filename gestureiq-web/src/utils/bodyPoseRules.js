@@ -269,6 +269,15 @@ export function evaluateFullBodyPose(landmarks) {
   const armsScore = arms.isVisible ? arms.score : 70;
   const totalScore = Math.round((activeLeg.score * 0.45) + (spineScore * 0.25) + (armsScore * 0.30));
 
+  // Determine per-joint color status ('#10b981' green, '#f59e0b' yellow, '#ef4444' red)
+  const kneeStatus = activeLeg.score >= 85 ? '#10b981' : (activeLeg.score >= 65 ? '#f59e0b' : '#ef4444');
+  const spineStatus = spineScore >= 85 ? '#10b981' : (spineScore >= 65 ? '#f59e0b' : '#ef4444');
+  const elbowStatus = armsScore >= 85 ? '#10b981' : (armsScore >= 65 ? '#f59e0b' : '#ef4444');
+
+  // Araimandi Depth Gauge (180 deg standing = 0%, 120 deg target Araimandi = 100%)
+  const avgKneeAngle = activeLeg.avgKneeAngle || 180;
+  const araimandiDepthPct = Math.min(100, Math.max(0, Math.round(((180 - avgKneeAngle) / 60) * 100)));
+
   const feedbacks = [];
   if (activeLeg.feedback) feedbacks.push(activeLeg.feedback);
   if (spine.isVisible && !spine.isPass) feedbacks.push(spine.feedback);
@@ -281,6 +290,10 @@ export function evaluateFullBodyPose(landmarks) {
     isPass: activeLeg.isPass,
     isFullyVisible: true,
     feedbacks,
+    kneeStatus,
+    spineStatus,
+    elbowStatus,
+    araimandiDepthPct,
     details: { araimandi, muzhumandi, samapada, nattadavu, spine, arms }
   };
 }

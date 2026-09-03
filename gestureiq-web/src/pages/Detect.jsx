@@ -708,6 +708,41 @@ export default function MudraDetect() {
       const worldLms = results.poseWorldLandmarks || lms;
 
       if (lms && lms.length >= 33) {
+        // Full Body & Anatomical Sanity Guard
+        const nose = lms[0];
+        const leftHip = lms[23];
+        const rightHip = lms[24];
+        const leftKnee = lms[25];
+        const rightKnee = lms[26];
+        const minConf = 0.45;
+
+        const isVisible =
+          (lms[11]?.visibility ?? 1) >= minConf &&
+          (lms[12]?.visibility ?? 1) >= minConf &&
+          (leftHip?.visibility ?? 1) >= minConf &&
+          (rightHip?.visibility ?? 1) >= minConf &&
+          (leftKnee?.visibility ?? 1) >= minConf &&
+          (rightKnee?.visibility ?? 1) >= minConf;
+
+        const isHallucinated = nose && leftHip && rightHip && (leftHip.y <= nose.y + 0.10);
+
+        if (!isVisible || isHallucinated) {
+          setHandPresent(false);
+          setPoseDetails(null);
+          landmarksRef.current = null;
+          setDetectedKey("⚠️ STEP BACK: Hips/Knees Out of Frame");
+          setConfidence(0);
+          if (modeRef.current === 'sequence') {
+            setSequenceResult({
+              matched_frame: "Step Back Required",
+              grade: "N/A",
+              feedback: ["⚠️ STEP BACK: Step 2 meters away so hips and knees are visible."]
+            });
+          }
+          ctx.restore();
+          return;
+        }
+
         setHandPresent(true);
         const normalized = normalizePoseLandmarks(worldLms || lms);
         const evalResult = evaluateFullBodyPose(normalized);
@@ -722,7 +757,7 @@ export default function MudraDetect() {
           }
           axios.post(`${FLASK_URL}/api/sequence/evaluate_image`, {
             dance_name: selectedDanceRef.current || 'Alarippu',
-            landmarks: lms.map(lm => ({ x: lm.x, y: lm.y, z: lm.z }))
+            landmarks: lms.map(lm => ({ x: lm.x, y: lm.y, z: lm.z, visibility: lm.visibility || 1.0 }))
           }).then(res => {
             if (res.data && res.data.detected) {
               setSequenceResult(res.data);
@@ -735,7 +770,24 @@ export default function MudraDetect() {
                 feedback: [res.data.error]
               });
             }
-          }).catch(err => console.error("[Sequence Eval Error]", err));
+          }).catch(err => {
+            console.warn("[Sequence Eval API Offline - Client Fallback Active]", err);
+            const leftKnee = (lms[23] && lms[25] && lms[27]) ? Math.abs((Math.atan2(lms[27].y - lms[25].y, lms[27].x - lms[25].x) - Math.atan2(lms[23].y - lms[25].y, lms[23].x - lms[25].x)) * 180 / Math.PI) : 180;
+            const rightKnee = (lms[24] && lms[26] && lms[28]) ? Math.abs((Math.atan2(lms[28].y - lms[26].y, lms[28].x - lms[26].x) - Math.atan2(lms[24].y - lms[26].y, lms[24].x - lms[26].x)) * 180 / Math.PI) : 180;
+            const avgKnee = (leftKnee + rightKnee) / 2.0;
+            let fbStance = "Araimandi Stance";
+            if (avgKnee < 100) fbStance = "Muzhumandi Stance";
+            else if (avgKnee > 155) fbStance = "Samapada Stance";
+
+            setSequenceResult({
+              current_stance: fbStance,
+              matched_frame: "Offline Instant Mode",
+              grade: "Live (Client Mode)",
+              match_score: Math.max(50, Math.round(100 - Math.abs(avgKnee - 120) * 0.8)),
+              feedback: ["Network packet dropped — running instant client-side posture tracking"]
+            });
+            setConfidence(Math.max(50, Math.round(100 - Math.abs(avgKnee - 120) * 0.8)));
+          });
         } else {
           const stanceToSet = (evalResult && evalResult.stanceName && !evalResult.stanceName.includes('Step Back'))
             ? evalResult.stanceName
@@ -745,9 +797,39 @@ export default function MudraDetect() {
           setConfidence(evalResult.totalScore > 0 ? evalResult.totalScore : 85);
         }
 
-        if (mp.drawConnectors && mp.drawLandmarks && POSE_CONNECTIONS) {
-          mp.drawConnectors(ctx, lms, POSE_CONNECTIONS, { color: evalResult.isPass ? '#10b981' : '#ef4444', lineWidth: 3 });
+        if (mp.drawConnectors && mp.drawLandmarks) {
+          const spineColor = evalResult?.spineStatus || '#10b981';
+          const elbowColor = evalResult?.elbowStatus || '#10b981';
+          const kneeColor  = evalResult?.kneeStatus  || '#10b981';
+
+          // Custom Limb Connectors
+          const torsoConn = [[11,12], [11,23], [12,24], [23,24]];
+          const armConn   = [[11,13], [13,15], [12,14], [14,16]];
+          const legConn   = [[23,25], [25,27], [24,26], [26,28]];
+
+          mp.drawConnectors(ctx, lms, torsoConn, { color: spineColor, lineWidth: 4 });
+          mp.drawConnectors(ctx, lms, armConn,   { color: elbowColor, lineWidth: 4 });
+          mp.drawConnectors(ctx, lms, legConn,   { color: kneeColor,  lineWidth: 4 });
           mp.drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 4 });
+
+          // Render Stance Depth Gauge HUD Bar
+          if (evalResult?.araimandiDepthPct !== undefined) {
+            const barW = 140, barH = 14, barX = width - barW - 20, barY = 20;
+            const fillW = Math.round((evalResult.araimandiDepthPct / 100) * barW);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+            ctx.roundRect ? ctx.roundRect(barX - 10, barY - 14, barW + 20, barH + 24, 6) : ctx.fillRect(barX - 10, barY - 14, barW + 20, barH + 24);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(`Araimandi Depth: ${evalResult.araimandiDepthPct}%`, barX, barY - 2);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillRect(barX, barY + 2, barW, barH);
+
+            ctx.fillStyle = kneeColor;
+            ctx.fillRect(barX, barY + 2, fillW, barH);
+          }
         }
 
         if (evalResult.isFullyVisible && evalResult?.feedbacks?.length && modeRef.current !== 'sequence') {
@@ -1885,6 +1967,84 @@ export default function MudraDetect() {
                             ✦ {fb}
                           </div>
                         ))}
+
+                        <button
+                          className="btn-primary"
+                          style={{ marginTop: 12, width: '100%', padding: '10px', fontSize: 12, background: C.deepMaroon }}
+                          onClick={async () => {
+                            try {
+                              const timelineData = stanceTimeline.length > 0 ? stanceTimeline : [
+                                { stance: sequenceResult.current_stance || 'Araimandi Stance', score: sequenceResult.match_score || 85 }
+                              ];
+                              const res = await axios.post(`${FLASK_URL}/api/sequence/session_complete`, {
+                                dance_name: selectedDanceRef.current || 'Alarippu',
+                                timeline: timelineData
+                              });
+                              if (res.data && res.data.status === 'success') {
+                                setSessionSummary(res.data);
+                              }
+                            } catch (e) {
+                              console.error(e);
+                            }
+                          }}>
+                          📊 Complete Routine & Export Scorecard
+                        </button>
+
+                        {sessionSummary && (
+                          <div style={{ marginTop: 16, padding: '14px', borderRadius: 10, background: C.parchment, border: `2px solid ${C.templeGold}` }}>
+                            <div style={{ fontFamily: "'Yatra One', serif", fontSize: 18, color: C.deepMaroon, marginBottom: 6 }}>
+                              🏆 Session Scorecard ({sessionSummary.grade})
+                            </div>
+                            <div style={{ fontSize: 12, fontFamily: "'Noto Serif', serif", color: C.brownMid, marginBottom: 8 }}>
+                              • Overall Alignment: <strong>{sessionSummary.overall_score}%</strong><br/>
+                              • Evaluated Frames: <strong>{sessionSummary.total_frames_evaluated}</strong>
+                            </div>
+                            <div style={{ fontSize: 11, fontFamily: "'Lora', serif", color: C.deepMaroon, fontWeight: 600, marginBottom: 4 }}>
+                              Stance Breakdown:
+                            </div>
+                            {sessionSummary.stance_breakdown && Object.entries(sessionSummary.stance_breakdown).map(([st, pct]) => (
+                              <div key={st} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontFamily: "'Lora', serif", color: C.brownMid, marginBottom: 2 }}>
+                                <span>• {st}</span>
+                                <strong>{pct}%</strong>
+                              </div>
+                            ))}
+                            <div style={{ marginTop: 8, fontSize: 11, fontStyle: 'italic', color: C.vermillion, fontFamily: "'Lora', serif", marginBottom: 10 }}>
+                              "{sessionSummary.performance_summary}"
+                            </div>
+                            <button
+                              className="btn-primary"
+                              style={{ width: '100%', padding: '8px', fontSize: 11, background: C.vermillion }}
+                              onClick={async () => {
+                                try {
+                                  const response = await fetch('/api/student/download_dance_report', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      studentId: 'Student_01',
+                                      danceName: selectedDanceRef.current || 'Alarippu',
+                                      overallScore: sessionSummary.overall_score,
+                                      grade: sessionSummary.grade,
+                                      stanceBreakdown: sessionSummary.stance_breakdown,
+                                      priorityFaults: sequenceResult?.feedback || ["Posture maintained with minimal angular deviation."],
+                                      performanceSummary: sessionSummary.performance_summary
+                                    })
+                                  });
+                                  const blob = await response.blob();
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `${selectedDanceRef.current || 'Alarippu'}_Performance_Report.pdf`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  a.remove();
+                                } catch (err) {
+                                  console.error("PDF download error:", err);
+                                }
+                              }}>
+                              📥 Download PDF Performance Scorecard
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div style={{ marginBottom: 18 }}>

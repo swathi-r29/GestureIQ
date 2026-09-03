@@ -108,6 +108,7 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
     sequence_data = []
     frame_idx = 0
     sampled_count = 0
+    prev_angles = None
 
     while True:
         ret, frame = cap.read()
@@ -123,11 +124,29 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = pose.process(rgb)
 
+        is_keyframe = False
+        keyframe_label = None
+        angular_velocity = 0.0
+
         if res.pose_landmarks:
             norm_coords = normalize_landmarks(res.pose_landmarks)
             norm_coords_list = norm_coords.tolist() if norm_coords is not None else None
             angles = extract_body_angles(norm_coords)
             raw_landmarks = [[lm.x, lm.y, lm.z, lm.visibility] for lm in res.pose_landmarks.landmark]
+
+            if angles and prev_angles:
+                delta_lk = abs(angles.get("left_knee", 180) - prev_angles.get("left_knee", 180))
+                delta_rk = abs(angles.get("right_knee", 180) - prev_angles.get("right_knee", 180))
+                delta_le = abs(angles.get("left_elbow", 180) - prev_angles.get("left_elbow", 180))
+                delta_re = abs(angles.get("right_elbow", 180) - prev_angles.get("right_elbow", 180))
+                angular_velocity = round(delta_lk + delta_rk + delta_le + delta_re, 1)
+
+                if angular_velocity <= 8.0:
+                    is_keyframe = True
+                    stance = angles.get("detected_stance", "Pose Stance")
+                    keyframe_label = f"{stance} Hold Peak"
+
+            prev_angles = angles
         else:
             norm_coords_list = None
             angles = None
@@ -138,6 +157,9 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
             "frame_idx": frame_idx,
             "timestamp_sec": timestamp_sec,
             "has_landmarks": norm_coords_list is not None,
+            "angular_velocity": angular_velocity,
+            "is_keyframe": is_keyframe,
+            "keyframe_label": keyframe_label,
             "normalized_pose": norm_coords_list,
             "angles": angles,
             "raw_landmarks": raw_landmarks
@@ -156,6 +178,8 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
     except Exception:
         pass
 
+    keyframe_count = sum(1 for item in sequence_data if item.get("is_keyframe"))
+
     # Save benchmark JSON
     out_file = os.path.join(REF_SEQ_DIR, f"{dance_name}_sequence.json")
     with open(out_file, "w") as f:
@@ -164,6 +188,7 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
             "source_url": url,
             "total_sampled_frames": len(sequence_data),
             "valid_pose_frames": sum(1 for item in sequence_data if item["has_landmarks"]),
+            "keyframe_count": keyframe_count,
             "sample_fps": sample_fps,
             "sequence": sequence_data
         }, f, indent=2)
@@ -171,6 +196,7 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
     print(f"\n✅ [4/4] SUCCESS! Benchmark reference sequence created:")
     print(f"     Target File: {out_file}")
     print(f"     Valid Pose Frames: {sum(1 for item in sequence_data if item['has_landmarks'])} / {len(sequence_data)}")
+    print(f"     Keyframe Holds Tagged: {keyframe_count}")
     return True
 
 
