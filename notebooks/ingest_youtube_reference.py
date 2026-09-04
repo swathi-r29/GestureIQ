@@ -37,11 +37,18 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
     print(f"  GestureIQ - Reference Sequence Ingestion: {dance_name}")
     print("=========================================================")
 
+    images_out_dir = os.path.join(BASE_DIR, "dataset", dance_name)
     os.makedirs(TEMP_DIR, exist_ok=True)
     os.makedirs(REF_SEQ_DIR, exist_ok=True)
     os.makedirs(RAW_VIDEO_DIR, exist_ok=True)
+    os.makedirs(images_out_dir, exist_ok=True)
 
-    # Check for local video fallback first
+    # Check for existing sequence JSON or local video fallback first
+    existing_seq_json = os.path.join(REF_SEQ_DIR, f"{dance_name}_sequence.json")
+    if os.path.exists(existing_seq_json):
+        print(f"📌 Sequence '{dance_name}' already exists in library: {existing_seq_json}")
+        return True
+
     local_video_path = os.path.join(RAW_VIDEO_DIR, f"{dance_name}.mp4")
     temp_video_path = os.path.join(TEMP_DIR, f"{dance_name}_temp.mp4")
 
@@ -53,35 +60,30 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
     elif url:
         print(f"[1/4] Downloading video from {url}...")
         ydl_opts = {
-            'format': 'best[ext=mp4]/bestvideo+bestaudio/best',
+            'format': '134/160/133/269/bestvideo[height<=360]/best[height<=360]/best',
             'outtmpl': temp_video_path,
             'nocheckcertificate': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['mweb', 'android']
-                }
-            },
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'quiet': False
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            target_video_file = temp_video_path
+            if os.path.exists(temp_video_path):
+                target_video_file = temp_video_path
         except Exception as e:
             print(f"⚠️ YouTube download attempt 1 error: {e}")
             try:
                 fallback_opts = {
-                    'format': 'b[ext=mp4]/b',
+                    'format': 'best',
                     'outtmpl': temp_video_path,
                     'nocheckcertificate': True,
-                    'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                    'extractor_args': {'youtube': {'player_client': ['ios', 'mweb']}}
+                    'quiet': False
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                     ydl.download([url])
-                target_video_file = temp_video_path
+                if os.path.exists(temp_video_path):
+                    target_video_file = temp_video_path
             except Exception as e2:
                 print(f"❌ YouTube download failed: {e2}")
 
@@ -120,9 +122,17 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
             continue
 
         sampled_count += 1
+        if sampled_count > 180:  # Cap at 180 sampled frames (~1 min sequence) for lightning-fast 12-second execution (prevents ngrok 503 timeouts)
+            print(f"  📌 Reached max 180 sampled frames cap (reference sequence ready). Finalizing sequence...")
+            break
         timestamp_sec = round(frame_idx / video_fps, 2)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        res = pose.process(rgb)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res = pose.process(rgb_frame)
+
+        # Save extracted frame image JPEG
+        frame_filename = f"frame_{sampled_count:04d}.jpg"
+        frame_save_path = os.path.join(images_out_dir, frame_filename)
+        cv2.imwrite(frame_save_path, frame)
 
         is_keyframe = False
         keyframe_label = None
@@ -156,6 +166,7 @@ def ingest_youtube_dance(url, dance_name, sample_fps=5):
             "step_index": sampled_count - 1,
             "frame_idx": frame_idx,
             "timestamp_sec": timestamp_sec,
+            "frame_file": frame_filename,
             "has_landmarks": norm_coords_list is not None,
             "angular_velocity": angular_velocity,
             "is_keyframe": is_keyframe,

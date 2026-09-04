@@ -66,7 +66,9 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       allowedHosts: true, 
       cors: true,
-      hmr: true,
+      hmr: {
+        clientPort: 443
+      },
       headers: {
         'ngrok-skip-browser-warning': 'true',
         'Content-Security-Policy': "frame-src * 'self' blob: data:;",

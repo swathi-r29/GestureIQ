@@ -3069,6 +3069,7 @@ if not os.path.exists(REF_SEQ_DIR_FLASK):
     REF_SEQ_DIR_FLASK = os.path.abspath(os.path.join(BASE_DIR, "../dataset/reference_sequences"))
 
 BENCHMARKS_CACHE = {}
+BENCHMARKS_MTIME = {}
 LAST_SEQUENCE_ANGLES = {}
 
 def load_cached_benchmarks():
@@ -3080,41 +3081,178 @@ def load_cached_benchmarks():
         if fname.endswith("_sequence.json"):
             dance_key = fname.replace("_sequence.json", "")
             try:
-                with open(os.path.join(REF_SEQ_DIR_FLASK, fname), 'r') as fp:
-                    data = json.load(fp)
-                    BENCHMARKS_CACHE[dance_key] = data.get("sequence", [])
-                    print(f"[BENCHMARK] Loaded {dance_key} ({len(BENCHMARKS_CACHE[dance_key])} frames)")
+                fpath = os.path.join(REF_SEQ_DIR_FLASK, fname)
+                mtime = os.path.getmtime(fpath)
+                cached_mtime = BENCHMARKS_MTIME.get(dance_key)
+                if cached_mtime != mtime or dance_key not in BENCHMARKS_CACHE:
+                    with open(fpath, 'r') as fp:
+                        data = json.load(fp)
+                        BENCHMARKS_CACHE[dance_key] = data.get("sequence", [])
+                        BENCHMARKS_MTIME[dance_key] = mtime
+                        print(f"[BENCHMARK] Loaded {dance_key} ({len(BENCHMARKS_CACHE[dance_key])} frames)")
             except Exception as ex:
                 print(f"[BENCHMARK ERROR] Could not load {fname}: {ex}")
 
 load_cached_benchmarks()
 
 
+@app.route('/api/sequence/list', methods=['GET'])
+def list_sequences():
+    """Returns a list of all available ingested reference dance items for frontend dropdown selection."""
+    try:
+        load_cached_benchmarks()
+        import json
+        sequences = []
+        if os.path.exists(REF_SEQ_DIR_FLASK):
+            for fname in os.listdir(REF_SEQ_DIR_FLASK):
+                if fname.endswith("_sequence.json"):
+                    dance_name = fname.replace("_sequence.json", "")
+                    fpath = os.path.join(REF_SEQ_DIR_FLASK, fname)
+                    total_frames = 0
+                    keyframe_count = 0
+                    try:
+                        with open(fpath, "r") as fp:
+                            d = json.load(fp)
+                            total_frames = d.get("total_sampled_frames", len(d.get("sequence", [])))
+                            keyframe_count = d.get("keyframe_count", sum(1 for item in d.get("sequence", []) if item.get("is_keyframe")))
+                    except Exception:
+                        pass
+                    sequences.append({
+                        "dance_name": dance_name,
+                        "display_name": dance_name.replace("_", " "),
+                        "total_frames": total_frames,
+                        "keyframe_count": keyframe_count
+                    })
+        return jsonify({"status": "success", "sequences": sorted(sequences, key=lambda x: x['dance_name'])}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+INGESTION_STATUS = {}
+
+def _bg_ingest_worker(youtube_url, safe_dance_name, sample_fps):
+    """Background worker thread for YouTube reference ingestion."""
+    try:
+        from notebooks.ingest_youtube_reference import ingest_youtube_dance
+        INGESTION_STATUS[safe_dance_name] = {"status": "processing", "message": f"Processing video for '{safe_dance_name}'..."}
+        res = ingest_youtube_dance(url=youtube_url, dance_name=safe_dance_name, sample_fps=sample_fps)
+
+        if not res:
+            INGESTION_STATUS[safe_dance_name] = {
+                "status": "error",
+                "message": f"Could not process video for '{safe_dance_name}'. The YouTube URL may be private, region-restricted, or unavailable."
+            }
+            return
+
+        ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{safe_dance_name}_sequence.json")
+        total_sampled = 0
+        valid_poses = 0
+        keyframe_cnt = 0
+
+        if os.path.exists(ref_file):
+            import json
+            with open(ref_file, 'r') as fp:
+                data = json.load(fp)
+                BENCHMARKS_CACHE[safe_dance_name] = data.get("sequence", [])
+                BENCHMARKS_MTIME[safe_dance_name] = os.path.getmtime(ref_file)
+                total_sampled = data.get("total_sampled_frames", len(BENCHMARKS_CACHE[safe_dance_name]))
+                valid_poses = data.get("valid_pose_frames", sum(1 for item in BENCHMARKS_CACHE[safe_dance_name] if item.get("has_landmarks")))
+                keyframe_cnt = data.get("keyframe_count", sum(1 for item in BENCHMARKS_CACHE[safe_dance_name] if item.get("is_keyframe")))
+
+        INGESTION_STATUS[safe_dance_name] = {
+            "status": "success",
+            "message": f"Successfully ingested '{safe_dance_name}'!",
+            "dance_name": safe_dance_name,
+            "total_sampled_frames": total_sampled,
+            "valid_pose_frames": valid_poses,
+            "keyframe_count": keyframe_cnt
+        }
+    except Exception as e:
+        print(f"[BG INGEST ERROR] {e}")
+        INGESTION_STATUS[safe_dance_name] = {"status": "error", "message": str(e)}
+
+@app.route('/api/sequence/ingest_youtube', methods=['POST'])
+def ingest_youtube_sequence_endpoint():
+    """
+    Triggers 3D pose extraction asynchronously in a background thread to avoid ngrok timeouts.
+    """
+    try:
+        import threading
+        body = request.get_json(force=True) or {}
+        youtube_url = body.get('youtube_url', '').strip()
+        dance_name = body.get('dance_name', '').strip()
+        sample_fps = int(body.get('sample_fps', 5))
+
+        if not dance_name:
+            return jsonify({"status": "error", "message": "Dance Name is required"}), 400
+
+        safe_dance_name = "".join(c for c in dance_name if c.isalnum() or c in ('_', '-')).strip()
+
+        if INGESTION_STATUS.get(safe_dance_name, {}).get("status") == "processing":
+            return jsonify({"status": "processing", "message": f"Ingestion already in progress for '{safe_dance_name}'..."}), 202
+
+        print(f"[INGEST API] Spawning background thread for '{safe_dance_name}'...")
+        thread = threading.Thread(target=_bg_ingest_worker, args=(youtube_url, safe_dance_name, sample_fps), daemon=True)
+        thread.start()
+
+        return jsonify({
+            "status": "processing",
+            "message": f"Background ingestion started for '{safe_dance_name}'.",
+            "dance_name": safe_dance_name
+        }), 202
+
+    except Exception as e:
+        print(f"[INGEST API ERROR] {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/sequence/status/<dance_name>', methods=['GET'])
+def get_sequence_ingestion_status(dance_name):
+    """Returns the current background ingestion status for a given dance sequence."""
+    safe_name = "".join(c for c in dance_name if c.isalnum() or c in ('_', '-')).strip()
+    status_info = INGESTION_STATUS.get(safe_name)
+
+    if not status_info:
+        ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{safe_name}_sequence.json")
+        if os.path.exists(ref_file):
+            return jsonify({"status": "success", "message": f"Sequence '{safe_name}' exists."}), 200
+        return jsonify({"status": "not_found", "message": "No ingestion task found."}), 404
+
+    return jsonify(status_info), 200
+
 @app.route('/api/sequence/evaluate_image', methods=['POST'])
 def evaluate_sequence_image():
     """Evaluates an uploaded static frame against a selected dance benchmark item."""
     try:
         body = request.get_json(force=True) or {}
-        dance_name = body.get('dance_name', 'Alarippu')
+        raw_dance_name = body.get('dance_name', 'auto')
         landmarks = body.get('landmarks', [])
 
-        ref_sequence = BENCHMARKS_CACHE.get(dance_name)
-        if not ref_sequence:
+        # Robust case-insensitive key resolver for spaces vs underscores
+        resolved_key = None
+        if raw_dance_name and raw_dance_name != 'auto' and raw_dance_name != 'Alarippu_Auto':
+            target_clean = raw_dance_name.strip().replace(" ", "_").lower()
+            for k in BENCHMARKS_CACHE.keys():
+                if k.lower() == target_clean or k.replace("_", " ").lower() == target_clean or target_clean in k.lower():
+                    resolved_key = k
+                    break
+
+        is_auto_detect = (resolved_key is None)
+        dance_name = resolved_key if resolved_key else 'auto'
+
+        ref_sequence = BENCHMARKS_CACHE.get(dance_name) if resolved_key else None
+        if resolved_key and (not ref_sequence or not any(item.get("angles") for item in ref_sequence if isinstance(item, dict))):
             ref_file = os.path.join(REF_SEQ_DIR_FLASK, f"{dance_name}_sequence.json")
             if os.path.exists(ref_file):
                 with open(ref_file, 'r') as f:
                     ref_data = json.load(f)
-                    ref_sequence = ref_data.get("sequence", [])
-                    BENCHMARKS_CACHE[dance_name] = ref_sequence
-
-        if not ref_sequence:
-            return jsonify({"detected": False, "error": f"Sequence file for {dance_name} not found."}), 404
+                    BENCHMARKS_CACHE[dance_name] = ref_data.get("sequence", [])
 
         if not landmarks or len(landmarks) < 27:
             return jsonify({"detected": False, "error": "No full-body posture detected in image."})
 
-        # Check visibility guard
-        is_visible, missing_parts = check_full_body_visibility(landmarks)
+        # Check visibility guard with lenient threshold for static photo uploads
+        is_visible, missing_parts = check_full_body_visibility(landmarks, min_vis=0.15)
         if not is_visible:
             return jsonify({
                 "detected": False,
@@ -3128,60 +3266,148 @@ def evaluate_sequence_image():
         if not student_angles:
             return jsonify({"detected": False, "error": "Unable to compute 3D body angles."})
 
-        best_score = -1.0
-        best_ref_frame = None
-        best_ref_angles = None
-        best_ref_item = None
+        is_auto_detect = (dance_name == 'auto' or not dance_name or dance_name == 'Alarippu_Auto')
 
-        for item in ref_sequence:
-            ref_angles = item.get("angles")
-            if not ref_angles:
+        overall_best_score = -1.0
+        overall_best_dance = dance_name if not is_auto_detect else 'Alarippu'
+        overall_best_frame = None
+        overall_best_angles = None
+
+        sequences_to_check = []
+        if not is_auto_detect and dance_name in BENCHMARKS_CACHE and any(item.get("angles") for item in BENCHMARKS_CACHE[dance_name]):
+            sequences_to_check.append((dance_name, [item for item in BENCHMARKS_CACHE[dance_name] if item.get("angles")]))
+        else:
+            for d_key, seq_frames in BENCHMARKS_CACHE.items():
+                valid_f = [item for item in seq_frames if item.get("angles")]
+                if valid_f:
+                    sequences_to_check.append((d_key, valid_f))
+
+        # Student's rich angle vector
+        s_lk      = student_angles.get("left_knee", 180)
+        s_rk      = student_angles.get("right_knee", 180)
+        s_le      = student_angles.get("left_elbow", 180)
+        s_re      = student_angles.get("right_elbow", 180)
+        s_tilt    = student_angles.get("torso_tilt", 0)
+        s_ws      = student_angles.get("wrist_span", 0)
+        s_ank     = student_angles.get("ankle_distance", 0)
+        s_led     = student_angles.get("left_elbow_drop", 0)
+        s_red     = student_angles.get("right_elbow_drop", 0)
+        s_ft      = student_angles.get("foot_turnout", 90)
+        s_sh_tilt = student_angles.get("shoulder_tilt", 0)
+
+        def _weighted_err(r_lk, r_rk, r_le, r_re, r_tilt, r_ws, r_ank, r_led, r_red, r_ft, r_sh_tilt):
+            return (
+                abs(r_lk - s_lk)            * 0.15 +
+                abs(r_rk - s_rk)            * 0.15 +
+                abs(r_le - s_le)            * 0.10 +
+                abs(r_re - s_re)            * 0.10 +
+                abs(r_ws - s_ws)  * 100     * 0.15 +
+                abs(r_ank - s_ank) * 80     * 0.12 +
+                abs(r_led - s_led) * 80     * 0.05 +
+                abs(r_red - s_red) * 80     * 0.05 +
+                abs(r_tilt - s_tilt)        * 0.07 +
+                abs(r_ft - s_ft)   * 0.5   * 0.04 +
+                abs(r_sh_tilt - s_sh_tilt) * 80 * 0.02
+            )
+
+        for display_key, seq_frames in sequences_to_check:
+            # --- Build per-sequence angle arrays ---
+            lk_v=[]; rk_v=[]; le_v=[]; re_v=[]; tilt_v=[]
+            ws_v=[]; ank_v=[]; led_v=[]; red_v=[]; ft_v=[]; sh_v=[]
+            best_frame_for_seq = None
+            best_err_for_seq = float('inf')
+            best_ref_for_seq = None
+
+            for item in seq_frames:
+                ra = item.get("angles")
+                if not ra:
+                    continue
+                r_lk  = ra.get("left_knee", 180);   lk_v.append(r_lk)
+                r_rk  = ra.get("right_knee", 180);  rk_v.append(r_rk)
+                r_le  = ra.get("left_elbow", 180);  le_v.append(r_le)
+                r_re  = ra.get("right_elbow", 180); re_v.append(r_re)
+                r_tilt= ra.get("torso_tilt", 0);    tilt_v.append(r_tilt)
+                r_ws  = ra.get("wrist_span", 0);    ws_v.append(r_ws)
+                r_ank = ra.get("ankle_distance", 0);ank_v.append(r_ank)
+                r_led = ra.get("left_elbow_drop", 0);led_v.append(r_led)
+                r_red = ra.get("right_elbow_drop", 0);red_v.append(r_red)
+                r_ft  = ra.get("foot_turnout", 90); ft_v.append(r_ft)
+                r_sh  = ra.get("shoulder_tilt", 0); sh_v.append(r_sh)
+
+                # Track best individual frame for feedback (best match to student)
+                frame_err = _weighted_err(r_lk, r_rk, r_le, r_re, r_tilt, r_ws, r_ank, r_led, r_red, r_ft, r_sh)
+                if item.get("is_keyframe"):
+                    frame_err = max(0.0, frame_err - 3.5)  # Keyframe hold bonus
+
+                if frame_err < best_err_for_seq:
+                    best_err_for_seq = frame_err
+                    best_frame_for_seq = item.get("frame_file") or f"Step #{item.get('step_index', 0)} ({item.get('timestamp_sec', 0.0)}s)"
+                    best_ref_for_seq = ra
+
+            if not lk_v:
                 continue
 
-            r_lk = ref_angles.get("left_knee", 180)
-            r_rk = ref_angles.get("right_knee", 180)
-            r_le = ref_angles.get("left_elbow", 180)
-            r_re = ref_angles.get("right_elbow", 180)
-            r_tilt = ref_angles.get("torso_tilt", 0)
+            n = len(lk_v)
 
-            lk_diff = abs(r_lk - student_angles["left_knee"])
-            rk_diff = abs(r_rk - student_angles["right_knee"])
-            le_diff = abs(r_le - student_angles["left_elbow"])
-            re_diff = abs(r_re - student_angles["right_elbow"])
-            tilt_diff = abs(r_tilt - student_angles["torso_tilt"])
+            # --- Score against BEST KEYFRAME MATCH (Min Error) ---
+            seq_score = max(0.0, round(100.0 - best_err_for_seq, 1))
 
-            avg_err = (lk_diff * 0.30 + rk_diff * 0.30 + le_diff * 0.15 + re_diff * 0.15 + tilt_diff * 0.10)
-            match_score = max(0.0, round(100.0 - avg_err, 1))
+            if seq_score > overall_best_score:
+                overall_best_score = seq_score
+                overall_best_dance = display_key
+                overall_best_frame = best_frame_for_seq or "Keyframe 1"
+                overall_best_angles = best_ref_for_seq
 
-            if match_score > best_score:
-                best_score = match_score
-                best_ref_frame = item.get("frame_file") or f"Step #{item.get('step_index', 0)} ({item.get('timestamp_sec', 0.0)}s)"
-                best_ref_angles = ref_angles
-                best_ref_item = item
+        # Always return the highest scoring sequence match
+        matched_dance_name = overall_best_dance
+
+        best_score = max(0.0, overall_best_score)
+        best_ref_frame = overall_best_frame or "Keyframe 1"
+        best_ref_angles = overall_best_angles
+
+        detected_stance = student_angles.get("detected_stance", "Araimandi Stance")
 
         feedback = []
         if best_ref_angles:
-            lk_diff = abs(best_ref_angles.get("left_knee", 180) - student_angles["left_knee"])
-            rk_diff = abs(best_ref_angles.get("right_knee", 180) - student_angles["right_knee"])
-            le_diff = abs(best_ref_angles.get("left_elbow", 180) - student_angles["left_elbow"])
-            re_diff = abs(best_ref_angles.get("right_elbow", 180) - student_angles["right_elbow"])
-            tilt_diff = abs(best_ref_angles.get("torso_tilt", 0) - student_angles["torso_tilt"])
+            lk_diff = abs(best_ref_angles.get("left_knee", 180) - s_lk)
+            rk_diff = abs(best_ref_angles.get("right_knee", 180) - s_rk)
+            le_diff = abs(best_ref_angles.get("left_elbow", 180) - s_le)
+            re_diff = abs(best_ref_angles.get("right_elbow", 180) - s_re)
+            tilt_diff = abs(best_ref_angles.get("torso_tilt", 0) - s_tilt)
+            ws_diff  = abs(best_ref_angles.get("wrist_span", 0) - s_ws) * 100
+            ank_diff = abs(best_ref_angles.get("ankle_distance", 0) - s_ank) * 80
 
-            detected_stance = student_angles.get("detected_stance", "Araimandi Stance")
             if max(lk_diff, rk_diff) > 18:
                 feedback.append(f"Knee angle off by {int(max(lk_diff, rk_diff))}° — adjust {detected_stance} depth")
             if max(le_diff, re_diff) > 20:
-                feedback.append("Level both arms in Natyarambham line")
+                feedback.append("Adjust arm bend — elbow angle mismatch with reference")
+            if ws_diff > 18:
+                ref_ws = best_ref_angles.get("wrist_span", 0)
+                if s_ws < ref_ws:
+                    feedback.append("Spread arms wider — wrist span too narrow for this posture")
+                else:
+                    feedback.append("Bring arms closer — wrist span too wide for this posture")
+            if ank_diff > 14:
+                ref_ank = best_ref_angles.get("ankle_distance", 0)
+                if s_ank < ref_ank:
+                    feedback.append("Widen your stance — feet closer than reference")
+                else:
+                    feedback.append("Narrow your stance — feet wider than reference")
             if tilt_diff > 10:
-                feedback.append("Straighten spine vertical center line")
+                feedback.append("Straighten spine — torso tilt off from reference")
 
         grade = "A+" if best_score >= 90 else ("A" if best_score >= 80 else ("B" if best_score >= 70 else "Needs Practice"))
 
+        matched_dance_display = matched_dance_name.replace('_', ' ')
+        clean_stance = detected_stance.replace(" Stance", "").strip()
+        matched_keyframe_label = f"{matched_dance_display} in {clean_stance}"
+
         return jsonify({
             "detected": True,
-            "dance_name": dance_name,
-            "current_stance": student_angles.get("detected_stance", "Unknown"),
+            "dance_name": matched_dance_name,
+            "current_stance": detected_stance,
             "matched_frame": best_ref_frame,
+            "matched_keyframe_label": matched_keyframe_label,
             "match_score": best_score,
             "grade": grade,
             "student_angles": student_angles,
@@ -3249,17 +3475,22 @@ def evaluate_sequence_frame():
                     pass
 
         if not ref_sequence:
+            from utils.pose_feature_engineering import classify_bharatanatyam_adavu
             norm = normalize_landmarks(landmarks)
             rotated = apply_perspective_normalization(norm)
             angles = extract_body_angles(rotated) or {}
             angles = smooth_joint_angles(angles, client_time)
             posture_eval = evaluate_body_posture_normalized(landmarks)
+            adavu_name, adavu_conf = classify_bharatanatyam_adavu(rotated, angles)
+
             return jsonify({
                 "status": "fallback_standalone",
                 "current_stance": angles.get("detected_stance", "Unknown"),
+                "detected_move": adavu_name,
+                "move_confidence": adavu_conf,
                 "match_score": posture_eval.get("posture_score", 70.0),
                 "grade": "B",
-                "matched_step": "Live Posture Only (No Reference JSON)",
+                "matched_step": f"Freestyle Move: {adavu_name}",
                 "angles": angles,
                 "feedback": posture_eval.get("corrections", [])
             }), 200

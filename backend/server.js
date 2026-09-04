@@ -49,6 +49,33 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Forward AI / Sequence API endpoints to Flask server (port 5001)
+app.use('/api/sequence', (req, res) => {
+    const http = require('http');
+    const options = {
+        hostname: '127.0.0.1',
+        port: 5001,
+        path: `/api/sequence${req.url}`,
+        method: req.method,
+        headers: { ...req.headers, host: '127.0.0.1:5001' }
+    };
+    const proxyReq = http.request(options, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res, { end: true });
+    });
+    proxyReq.on('error', (err) => {
+        console.error('[Node -> Flask Proxy Error]:', err.message);
+        res.status(500).json({ status: 'error', message: 'Flask AI backend unreachable' });
+    });
+    if (req.body && Object.keys(req.body).length > 0) {
+        const bodyData = JSON.stringify(req.body);
+        proxyReq.setHeader('Content-Type', 'application/json');
+        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+        proxyReq.write(bodyData);
+    }
+    proxyReq.end();
+});
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/user', require('./routes/user'));

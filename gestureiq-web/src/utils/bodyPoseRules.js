@@ -27,11 +27,14 @@ function isLandmarkReal(lm) {
 }
 
 /**
- * Checks that both hips AND both knees are detected — minimum for any leg stance.
+ * Checks that hips, knees, AND ankles are detected — mandatory for any leg stance classification.
  */
 function hasLowerBody(landmarks) {
-  return (isLandmarkReal(landmarks[23]) || isLandmarkReal(landmarks[24])) ||
-         (isLandmarkReal(landmarks[11]) && isLandmarkReal(landmarks[12]));
+  if (!landmarks || landmarks.length < 33) return false;
+  const hasHips = isLandmarkReal(landmarks[23]) || isLandmarkReal(landmarks[24]);
+  const hasKnees = isLandmarkReal(landmarks[25]) || isLandmarkReal(landmarks[26]);
+  const hasAnkles = isLandmarkReal(landmarks[27]) || isLandmarkReal(landmarks[28]);
+  return hasHips && hasKnees && hasAnkles;
 }
 
 /**
@@ -93,14 +96,20 @@ export function checkMuzhumandi(landmarks) {
   const pHipR = isLandmarkReal(landmarks[24]) ? landmarks[24] : { x: 0.58, y: 0.55, z: 0 };
   const pKneeL = isLandmarkReal(landmarks[25]) ? landmarks[25] : { x: pHipL.x - 0.08, y: pHipL.y + 0.18, z: pHipL.z ?? 0 };
   const pKneeR = isLandmarkReal(landmarks[26]) ? landmarks[26] : { x: pHipR.x + 0.08, y: pHipR.y + 0.18, z: pHipR.z ?? 0 };
-  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x, y: pKneeL.y + 0.1, z: pKneeL.z ?? 0 };
-  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x, y: pKneeR.y + 0.1, z: pKneeR.z ?? 0 };
+  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x, y: pKneeL.y + 0.22, z: pKneeL.z ?? 0 };
+  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x, y: pKneeR.y + 0.22, z: pKneeR.z ?? 0 };
 
   const leftKneeAngle = calculate3DAngle(pHipL, pKneeL, pAnkleL);
   const rightKneeAngle = calculate3DAngle(pHipR, pKneeR, pAnkleR);
   const angle = Math.round((leftKneeAngle + rightKneeAngle) / 2);
 
-  const isPass = angle <= 85;
+  // Height check: hips must drop low relative to ankles in full squat (< 0.28 normalized distance)
+  const hipAnkleDistL = Math.abs(pAnkleL.y - pHipL.y);
+  const hipAnkleDistR = Math.abs(pAnkleR.y - pHipR.y);
+  const avgHipAnkleDist = (hipAnkleDistL + hipAnkleDistR) / 2;
+
+  // Muzhumandi requires deep knee bend AND low hip height to ground
+  const isPass = angle <= 90 && avgHipAnkleDist < 0.28;
   const feedback = isPass ? "Perfect Muzhumandi full squat!" : "Sit lower on your toes into full Muzhumandi.";
   const score = isPass ? 95 : Math.max(40, Math.round(100 - (angle - 35)));
 
@@ -220,6 +229,23 @@ export function checkNatyarambham(landmarks) {
 }
 
 /**
+ * Tillana Overhead Pose Evaluation — checks if wrists are elevated above shoulders/head
+ */
+export function checkTillanaPose(landmarks) {
+  if (!landmarks || landmarks.length < 33) return { isPass: false };
+  const pShoulderL = landmarks[11], pShoulderR = landmarks[12];
+  const pWristL = landmarks[15], pWristR = landmarks[16];
+
+  if (!pShoulderL || !pShoulderR || !pWristL || !pWristR) return { isPass: false };
+
+  // Overhead check: both wrists elevated well above shoulder level (y is smaller when higher up)
+  const isOverhead = (pWristL.y < pShoulderL.y - 0.06) && (pWristR.y < pShoulderR.y - 0.06);
+  const isHandsNear = Math.abs(pWristL.x - pWristR.x) < 0.45;
+
+  return { isPass: isOverhead && isHandsNear, isOverhead };
+}
+
+/**
  * Master Classifier — Classifies and evaluates full body pose.
  * Requires actual lower body detection; never invents fake scores.
  */
@@ -239,6 +265,7 @@ export function evaluateFullBodyPose(landmarks) {
   const nattadavu = checkNattadavu(landmarks);
   const spine = checkSpineAlignment(landmarks);
   const arms = checkNatyarambham(landmarks);
+  const tillana = checkTillanaPose(landmarks);
 
   // If lower body not visible at all — cannot determine any stance
   if (!araimandi.isVisible) {
@@ -246,7 +273,7 @@ export function evaluateFullBodyPose(landmarks) {
       stanceName: "Step Back — Full Body Needed",
       totalScore: 0, isPass: false, isFullyVisible: false,
       feedbacks: ["Step back 6–8 ft so your hips and knees are fully visible."],
-      details: { araimandi, muzhumandi, samapada, nattadavu, spine, arms }
+      details: { araimandi, muzhumandi, samapada, nattadavu, spine, arms, tillana }
     };
   }
 
@@ -254,7 +281,10 @@ export function evaluateFullBodyPose(landmarks) {
   let stanceName = "Araimandi Stance";
   let activeLeg = araimandi;
 
-  if (muzhumandi.isPass) {
+  if (tillana.isPass) {
+    stanceName = "Tillana Paras Stance";
+    activeLeg = muzhumandi.isPass ? muzhumandi : (araimandi.isPass ? araimandi : samapada);
+  } else if (muzhumandi.isPass) {
     stanceName = "Muzhumandi Stance";
     activeLeg = muzhumandi;
   } else if (nattadavu.isPass) {

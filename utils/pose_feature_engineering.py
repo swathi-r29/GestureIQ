@@ -5,7 +5,62 @@ Centralized 3D Pose Feature Engineering, Normalization & Multi-Stance Classifier
 
 import math
 import numpy as np
-def check_full_body_visibility(landmarks, min_vis=0.45):
+def _to_xyz_array(landmarks):
+    """
+    Convert a landmark collection to a float64 NumPy array of shape (N, 3).
+    Always returns exactly 3 columns so np.cross() never sees a 4-element vector.
+    """
+    if landmarks is None:
+        return np.zeros((33, 3), dtype=np.float64)
+
+    if isinstance(landmarks, np.ndarray):
+        arr = landmarks.astype(np.float64)
+        if arr.ndim == 2 and arr.shape[1] >= 3:
+            return arr[:, :3]
+        if arr.ndim == 1 and arr.shape[0] >= 3:
+            return arr[:3].reshape(1, 3)
+        return np.zeros((33, 3), dtype=np.float64)
+
+    if hasattr(landmarks, 'landmark'):
+        lms = landmarks.landmark
+    else:
+        lms = landmarks
+
+    rows = []
+    for lm in lms:
+        if isinstance(lm, dict):
+            rows.append([float(lm.get('x', 0)),
+                         float(lm.get('y', 0)),
+                         float(lm.get('z', 0))])
+        elif hasattr(lm, 'x'):
+            rows.append([float(lm.x), float(lm.y), float(lm.z)])
+        elif isinstance(lm, (list, tuple)) and len(lm) >= 3:
+            rows.append([float(lm[0]), float(lm[1]), float(lm[2])])
+        else:
+            rows.append([0.0, 0.0, 0.0])
+
+    return np.array(rows, dtype=np.float64)
+
+
+def _get_visibility(landmark):
+    """Read visibility value from a single landmark regardless of data structure."""
+    if isinstance(landmark, dict):
+        return float(landmark.get('visibility', 1.0))
+    if hasattr(landmark, 'visibility'):
+        return float(landmark.visibility)
+    if isinstance(landmark, (list, tuple)):
+        if len(landmark) >= 4:
+            return float(landmark[3])
+        if len(landmark) == 3:
+            return 1.0
+    if isinstance(landmark, np.ndarray):
+        if landmark.shape[0] >= 4:
+            return float(landmark[3])
+        return 1.0
+    return 1.0
+
+
+def check_full_body_visibility(landmarks, min_vis=0.15):
     """
     Validates visibility and geometric sanity of lower body keypoints.
     """
@@ -22,13 +77,6 @@ def check_full_body_visibility(landmarks, min_vis=0.45):
     if len(lms) < 27:
         return False, ["Lower body landmarks missing"]
 
-    def get_vis(idx):
-        if hasattr(lms[idx], 'visibility'):
-            return lms[idx].visibility
-        if isinstance(lms[idx], dict):
-            return lms[idx].get('visibility', 1.0)
-        return 1.0
-
     def get_y(idx):
         if hasattr(lms[idx], 'y'):
             return lms[idx].y
@@ -37,6 +85,17 @@ def check_full_body_visibility(landmarks, min_vis=0.45):
         if isinstance(lms[idx], (list, tuple)) and len(lms[idx]) > 1:
             return lms[idx][1]
         return 0.0
+
+    def get_vis(idx):
+        if idx < len(lms):
+            v = _get_visibility(lms[idx])
+            y_val = get_y(idx)
+            # If coordinates are validly within normalized image bounds (-0.15 to 1.15),
+            # treat keypoint as present even if MediaPipe static model gave a low visibility float
+            if -0.15 <= y_val <= 1.15:
+                return max(v, 0.5)
+            return v
+        return 1.0
 
     missing = []
     if get_vis(11) < min_vis or get_vis(12) < min_vis:
@@ -51,10 +110,9 @@ def check_full_body_visibility(landmarks, min_vis=0.45):
     hip_y = (get_y(23) + get_y(24)) / 2.0
     knee_y = (get_y(25) + get_y(26)) / 2.0
 
-    # If hips or knees are higher than or level with the nose, it is hallucinated onto the face
-    if hip_y <= nose_y + 0.10:
+    if hip_y <= nose_y + 0.03:
         missing.append("Hips hallucinated on upper body/face")
-    if knee_y <= hip_y + 0.05:
+    if knee_y <= hip_y + 0.02:
         missing.append("Knees collapsed on torso/face")
 
     return len(missing) == 0, missing
@@ -65,32 +123,16 @@ def normalize_landmarks(landmarks):
     Normalizes 33 MediaPipe pose landmarks relative to hip center, torso scale,
     and projects onto the dancer's anatomical coronal plane (Perspective Invariance).
     """
-    if not landmarks:
-        return None
-
-    if hasattr(landmarks, 'landmark'):
-        coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-    elif isinstance(landmarks, list):
-        if len(landmarks) == 0:
-            return None
-        if isinstance(landmarks[0], dict):
-            coords = np.array([[lm.get('x', 0.0), lm.get('y', 0.0), lm.get('z', 0.0)] for lm in landmarks])
-        else:
-            coords = np.array(landmarks)
-    elif isinstance(landmarks, np.ndarray):
-        coords = landmarks
-    else:
-        return None
-
-    if len(coords) < 25:
+    pts = _to_xyz_array(landmarks)
+    if pts is None or len(pts) < 25:
         return None
 
     # 1. Hips center origin (joints 23 & 24)
-    hip_center = (coords[23] + coords[24]) / 2.0
-    centered = coords - hip_center
+    hip_center = (pts[23] + pts[24]) / 2.0
+    centered = pts - hip_center
 
     # 2. Torso scale normalization
-    shoulder_center = (coords[11] + coords[12]) / 2.0
+    shoulder_center = (pts[11] + pts[12]) / 2.0
     torso_vec = shoulder_center - hip_center
     torso_length = float(np.linalg.norm(torso_vec))
 
@@ -168,6 +210,49 @@ def classify_bharatanatyam_stance(angles, norm_coords):
         return "Prenkhana Stance", 0.85
 
     return "Transition / Movement", 0.50
+
+
+def classify_bharatanatyam_adavu(norm_coords, angles):
+    """
+    Classifies real-time dynamic Bharatanatyam Adavu move category for Freestyle Mode.
+    Categories:
+      - Tatta Adavu (Rhythmic Foot Strike in Araimandi)
+      - Natta Adavu (Heel Touch Leg Extension)
+      - Mandi Adavu (Full Squat Movement & Knee Strike)
+      - Kuditta Nattadavu (Jump Elevation & Landing Strike)
+      - Basic Stance / Transition
+    """
+    if norm_coords is None or not angles:
+        return "Basic Stance / Transition", 0.50
+
+    nc = np.array(norm_coords)
+    stance = angles.get("detected_stance", "Unknown")
+    lk = angles.get("left_knee", 180.0)
+    rk = angles.get("right_knee", 180.0)
+    le = angles.get("left_elbow", 180.0)
+    re = angles.get("right_elbow", 180.0)
+
+    ankle_dist = float(np.linalg.norm(nc[27] - nc[28]))
+    ankle_y_diff = abs(nc[27][1] - nc[28][1])
+
+    # 1. Mandi Adavu (Full Squat Movement)
+    if stance == "Muzhumandi Stance" or (lk <= 95 and rk <= 95):
+        return "Mandi Adavu (Full Squat Movement)", 0.90
+
+    # 2. Natta Adavu / Prenkhana (Heel Extension to Side)
+    if stance == "Prenkhana Stance" or ankle_dist > 0.85 or (abs(lk - rk) > 30 and (le < 155 or re < 155)):
+        return "Natta Adavu (Heel Stretch Extension)", 0.88
+
+    # 3. Tatta Adavu (Rhythmic Foot Strike in Araimandi)
+    if stance == "Araimandi Stance" and (ankle_y_diff > 0.04 or (110 <= lk <= 140 and 110 <= rk <= 140)):
+        return "Tatta Adavu (Rhythmic Foot Strike)", 0.92
+
+    # 4. Kuditta Nattadavu / Jump Stance
+    hip_height = float((nc[23][1] + nc[24][1]) / 2.0)
+    if hip_height < -0.15: # Elevated hip origin relative to normalized torso
+        return "Kuditta Nattadavu (Jump & Strike)", 0.85
+
+    return "Basic Stance / Transition", 0.60
 
 
 def extract_body_angles(norm_coords):
@@ -546,3 +631,109 @@ def smooth_joint_angles(raw_angles_dict, timestamp_sec):
     for i, k in enumerate(keys):
         raw_angles_dict[k] = round(float(smoothed_vec[i]), 1)
     return raw_angles_dict
+
+
+def extract_pose_features(landmarks):
+    """
+    Extract a compact, normalised feature vector from 33 MediaPipe pose landmarks.
+    """
+    pts = _to_xyz_array(landmarks)
+    if pts.shape[0] < 29:
+        return np.zeros(132, dtype=np.float64)
+
+    norm_pts = normalize_landmarks(pts)
+    coord_feats = norm_pts.flatten() if norm_pts is not None else np.zeros(99)
+
+    def _safe_norm(v):
+        n = np.linalg.norm(v)
+        return n if n > 1e-8 else 1e-8
+
+    def angle(a, b, c):
+        va = pts[a] - pts[b]
+        vc = pts[c] - pts[b]
+        cos_t = np.dot(va, vc) / (_safe_norm(va) * _safe_norm(vc))
+        return float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0))))
+
+    angles = np.array([
+        angle(11, 13, 15), angle(12, 14, 16), angle(13, 11, 23),
+        angle(14, 12, 24), angle(23, 25, 27), angle(24, 26, 28),
+        angle(11, 23, 25), angle(12, 24, 26), angle(23, 0, 24),
+    ], dtype=np.float64)
+
+    key_pairs = [
+        (15, 16), (15, 23), (16, 24), (15, 11), (16, 12), (15, 12), (16, 11),
+        (13, 14), (25, 26), (27, 28), (15, 25), (16, 26), (11, 24), (12, 23),
+        (0, 23), (0, 24)
+    ]
+    spine_len = _safe_norm(((pts[11] + pts[12]) / 2) - ((pts[23] + pts[24]) / 2))
+    dists = np.array([np.linalg.norm(pts[a] - pts[b]) / spine_len for a, b in key_pairs], dtype=np.float64)
+    velocity = np.zeros(8, dtype=np.float64)
+
+    return np.concatenate([coord_feats, angles, dists, velocity])
+
+
+def compute_frame_similarity(ref_landmarks, user_landmarks):
+    """
+    Return a similarity score in [0, 1] between two sets of pose landmarks.
+    """
+    ref_pts = _to_xyz_array(ref_landmarks)
+    user_pts = _to_xyz_array(user_landmarks)
+
+    n = min(ref_pts.shape[0], user_pts.shape[0])
+    if n == 0:
+        return 0.0
+
+    ref_pts = ref_pts[:n]
+    user_pts = user_pts[:n]
+
+    ref_vis = np.array([_get_visibility(lm) for lm in list(ref_landmarks)[:n]], dtype=np.float64) if isinstance(ref_landmarks, (list, tuple)) else np.ones(n)
+    weights = np.clip(ref_vis, 0.0, 1.0)
+    total_w = weights.sum()
+    if total_w < 1e-8:
+        weights = np.ones(n, dtype=np.float64)
+        total_w = float(n)
+
+    ref_norm = normalize_landmarks(ref_pts)
+    user_norm = normalize_landmarks(user_pts)
+
+    if ref_norm is None or user_norm is None:
+        return 0.0
+
+    dists = np.linalg.norm(ref_norm - user_norm, axis=1)
+    mean_dist = float(np.dot(dists, weights) / total_w)
+    similarity = float(np.exp(-mean_dist * 1.2))
+    return float(np.clip(similarity, 0.0, 1.0))
+
+
+def dtw_sequence_similarity(ref_sequence, user_sequence):
+    """
+    Dynamic Time Warping similarity between two pose sequences.
+    """
+    n = len(ref_sequence)
+    m = len(user_sequence)
+
+    if n == 0 or m == 0:
+        return 0.0
+
+    cost = np.full((n, m), np.inf, dtype=np.float64)
+
+    def frame_dist(r_lms, u_lms):
+        sim = compute_frame_similarity(r_lms, u_lms)
+        return 1.0 - sim
+
+    cost[0, 0] = frame_dist(ref_sequence[0], user_sequence[0])
+
+    for i in range(1, n):
+        cost[i, 0] = cost[i-1, 0] + frame_dist(ref_sequence[i], user_sequence[0])
+
+    for j in range(1, m):
+        cost[0, j] = cost[0, j-1] + frame_dist(ref_sequence[0], user_sequence[j])
+
+    for i in range(1, n):
+        for j in range(1, m):
+            d = frame_dist(ref_sequence[i], user_sequence[j])
+            cost[i, j] = d + min(cost[i-1, j], cost[i, j-1], cost[i-1, j-1])
+
+    dtw_dist = float(cost[n-1, m-1]) / (n + m)
+    similarity = float(np.exp(-dtw_dist * 2.0))
+    return float(np.clip(similarity, 0.0, 1.0))

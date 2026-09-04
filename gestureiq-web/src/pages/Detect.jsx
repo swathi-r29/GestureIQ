@@ -8,6 +8,7 @@ import {
   Camera as CameraIcon, CameraOff, Hand, Layers, Flame, Trophy,
   Star, LayoutGrid, X, Activity, Zap, BookOpen,
   ChevronRight, ScanLine, Sparkles, Upload, Image as ImageIcon,
+  Plus, Video, Loader2
 } from 'lucide-react';
 import { loadMediaPipeScripts, loadMediaPipePoseScripts, loadMediaPipeHolisticScripts } from '../utils/loadMediaPipe';
 import { evaluateSingleMudra, evaluateDoubleMudra } from '../utils/geometricRules';
@@ -105,6 +106,18 @@ const STANCE_DATA = {
     meaning: 'Extended Leg & Foot-Tapping Stance',
     description: 'One leg held in Araimandi while the opposite leg extends outward to touch the heel or toe to the floor with stretched arms.',
     usage: 'Used in Natta Adavu series and rhythmic leg-stretching footwork patterns.'
+  },
+  'Tillana Paras Stance': {
+    name: 'Tillana Paras Stance',
+    meaning: 'Classical Tillana Pose (Overhead Arms & Muzhumandi)',
+    description: 'An iconic classical posture depicting the rhythmic Tillana with arms elevated overhead above the crown while in deep Muzhumandi or Araimandi stance.',
+    usage: 'Featured in Tillana finale dance sequences, rhythmic tirmanams, and expressive postures.'
+  },
+  'Tillana Posture': {
+    name: 'Tillana Posture',
+    meaning: 'Tillana Finale Stance',
+    description: 'A dynamic posture with arms raised overhead above the head, embodying the energetic finale of a Bharatanatyam recital.',
+    usage: 'Used during Tillana choreography, rhythmic footwork, and overhead pranam.'
   },
   'Pose Tracked': {
     name: 'Full Body Pose Tracked',
@@ -235,15 +248,123 @@ export default function MudraDetect() {
   const [uniqueMudras, setUniqueMudras] = useState(new Set());
   const [poseDetails, setPoseDetails] = useState(null);
   const [holisticResult, setHolisticResult] = useState(null);
-  const [selectedDance, setSelectedDance] = useState('Alarippu');
+  const [selectedDance, setSelectedDance] = useState('auto');
+  const [availableSequences, setAvailableSequences] = useState([]);
+  const [showIngestModal, setShowIngestModal] = useState(false);
+  const [ingestUrl, setIngestUrl] = useState('');
+  const [ingestDanceName, setIngestDanceName] = useState('');
+  const [ingestFps, setIngestFps] = useState(5);
+  const [isIngesting, setIsIngesting] = useState(false);
+  const [ingestStatusMessage, setIngestStatusMessage] = useState('');
+
   const [sequenceResult, setSequenceResult] = useState(null);
   const [sequenceLoading, setSequenceLoading] = useState(false);
+  const [sessionSummary, setSessionSummary] = useState(null);
+  const [stanceTimeline, setStanceTimeline] = useState([]);
   const [webcamError, setWebcamError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [imageAspect, setImageAspect] = useState(null);
   const activeImgRef = useRef(null);
   const fileInputRef = useRef(null);
   const holisticRef = useRef(null);
   const voiceGuide = useVoiceGuide({ language: 'en' });
+
+  // Fetch sequence list from backend with automatic retry
+  const fetchSequenceList = useCallback(async (retryCount = 0) => {
+    try {
+      const res = await axios.get(`${FLASK_URL}/api/sequence/list`);
+      if (res.data && res.data.sequences && res.data.sequences.length > 0) {
+        setAvailableSequences(res.data.sequences);
+      }
+    } catch (e) {
+      console.warn('Could not load sequence list from Flask backend:', e);
+      if (retryCount < 3) {
+        setTimeout(() => fetchSequenceList(retryCount + 1), 1500);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSequenceList();
+  }, [fetchSequenceList]);
+
+  // Handle YouTube Video Ingestion Submission
+  const handleIngestSubmit = async (e) => {
+    e.preventDefault();
+    if (!ingestDanceName.trim()) {
+      alert('Please enter a Dance Item Name');
+      return;
+    }
+    setIsIngesting(true);
+    try {
+      const safeDanceName = ingestDanceName.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+      const res = await axios.post(`${FLASK_URL}/api/sequence/ingest_youtube`, {
+        youtube_url: ingestUrl.trim(),
+        dance_name: ingestDanceName.trim(),
+        sample_fps: ingestFps
+      });
+
+      if (res.data && (res.data.status === 'processing' || res.status === 202)) {
+        setIngestStatusMessage(`📥 Extracting 3D Landmarks & Keyframes for '${safeDanceName}' in background...`);
+
+        let attempts = 0;
+        const pollInterval = setInterval(async () => {
+          attempts += 1;
+          try {
+            const statusRes = await axios.get(`${FLASK_URL}/api/sequence/status/${safeDanceName}`);
+            const data = statusRes.data;
+
+            if (data.status === 'success') {
+              clearInterval(pollInterval);
+              setIngestStatusMessage(`✅ SUCCESS! Ingested sequence '${data.dance_name || safeDanceName}' (${data.keyframe_count || 0} keyframe holds tagged).`);
+              await fetchSequenceList();
+              setSelectedDance(data.dance_name || safeDanceName);
+              selectedDanceRef.current = data.dance_name || safeDanceName;
+              setTimeout(() => {
+                setIsIngesting(false);
+                setShowIngestModal(false);
+                setIngestUrl('');
+                setIngestDanceName('');
+                setIngestStatusMessage('');
+              }, 1800);
+            } else if (data.status === 'error') {
+              clearInterval(pollInterval);
+              setIngestStatusMessage(`❌ Error: ${data.message || 'Ingestion failed.'}`);
+              setIsIngesting(false);
+            } else {
+              setIngestStatusMessage(`📥 Processing video landmarks... (${attempts * 2}s elapsed)`);
+            }
+          } catch (e) {
+            if (attempts > 30) {
+              clearInterval(pollInterval);
+              setIngestStatusMessage('❌ Ingestion timed out. Please check backend server.');
+              setIsIngesting(false);
+            }
+          }
+        }, 2000);
+      } else if (res.data && res.data.status === 'success') {
+        const danceName = res.data.dance_name || safeDanceName;
+        setIngestStatusMessage(`✅ SUCCESS! Ingested '${danceName}'.`);
+        await fetchSequenceList();
+        setSelectedDance(danceName);
+        selectedDanceRef.current = danceName;
+        setTimeout(() => {
+          setIsIngesting(false);
+          setShowIngestModal(false);
+          setIngestUrl('');
+          setIngestDanceName('');
+          setIngestStatusMessage('');
+        }, 1800);
+      } else {
+        setIngestStatusMessage(`❌ Error: ${res.data?.message || 'Ingestion failed.'}`);
+        setIsIngesting(false);
+      }
+    } catch (err) {
+      console.error('Ingest error:', err);
+      setIngestStatusMessage(`❌ Error: ${err.response?.data?.message || err.message}`);
+      setIsIngesting(false);
+    }
+  };
 
   const isProcessingRef = useRef(false);
   const streamRef = useRef(null);
@@ -714,17 +835,23 @@ export default function MudraDetect() {
         const rightHip = lms[24];
         const leftKnee = lms[25];
         const rightKnee = lms[26];
-        const minConf = 0.45;
+        const isPointInFrame = (lm) => {
+          if (!lm) return false;
+          if (typeof lm.x !== 'number' || typeof lm.y !== 'number') return false;
+          if (isNaN(lm.x) || isNaN(lm.y)) return false;
+          if (lm.x === 0 && lm.y === 0) return false;
+          return lm.y >= -0.15 && lm.y <= 1.15;
+        };
 
         const isVisible =
-          (lms[11]?.visibility ?? 1) >= minConf &&
-          (lms[12]?.visibility ?? 1) >= minConf &&
-          (leftHip?.visibility ?? 1) >= minConf &&
-          (rightHip?.visibility ?? 1) >= minConf &&
-          (leftKnee?.visibility ?? 1) >= minConf &&
-          (rightKnee?.visibility ?? 1) >= minConf;
+          isPointInFrame(lms[11]) &&
+          isPointInFrame(lms[12]) &&
+          isPointInFrame(leftHip) &&
+          isPointInFrame(rightHip) &&
+          isPointInFrame(leftKnee) &&
+          isPointInFrame(rightKnee);
 
-        const isHallucinated = nose && leftHip && rightHip && (leftHip.y <= nose.y + 0.10);
+        const isHallucinated = nose && leftHip && rightHip && (leftHip.y <= nose.y + 0.03);
 
         if (!isVisible || isHallucinated) {
           setHandPresent(false);
@@ -756,12 +883,15 @@ export default function MudraDetect() {
             setConfidence(85);
           }
           axios.post(`${FLASK_URL}/api/sequence/evaluate_image`, {
-            dance_name: selectedDanceRef.current || 'Alarippu',
+            dance_name: selectedDanceRef.current || 'auto',
             landmarks: lms.map(lm => ({ x: lm.x, y: lm.y, z: lm.z, visibility: lm.visibility || 1.0 }))
           }).then(res => {
             if (res.data && res.data.detected) {
               setSequenceResult(res.data);
-              setDetectedKey(`${res.data.dance_name} - ${res.data.matched_frame}`);
+              const currentDance = (res.data.dance_name || selectedDanceRef.current || 'Alarippu').replace(/_/g, ' ');
+              const cleanStance = (res.data.current_stance || 'Araimandi').replace(' Stance', '').trim();
+              const label = res.data.matched_keyframe_label || `${currentDance} in ${cleanStance}`;
+              setDetectedKey(label);
               setConfidence(res.data.match_score);
             } else if (res.data && res.data.error) {
               setSequenceResult({
@@ -871,9 +1001,9 @@ export default function MudraDetect() {
         ctx.save();
         ctx.clearRect(0, 0, W, H);
 
-        // Draw source image/video frame
+        // Draw source video frame (only for live video; static images use <img> tag)
         const src = activeImgRef.current || videoRef.current;
-        if (src) ctx.drawImage(src, 0, 0, W, H);
+        if (src && !activeImgRef.current) ctx.drawImage(src, 0, 0, W, H);
 
         // Evaluate all streams
         const evalResult = evaluateHolisticPose({
@@ -898,24 +1028,25 @@ export default function MudraDetect() {
           : (evalResult && evalResult.stanceName && !evalResult.stanceName.includes('Step Back'))
             ? evalResult.stanceName
             : 'Araimandi Stance';
+
         setDetectedKey(stanceToSet);
         setConfidence(evalResult.combinedScore > 0 ? evalResult.combinedScore : 85);
 
-        // Dispatch lightweight JSON landmark arrays to Flask /api/detect_holistic (No Base64 decoding overhead)
-        axios.post(`${FLASK_URL}/api/detect_holistic`, {
-          targetMudra: '',
-          handedness: 'Right',
-          pose_landmarks: results.poseLandmarks ? results.poseLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z, visibility: l.visibility || 1.0 })) : null,
-          face_landmarks: results.faceLandmarks ? results.faceLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z })) : null,
-          hand_landmarks: (results.rightHandLandmarks || results.leftHandLandmarks) ? (results.rightHandLandmarks || results.leftHandLandmarks).map(l => ({ x: l.x, y: l.y, z: l.z })) : null,
-        }).then(res => {
-          if (res.data) {
-            if (res.data.current_stance && res.data.current_stance !== 'Unknown') {
-              setDetectedKey(res.data.current_stance);
+        if (modeRef.current === 'sequence' && results.poseLandmarks && results.poseLandmarks.length >= 27) {
+          axios.post(`${FLASK_URL}/api/sequence/evaluate_image`, {
+            dance_name: selectedDanceRef.current || 'auto',
+            landmarks: results.poseLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z, visibility: l.visibility || 1.0 }))
+          }).then(res => {
+            if (res.data && res.data.detected) {
+              setSequenceResult(res.data);
+              const label = res.data.matched_keyframe_label || `${res.data.dance_name.replace('_', ' ')} — ${res.data.current_stance}`;
+              setDetectedKey(label);
+              if (res.data.match_score) setConfidence(res.data.match_score);
             }
-            if (res.data.accuracy) setConfidence(res.data.accuracy);
-          }
-        }).catch(err => console.error("Holistic API dispatch error:", err));
+          }).catch(e => {
+            console.warn("Sequence evaluation notice:", e);
+          });
+        }
 
         // Voice coaching
         if (evalResult.feedbacks?.length) {
@@ -932,17 +1063,28 @@ export default function MudraDetect() {
     }
   }, [voiceGuide]);
 
-  const handleImageSelect = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    unlockAudio();
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  const stopWebcamStream = useCallback(() => {
+    if (window.localStream) {
+      window.localStream.getTracks().forEach(track => track.stop());
+      window.localStream = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const handleImageSelect = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    unlockAudio();
+    stopWebcamStream();
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
@@ -957,6 +1099,9 @@ export default function MudraDetect() {
       img.src = src;
       img.onload = async () => {
         activeImgRef.current = img;
+        if (img.width && img.height) {
+          setImageAspect(`${img.width} / ${img.height}`);
+        }
         const canvas = canvasRef.current;
         if (canvas) {
           canvas.width = img.width || 640;
@@ -985,7 +1130,7 @@ export default function MudraDetect() {
       };
     };
     reader.readAsDataURL(file);
-  }, [mode, unlockAudio, initPoseEngine, initHands, initHolisticEngine]);
+  }, [mode, unlockAudio, initPoseEngine, initHands, initHolisticEngine, stopWebcamStream]);
 
   const runPoseDetection = useCallback(async () => {
     if (isProcessingRef.current) return;
@@ -1008,7 +1153,7 @@ export default function MudraDetect() {
   }, []);
 
   useEffect(() => {
-    if (!cameraOn || !videoRef.current) return;
+    if (!cameraOn || !videoRef.current || activeImgRef.current || imagePreview) return;
     const startStream = async () => {
       try {
         let success = false;
@@ -1071,7 +1216,7 @@ export default function MudraDetect() {
     };
     startStream();
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); clearInterval(intervalRef.current); };
-  }, [cameraOn, mode, initHands, initPoseEngine, runSingleDetection, runDoubleDetection, runPoseDetection]);
+  }, [cameraOn, mode, imagePreview, initHands, initPoseEngine, runSingleDetection, runDoubleDetection, runPoseDetection]);
 
 
   // Page-exit cleanup: close the Hands instance and stop the media stream when component unmounts
@@ -1085,16 +1230,7 @@ export default function MudraDetect() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      if (window.localStream) {
-        window.localStream.getTracks().forEach(track => track.stop());
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
+      stopWebcamStream();
       if (handsRef.current) {
         try {
           handsRef.current.close();
@@ -1105,22 +1241,22 @@ export default function MudraDetect() {
       }
       isProcessingRef.current = false;
     };
-  }, []);
+  }, [stopWebcamStream]);
 
   const stopCamera = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     clearInterval(intervalRef.current);
-    if (window.localStream) { window.localStream.getTracks().forEach(track => track.stop()); }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
-    if (videoRef.current) videoRef.current.srcObject = null;
+    stopWebcamStream();
     landmarksRef.current = null;
+    activeImgRef.current = null;
+    setImagePreview(null);
     bufferRef.current = [];
     setCameraOn(false); setHandPresent(false); setDetectedKey(null);
     setConfidence(0); setStreak(0); streakRef.current = 0; prevKeyRef.current = null;
     setSessionHistory([]); setUniqueMudras(new Set());
     setWebcamError(null);
     isProcessingRef.current = false;
-  }, []);
+  }, [stopWebcamStream]);
 
 
   const switchMode = (m) => { if (m === mode) return; stopCamera(); setMode(m); };
@@ -1340,7 +1476,7 @@ export default function MudraDetect() {
               { key: 'single', label: 'Asamyuta Hasta', sub: '28 Single-hand Mudras', Icon: Hand },
               { key: 'double', label: 'Samyuta Hasta', sub: '23 Double-hand Mudras', Icon: Layers },
               { key: 'pose', label: 'Adavu Posture', sub: 'Full-Body Stance Analytics', Icon: Activity },
-              { key: 'sequence', label: 'Reference Dance', sub: 'Alarippu & Pushpanjali', Icon: BookOpen },
+              { key: 'sequence', label: 'Reference Dance', sub: 'All Dance Suites & Items', Icon: BookOpen },
               { key: 'holistic', label: 'Full Analysis', sub: 'Face + Pose + Hands', Icon: Sparkles },
             ].map(({ key, label, sub, Icon }, idx, arr) => (
               <button key={key} className="mode-tab" onClick={() => switchMode(key)} style={{
@@ -1383,7 +1519,8 @@ export default function MudraDetect() {
                 overflow: 'hidden',
                 background: C.ink,
                 border: `2px solid ${isDetected ? accent : C.linen}`,
-                aspectRatio: '4/3',
+                aspectRatio: imagePreview ? (imageAspect || 'auto') : '4/3',
+                maxHeight: imagePreview ? '80vh' : 'auto',
                 transition: 'border-color 0.5s',
                 boxShadow: isDetected
                   ? `0 0 0 4px ${accent}18, 0 12px 48px rgba(44,26,14,0.2)`
@@ -1398,10 +1535,25 @@ export default function MudraDetect() {
                 <CornerOrnament flip />
               </div>
 
-              <video ref={videoRef} autoPlay playsInline muted
-                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: 'block' }}
-              />
-              <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+              {imagePreview ? (
+                <img
+                  src={imagePreview}
+                  alt="Uploaded Stance"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    display: 'block',
+                    margin: '0 auto',
+                    background: C.ink,
+                  }}
+                />
+              ) : (
+                <video ref={videoRef} autoPlay playsInline muted
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: 'block' }}
+                />
+              )}
+              <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
 
               {status === 'analyzing' && (
                 <div className={`scan-line ${mode === 'double' ? 'scan-line-teal' : ''}`} />
@@ -1440,9 +1592,11 @@ export default function MudraDetect() {
                     letterSpacing: 0.5, marginBottom: 6,
                   }}>
                     {mode === 'holistic'
-                      ? 'Full Body Analysis'
+                      ? 'Full Body & Hasta Analysis'
                       : mode === 'pose'
                       ? 'Adavu Posture Analytics'
+                      : mode === 'sequence'
+                      ? 'Reference Dance Practice'
                       : mode === 'double'
                       ? 'Samyuta Detection'
                       : 'Asamyuta Detection'}
@@ -1452,9 +1606,11 @@ export default function MudraDetect() {
                     fontSize: 13, color: C.brownLight, marginBottom: 36, letterSpacing: 0.3,
                   }}>
                     {mode === 'holistic'
-                      ? 'Face + Pose + Hands combined AI posture analytics'
+                      ? 'Combined Face, 3D Pose Stance, and Classical Hasta Analytics'
                       : mode === 'pose'
                       ? 'Classical stance analytics · Full body posture'
+                      : mode === 'sequence'
+                      ? 'AI Sequence Alignment & Keyframe Comparison'
                       : mode === 'double'
                       ? '23 classical double-hand mudras · Show both hands'
                       : '28 classical asamyuta mudras · Single hand recognition'}
@@ -1493,7 +1649,7 @@ export default function MudraDetect() {
                   />
 
                   {mode === 'sequence' && (
-                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, zIndex: 999, pointerEvents: 'auto' }}>
+                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, zIndex: 999, pointerEvents: 'auto' }}>
                       <label style={{ fontFamily: "'Lora', serif", fontSize: 13, color: C.deepMaroon, fontWeight: 600 }}>
                         Reference Dance Item:
                       </label>
@@ -1515,20 +1671,57 @@ export default function MudraDetect() {
                           cursor: 'pointer'
                         }}
                       >
-                        <option value="Alarippu">Alarippu Benchmark (1,191 Frames)</option>
-                        <option value="Sthanaka_Bheda">Sthanaka Bheda Postures (Akshita Ms Gupta)</option>
-                        <option value="Sthanaka_Bheda_Lesson">Sthanaka Bheda Standing Lesson (22/365)</option>
-                        <option value="Alarippu_Tutorial">Alarippu Step-by-Step Tutorial (Anu Lanish)</option>
-                        <option value="Alarippu_Performance">Alarippu Full Performance (Tanvi Hari)</option>
-                        <option value="Thattadavu_Suite">Thattadavu Basic Adavu Lessons (1 to 8)</option>
+                        <option value="auto">✨ Auto-Detect All Sequences (Smart AI)</option>
+                        {availableSequences.length > 0 ? (
+                          availableSequences.map((seq) => (
+                            <option key={seq.dance_name} value={seq.dance_name}>
+                              {seq.display_name} ({seq.total_frames} Frames{seq.keyframe_count ? `, ${seq.keyframe_count} Keyframes` : ''})
+                            </option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="Veeshi_Adavu_Suite">Veeshi Adavu Suite (180 Frames, 42 Keyframes)</option>
+                            <option value="Thattadavu_Suite">Thattadavu Suite (180 Frames, 86 Keyframes)</option>
+                            <option value="Tillana_Paras">Tillana Paras (180 Frames)</option>
+                            <option value="Natta_Adavu">Natta Adavu (600 Frames, 19 Keyframes)</option>
+                            <option value="Alarippu">Alarippu Benchmark (1,191 Frames, 107 Keyframes)</option>
+                            <option value="Pushpanjali">Pushpanjali Benchmark (1,000 Frames)</option>
+                            <option value="Sthanaka_Bheda">Sthanaka Bheda Postures (745 Frames)</option>
+                            <option value="Sthanaka_Bheda_Lesson">Sthanaka Bheda Lesson (1,459 Frames)</option>
+                            <option value="Alarippu_Performance">Alarippu Performance (2,007 Frames)</option>
+                          </>
+                        )}
                       </select>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowIngestModal(true)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: 8,
+                          border: `1.5px solid ${C.vermillion}`,
+                          background: C.vermillion,
+                          color: '#ffffff',
+                          fontFamily: "'Lora', serif",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          boxShadow: '0 2px 8px rgba(155, 28, 28, 0.25)',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <Plus size={15} /> Ingest YouTube Video
+                      </button>
                     </div>
                   )}
 
                   <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', zIndex: 999, pointerEvents: 'auto' }}>
                     <button
                       className="btn-primary"
-                      onClick={() => { unlockAudio(); setWebcamError(null); setImagePreview(null); activeImgRef.current = null; setCameraOn(true); }}
+                      onClick={() => { unlockAudio(); setWebcamError(null); stopWebcamStream(); setImagePreview(null); activeImgRef.current = null; setCameraOn(true); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '14px 28px', borderRadius: 12,
@@ -1561,21 +1754,26 @@ export default function MudraDetect() {
                       }}
                     >
                       <Upload size={16} color={C.templeGold} />
-                      Upload Stance Image
+                      {(mode === 'single' || mode === 'double') ? 'Upload Mudra Image' : 'Upload Stance Image'}
                     </button>
 
+                    {/* Mode-Specific Sample Button 1 */}
                     <button
                       className="btn-secondary"
                       onClick={() => {
                         unlockAudio();
+                        stopWebcamStream();
                         if (intervalRef.current) {
                           clearInterval(intervalRef.current);
                           intervalRef.current = null;
                         }
+                        const isMudra = (mode === 'single' || mode === 'double');
+                        const imgSrc = mode === 'single' ? '/sample_pataka.png' : (mode === 'double' ? '/sample_anjali_pranam.png' : '/sample_araimandi_full.png');
+                        
                         const img = new Image();
                         img.crossOrigin = 'anonymous';
-                        img.src = '/sample_araimandi_full.png';
-                        setImagePreview('/sample_araimandi_full.png');
+                        img.src = imgSrc;
+                        setImagePreview(imgSrc);
                         setCameraOn(true);
                         img.onload = async () => {
                           activeImgRef.current = img;
@@ -1586,11 +1784,21 @@ export default function MudraDetect() {
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                           }
-                          let ok = (mode === 'holistic') ? await initHolisticEngine() : await initPoseEngine();
-                          if (mode === 'holistic' && ok && holisticRef.current) {
-                            await holisticRef.current.send({ image: img });
-                          } else if (ok && poseRef.current) {
-                            await poseRef.current.send({ image: img });
+                          if (isMudra) {
+                            let ok = await initHands(mode === 'double' ? 2 : 1);
+                            if (ok && handsRef.current) {
+                              await handsRef.current.send({ image: img });
+                            }
+                          } else if (mode === 'holistic') {
+                            let ok = await initHolisticEngine();
+                            if (ok && holisticRef.current) {
+                              await holisticRef.current.send({ image: img });
+                            }
+                          } else {
+                            let ok = await initPoseEngine();
+                            if (ok && poseRef.current) {
+                              await poseRef.current.send({ image: img });
+                            }
                           }
                         };
                       }}
@@ -1606,21 +1814,28 @@ export default function MudraDetect() {
                         cursor: 'pointer'
                       }}
                     >
-                      <span>🎭 Try Araimandi Stance</span>
+                      <span>
+                        {mode === 'single' ? '✋ Try Pataka Mudra' : (mode === 'double' ? '🙏 Try Anjali Mudra' : '🎭 Try Araimandi Stance')}
+                      </span>
                     </button>
 
+                    {/* Mode-Specific Sample Button 2 */}
                     <button
                       className="btn-secondary"
                       onClick={() => {
                         unlockAudio();
+                        stopWebcamStream();
                         if (intervalRef.current) {
                           clearInterval(intervalRef.current);
                           intervalRef.current = null;
                         }
+                        const isMudra = (mode === 'single' || mode === 'double');
+                        const imgSrc = mode === 'single' ? '/sample_tripataka.png' : '/sample_anjali_pranam.png';
+                        
                         const img = new Image();
                         img.crossOrigin = 'anonymous';
-                        img.src = '/sample_anjali_pranam.png';
-                        setImagePreview('/sample_anjali_pranam.png');
+                        img.src = imgSrc;
+                        setImagePreview(imgSrc);
                         setCameraOn(true);
                         img.onload = async () => {
                           activeImgRef.current = img;
@@ -1631,11 +1846,21 @@ export default function MudraDetect() {
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                           }
-                          let ok = (mode === 'holistic') ? await initHolisticEngine() : await initPoseEngine();
-                          if (mode === 'holistic' && ok && holisticRef.current) {
-                            await holisticRef.current.send({ image: img });
-                          } else if (ok && poseRef.current) {
-                            await poseRef.current.send({ image: img });
+                          if (isMudra) {
+                            let ok = await initHands(mode === 'double' ? 2 : 1);
+                            if (ok && handsRef.current) {
+                              await handsRef.current.send({ image: img });
+                            }
+                          } else if (mode === 'holistic') {
+                            let ok = await initHolisticEngine();
+                            if (ok && holisticRef.current) {
+                              await holisticRef.current.send({ image: img });
+                            }
+                          } else {
+                            let ok = await initPoseEngine();
+                            if (ok && poseRef.current) {
+                              await poseRef.current.send({ image: img });
+                            }
                           }
                         };
                       }}
@@ -1651,7 +1876,9 @@ export default function MudraDetect() {
                         cursor: 'pointer'
                       }}
                     >
-                      <span>🪔 Try Anjali Pranam</span>
+                      <span>
+                        {mode === 'single' ? '🪶 Try Tripataka Mudra' : '🪔 Try Anjali Pranam'}
+                      </span>
                     </button>
                   </div>
 
@@ -1908,14 +2135,14 @@ export default function MudraDetect() {
                         fontSize: 48, color: C.deepMaroon,
                         lineHeight: 1, letterSpacing: 0.5, marginBottom: 4,
                       }}>
-                        {mudra.name}
+                        {mode === 'sequence' ? (sequenceResult?.matched_keyframe_label || mudra.name) : mudra.name}
                       </h2>
                       <p style={{
                         fontFamily: "'IM Fell English', serif",
                         fontSize: 16, fontStyle: 'italic',
                         color: accentGold,
                       }}>
-                        "{mudra.meaning}"
+                        "{mode === 'sequence' && sequenceResult?.dance_name ? `${sequenceResult.dance_name.replace('_', ' ')} Sequence Match` : mudra.meaning}"
                       </p>
                       {/* Decorative rule */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 0' }}>
@@ -1946,7 +2173,48 @@ export default function MudraDetect() {
                     </div>
 
                     {/* Description & Usage or Sequence Feedback */}
-                    {mode === 'sequence' && sequenceResult ? (
+                    {mode === 'holistic' && holisticResult ? (
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={{ padding: '12px 16px', borderRadius: 10, background: C.cream, border: `1px solid ${C.linen}`, marginBottom: 14 }}>
+                          <p style={{ fontFamily: "'Lora', serif", fontSize: 11, color: C.deepMaroon, fontWeight: 600, marginBottom: 8 }}>
+                            Holistic Stream Alignment:
+                          </p>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, textAlign: 'center', marginBottom: 10 }}>
+                            <div style={{ padding: '8px 4px', borderRadius: 8, background: `${C.parchment}`, border: `1px solid ${C.linen}` }}>
+                              <div style={{ fontSize: 10, color: C.brownLight, fontFamily: "'Lora', serif" }}>🎭 Face</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: C.templeGold, fontFamily: "'IM Fell English', serif" }}>
+                                {holisticResult.scores?.face || 85}%
+                              </div>
+                            </div>
+                            <div style={{ padding: '8px 4px', borderRadius: 8, background: `${C.parchment}`, border: `1px solid ${C.linen}` }}>
+                              <div style={{ fontSize: 10, color: C.brownLight, fontFamily: "'Lora', serif" }}>🦵 Stance</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: C.teal, fontFamily: "'IM Fell English', serif" }}>
+                                {holisticResult.scores?.stance || 80}%
+                              </div>
+                            </div>
+                            <div style={{ padding: '8px 4px', borderRadius: 8, background: `${C.parchment}`, border: `1px solid ${C.linen}` }}>
+                              <div style={{ fontSize: 10, color: C.brownLight, fontFamily: "'Lora', serif" }}>🖐️ Mudra</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: C.vermillion, fontFamily: "'IM Fell English', serif" }}>
+                                {holisticResult.scores?.mudra || 75}%
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 12, fontFamily: "'Noto Serif', serif", color: C.brownMid, lineHeight: 1.7 }}>
+                            <div>• Live Stance: <strong style={{ color: C.teal }}>{holisticResult.stanceName || 'Araimandi Stance'}</strong></div>
+                            <div>• Active Mudra: <strong>{holisticResult.mudraName || 'Natyarambham Arms'}</strong></div>
+                          </div>
+                        </div>
+
+                        <p style={{ fontFamily: "'Lora', serif", fontSize: 10, color: C.sandal, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+                          Live Alignment Corrections:
+                        </p>
+                        {holisticResult.feedbacks && holisticResult.feedbacks.map((fb, idx) => (
+                          <div key={idx} style={{ padding: '8px 12px', borderRadius: 8, background: `${C.vermillion}10`, border: `1px solid ${C.vermillion}30`, color: C.deepMaroon, fontSize: 12, fontFamily: "'Lora', serif", marginBottom: 6 }}>
+                            ✦ {fb}
+                          </div>
+                        ))}
+                      </div>
+                    ) : mode === 'sequence' && sequenceResult ? (
                       <div style={{ marginBottom: 18 }}>
                         <div style={{ padding: '12px 16px', borderRadius: 10, background: C.cream, border: `1px solid ${C.linen}`, marginBottom: 14 }}>
                           <p style={{ fontFamily: "'Lora', serif", fontSize: 11, color: C.deepMaroon, fontWeight: 600, marginBottom: 6 }}>
@@ -2376,6 +2644,164 @@ export default function MudraDetect() {
                 Return to Detection
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ YOUTUBE INGESTION MODAL ════════════════════════════════════════ */}
+      {showIngestModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 500,
+            background: 'rgba(44,26,14,0.70)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+          onClick={() => !isIngesting && setShowIngestModal(false)}
+        >
+          <div
+            className="fade-up"
+            style={{
+              background: C.parchment,
+              borderRadius: 24,
+              maxWidth: 540, width: '100%',
+              border: `2px solid ${C.vermillion}60`,
+              position: 'relative',
+              boxShadow: `0 24px 80px rgba(44,26,14,0.4)`,
+              overflow: 'hidden',
+              padding: 28
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${C.vermillion}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Video size={20} color={C.vermillion} />
+                </div>
+                <div>
+                  <h3 style={{ fontFamily: "'Yatra One', serif", fontSize: 24, color: C.deepMaroon, margin: 0 }}>
+                    Ingest YouTube Reference Video
+                  </h3>
+                  <p style={{ fontFamily: "'Lora', serif", fontSize: 11, color: C.brownLight, margin: 0, fontStyle: 'italic' }}>
+                    Extract 3D Pose Landmarks & Angular Velocity Keyframes
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isIngesting && setShowIngestModal(false)}
+                disabled={isIngesting}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.brownLight }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleIngestSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontFamily: "'Lora', serif", fontSize: 12, fontWeight: 600, color: C.deepMaroon, marginBottom: 6 }}>
+                  Dance Item / Sequence Name <span style={{ color: C.vermillion }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Jatiswaram, Tillana, Shabdam"
+                  value={ingestDanceName}
+                  onChange={(e) => setIngestDanceName(e.target.value)}
+                  disabled={isIngesting}
+                  required
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 8,
+                    border: `1.5px solid ${C.linen}`, background: C.cream,
+                    color: C.deepMaroon, fontFamily: "'Lora', serif", fontSize: 13,
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontFamily: "'Lora', serif", fontSize: 12, fontWeight: 600, color: C.deepMaroon, marginBottom: 6 }}>
+                  YouTube Video URL (Or leave blank to process local video file)
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={ingestUrl}
+                  onChange={(e) => setIngestUrl(e.target.value)}
+                  disabled={isIngesting}
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 8,
+                    border: `1.5px solid ${C.linen}`, background: C.cream,
+                    color: C.deepMaroon, fontFamily: "'Lora', serif", fontSize: 13,
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontFamily: "'Lora', serif", fontSize: 12, fontWeight: 600, color: C.deepMaroon, marginBottom: 6 }}>
+                  Sampling Rate (FPS)
+                </label>
+                <select
+                  value={ingestFps}
+                  onChange={(e) => setIngestFps(Number(e.target.value))}
+                  disabled={isIngesting}
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 8,
+                    border: `1.5px solid ${C.linen}`, background: C.cream,
+                    color: C.deepMaroon, fontFamily: "'Lora', serif", fontSize: 13
+                  }}
+                >
+                  <option value={5}>5 FPS (Standard — Recommended)</option>
+                  <option value={10}>10 FPS (High Precision for Fast Dances)</option>
+                  <option value={15}>15 FPS (Ultra High FPS)</option>
+                </select>
+              </div>
+
+              {ingestStatusMessage && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8,
+                  background: isIngesting ? `${C.templeGold}15` : (ingestStatusMessage.includes('SUCCESS') ? '#10b98115' : '#ef444415'),
+                  border: `1px solid ${isIngesting ? C.templeGold : (ingestStatusMessage.includes('SUCCESS') ? '#10b981' : '#ef4444')}`,
+                  fontFamily: "'Lora', serif", fontSize: 12, color: C.deepMaroon,
+                  display: 'flex', alignItems: 'center', gap: 8
+                }}>
+                  {isIngesting && <Loader2 size={16} className="animate-spin" color={C.templeGold} />}
+                  <span>{ingestStatusMessage}</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowIngestModal(false)}
+                  disabled={isIngesting}
+                  style={{
+                    flex: 1, padding: '11px 0', borderRadius: 10,
+                    border: `1.5px solid ${C.linen}`, background: C.cream,
+                    color: C.brownLight, fontFamily: "'Lora', serif", fontSize: 13, fontWeight: 600,
+                    cursor: isIngesting ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isIngesting}
+                  style={{
+                    flex: 1.5, padding: '11px 0', borderRadius: 10,
+                    border: 'none', background: C.vermillion,
+                    color: '#ffffff', fontFamily: "'Lora', serif", fontSize: 13, fontWeight: 600,
+                    cursor: isIngesting ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    boxShadow: '0 4px 16px rgba(155, 28, 28, 0.3)'
+                  }}
+                >
+                  {isIngesting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  {isIngesting ? 'Processing Video...' : 'Ingest & Extract Keyframes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
