@@ -74,9 +74,27 @@ export function evaluateHolisticPose({
   // ── 2. Face Alignment ─────────────────────────────────────────────────────
   const faceResult = evaluateFaceAlignment(faceLandmarks, poseLandmarks);
 
-  // ── 3. Hand Mudras ────────────────────────────────────────────────────────
-  const leftMudra = classifyHandMudra(leftHandLandmarks, poseLandmarks, true);
-  const rightMudra = classifyHandMudra(rightHandLandmarks, poseLandmarks, false);
+  // ── 3. Hand Mudras & Inter-Wrist Occlusion Pre-Filter ────────────────────
+  let leftMudra = classifyHandMudra(leftHandLandmarks, poseLandmarks, true);
+  let rightMudra = classifyHandMudra(rightHandLandmarks, poseLandmarks, false);
+
+  // Check inter-wrist distance for joined/crossed hand postures (Anjali, Kapotha, Svastika)
+  if (poseLandmarks && poseLandmarks[15] && poseLandmarks[16]) {
+    const lW = poseLandmarks[15];
+    const rW = poseLandmarks[16];
+    const dx = lW.x - rW.x;
+    const dy = lW.y - rW.y;
+    const wristDist = Math.sqrt(dx * dx + dy * dy);
+
+    if (wristDist < 0.22 && (!leftMudra.mudraKey || !rightMudra.mudraKey)) {
+      if (!leftMudra.mudraKey) {
+        leftMudra = { mudraKey: 'anjali', mudraName: 'Anjali / Svastika Pranam', confidence: 82 };
+      }
+      if (!rightMudra.mudraKey) {
+        rightMudra = { mudraKey: 'anjali', mudraName: 'Anjali / Svastika Pranam', confidence: 82 };
+      }
+    }
+  }
 
   // Pick the best hand mudra (prefer the one with detected mudra)
   const activeMudra = rightMudra.mudraKey

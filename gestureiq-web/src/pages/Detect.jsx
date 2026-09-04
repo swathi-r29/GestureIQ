@@ -264,6 +264,7 @@ export default function MudraDetect() {
   const [webcamError, setWebcamError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [imageAspect, setImageAspect] = useState(null);
+  const lastProcessTimeRef = useRef(0);
   const activeImgRef = useRef(null);
   const fileInputRef = useRef(null);
   const holisticRef = useRef(null);
@@ -960,6 +961,17 @@ export default function MudraDetect() {
             ctx.fillStyle = kneeColor;
             ctx.fillRect(barX, barY + 2, fillW, barH);
           }
+
+          // Render Spine Tilt Angle HUD Badge
+          if (evalResult?.details?.spine?.tiltAngle !== undefined) {
+            const tiltVal = Math.round(evalResult.details.spine.tiltAngle);
+            const badgeW = 130, badgeH = 22, badgeX = 20, badgeY = 20;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+            ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fillStyle = tiltVal <= 13 ? '#10b981' : '#f59e0b';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(`Spine Tilt: ${tiltVal}° (${tiltVal <= 13 ? 'Upright' : 'Leaning'})`, badgeX + 8, badgeY + 15);
+          }
         }
 
         if (evalResult.isFullyVisible && evalResult?.feedbacks?.length && modeRef.current !== 'sequence') {
@@ -993,6 +1005,12 @@ export default function MudraDetect() {
         minTrackingConfidence: 0.5,
       });
       h.onResults((results) => {
+        const now = Date.now();
+        if (!activeImgRef.current && (now - lastProcessTimeRef.current < 50)) {
+          return;
+        }
+        lastProcessTimeRef.current = now;
+
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');

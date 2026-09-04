@@ -3283,6 +3283,7 @@ def evaluate_sequence_image():
                     sequences_to_check.append((d_key, valid_f))
 
         # Student's rich angle vector
+        student_stance = student_angles.get("detected_stance", "Araimandi Stance")
         s_lk      = student_angles.get("left_knee", 180)
         s_rk      = student_angles.get("right_knee", 180)
         s_le      = student_angles.get("left_elbow", 180)
@@ -3336,6 +3337,12 @@ def evaluate_sequence_image():
 
                 # Track best individual frame for feedback (best match to student)
                 frame_err = _weighted_err(r_lk, r_rk, r_le, r_re, r_tilt, r_ws, r_ank, r_led, r_red, r_ft, r_sh)
+                ref_stance = ra.get("detected_stance")
+                if ref_stance and ref_stance != student_stance:
+                    frame_err += 8.0  # Penalty for cross-stance category mismatch
+                elif ref_stance and ref_stance == student_stance:
+                    frame_err = max(0.0, frame_err - 2.0)  # Category match bonus
+
                 if item.get("is_keyframe"):
                     frame_err = max(0.0, frame_err - 3.5)  # Keyframe hold bonus
 
