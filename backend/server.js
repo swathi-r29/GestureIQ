@@ -50,14 +50,19 @@ app.use(cors({
 app.use(express.json());
 
 // Forward AI / Sequence API endpoints to Flask server (port 5001)
-app.use('/api/sequence', (req, res) => {
+const proxyToFlask = (req, res) => {
     const http = require('http');
+    const bodyData = (req.body && Object.keys(req.body).length > 0) ? JSON.stringify(req.body) : '';
+    const headers = {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(bodyData)
+    };
     const options = {
         hostname: '127.0.0.1',
         port: 5001,
-        path: `/api/sequence${req.url}`,
+        path: req.originalUrl || req.url,
         method: req.method,
-        headers: { ...req.headers, host: '127.0.0.1:5001' }
+        headers: headers
     };
     const proxyReq = http.request(options, (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
@@ -67,14 +72,22 @@ app.use('/api/sequence', (req, res) => {
         console.error('[Node -> Flask Proxy Error]:', err.message);
         res.status(500).json({ status: 'error', message: 'Flask AI backend unreachable' });
     });
-    if (req.body && Object.keys(req.body).length > 0) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+    if (bodyData) {
         proxyReq.write(bodyData);
     }
     proxyReq.end();
-});
+};
+
+app.use([
+    '/api/predict',
+    '/api/sequence',
+    '/api/detect_landmarks',
+    '/api/detect_double_landmarks',
+    '/api/detect_holistic',
+    '/api/predict_pose',
+    '/api/predict_adavu',
+    '/api/ingest_youtube'
+], proxyToFlask);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));

@@ -436,7 +436,7 @@ MUDRA_REFERENCE_ANGLES = {
     "kapittha":     {'thumb': 106.6, 'index':  97.2, 'middle':  76.5, 'ring':  78.4, 'pinky':  91.1},
     "kartarimukha": {'thumb':  80.2, 'index': 175.1, 'middle': 174.4, 'ring':  51.2, 'pinky':  49.8},
     "katakamukha":  {'thumb': 100.4, 'index': 101.2, 'middle': 102.5, 'ring': 174.5, 'pinky': 173.2},
-    "mayura":       {'thumb': 101.2, 'index': 175.4, 'middle': 174.5, 'ring': 120.4, 'pinky': 175.2},
+    "mayura":       {'thumb': 101.2, 'index': 175.4, 'middle': 174.5, 'ring':  65.0, 'pinky': 175.2},
     "mrigashira":   {'thumb': 175.1, 'index':  70.2, 'middle':  70.4, 'ring':  70.1, 'pinky': 175.2},
     "mukula":       {'thumb':  59.8, 'index':  60.2, 'middle':  61.4, 'ring':  59.5, 'pinky':  61.2},
     "mushti":       {'thumb':  55.0, 'index':  45.0, 'middle':  45.0, 'ring':  45.0, 'pinky':  45.0},
@@ -558,12 +558,12 @@ def verify_mudra_identity(ml_prediction, current_angles, lm_wrapper, palm_size):
         if thumb_tip_y > (index_knuckle_y - 0.02): # Tolerance for near-level
             return False, "Wrong mudra — Your thumb must be raised and upright for Shikhara."
 
-    # Mushti MUST have thumb tucked (Not raised)
+    # Mushti MUST have thumb tucked over fingers (Not extended straight up like Shikhara)
     if mudra == "mushti":
-        thumb_tip_y = lm_wrapper[4].y
-        index_knuckle_y = lm_wrapper[5].y
-        if thumb_tip_y < index_knuckle_y:
-            return False, "Wrong mudra — For Mushti, your thumb should be tucked against your fingers."
+        if current_angles.get('thumb', 0) > 150:
+            gap_to_index_pip = dist_lm(lm_wrapper, 4, 6, palm_size)
+            if gap_to_index_pip > 0.45:
+                return False, "Wrong mudra — For Mushti, tuck your thumb over your fingers (do not raise your thumb up)."
 
     # Suchi must have Index fully UP (Vertical Check)
     if mudra == "suchi":
@@ -871,26 +871,18 @@ def get_corrections(detected_mudra, current_angles, landmarks_ref=None, palm_siz
     for finger, ref_angle in reference.items():
         if finger in skip_fingers:
             continue
-            
-        # Check all joints associated with this finger if available
-        joints_to_check = joint_map.get(finger, [finger])
-        max_joint_dev = 0
-        worst_joint = finger
-        
-        for joint in joints_to_check:
-            actual_angle = current_angles.get(joint, ref_angle)
-            abs_dev      = abs(ref_angle - actual_angle)
-            if abs_dev > max_joint_dev:
-                max_joint_dev = abs_dev
-                worst_joint = joint
 
-        # Update total error based on the worst joint deviation for this finger
+        actual_angle = current_angles.get(finger, ref_angle)
+        max_joint_dev = abs(ref_angle - actual_angle)
+        worst_joint = finger
+
+        # Update total error based on finger PIP deviation
         if max_joint_dev > 90:
-            total_error += (max_joint_dev * 2.5)
-        elif max_joint_dev > 50:
             total_error += (max_joint_dev * 1.5)
-        else:
+        elif max_joint_dev > 50:
             total_error += max_joint_dev
+        else:
+            total_error += (max_joint_dev * 0.5)
 
         target_straight = ref_angle >= 140
         threshold = STRAIGHT_FINGER_THRESHOLD if (mudra_key in STRAIGHT_FINGER_MUDRAS and
@@ -2423,18 +2415,31 @@ def predict_mudra():
     try:
         body = request.get_json(force=True)
         if not body or 'landmarks' not in body:
-            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": []}), 400
+            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": [], "detected": False}), 200
 
         raw_lms = body['landmarks']
-        target  = body.get('targetMudra', '').lower().strip()
+        target  = (body.get('targetMudra') or '').lower().strip()
         # Normalise target name
         target = FRONTEND_TO_MODEL.get(target, target)
 
-        if len(raw_lms) != 21:
-            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": []}), 400
+        if not raw_lms or len(raw_lms) != 21:
+            return jsonify({"name": "", "confidence": 0.0, "top3": [], "accuracy": 0, "corrections": [], "detected": False}), 200
 
-        # Build LM objects from JSON
-        lm_list = [LM(float(p['x']), float(p['y']), float(p['z'])) for p in raw_lms]
+        # Build LM objects from JSON safely
+        lm_list = []
+        for p in raw_lms:
+            if isinstance(p, dict):
+                x = float(p.get('x', 0.0) or 0.0)
+                y = float(p.get('y', 0.0) or 0.0)
+                z = float(p.get('z', 0.0) or 0.0)
+            elif isinstance(p, (list, tuple)) and len(p) >= 3:
+                x = float(p[0] or 0.0)
+                y = float(p[1] or 0.0)
+                z = float(p[2] or 0.0)
+            else:
+                x, y, z = 0.0, 0.0, 0.0
+            lm_list.append(LM(x, y, z))
+
         lm_wrapper = LMWrapper(lm_list)
         
         # Calculate palm_size for geometric rules
@@ -2470,6 +2475,7 @@ def predict_mudra():
         accuracy = 0.0
         corrections = []
         feedback = "Show your hand to the camera"
+        status = "Needs Improvement"
 
         if best_probs is not None:
             # Get joint angles for geometric verification
@@ -2477,31 +2483,54 @@ def predict_mudra():
             
             if target:
                 clean_best = clean_mudra_name(best_name)
-                # target is already cleaned/mapped above
                 
-                # Check if it's the wrong identity
-                if clean_best != target and best_conf > 30:
-                    accuracy = 0.0
-                    corrections = [f"Wrong Mudra: You are showing {best_name.capitalize()} instead of {target.capitalize()}."]
-                    feedback = "Try to form the target mudra correctly."
-                else:
-                    # Target matches or AI is confused (low confidence) -> rely on geometry
-                    ref_msgs, geom_acc, _, _ = get_corrections(target, finger_angles, lm_wrapper, palm_size)
-                    # [NORMALIZED] Blend: 70% AI Confidence / 30% Geometry
-                    blend_acc = (best_conf * 0.7) + (geom_acc * 0.3 if clean_best == target else 0)
-                    accuracy = round(blend_acc, 1)
+                # Get target confidence from model probabilities if available
+                target_conf = 0.0
+                if hasattr(model, 'classes_') and target in model.classes_:
+                    target_idx = list(model.classes_).index(target)
+                    target_conf = float(best_probs[target_idx]) * 100.0
+                
+                # 1. Master Physical Truth Guard: Check if physical posture violates target fingerprint
+                is_valid_target, veto_msg = verify_mudra_identity(target, finger_angles, lm_wrapper, palm_size)
+                
+                # 2. Get geometric corrections & accuracy for target
+                ref_msgs, geom_acc, _, _ = get_corrections(target, finger_angles, lm_wrapper, palm_size)
+                
+                # 3. Decision Logic:
+                # If hand physically matches target fingerprint AND geometric accuracy is reasonable (>= 35%), user IS doing target!
+                if is_valid_target and geom_acc >= 35.0:
+                    effective_conf = max(target_conf, 45.0 if clean_best == target else 35.0)
+                    accuracy = round(max((effective_conf * 0.5) + (geom_acc * 0.5), geom_acc), 1)
+                    status = "Correct" if accuracy >= 50 and geom_acc >= 45 else "Needs Improvement"
                     corrections = ref_msgs
+                    feedback = "Excellent! Perfect form." if status == "Correct" else "Almost there! Follow the corrections."
+                    wrong_display = ""
+                else:
+                    # Target posture is physically invalid or low geometric match. User is showing a wrong posture / wrong mudra.
+                    accuracy = 0.0
+                    status = "Wrong Mudra"
                     
-                    if accuracy >= 75:
-                        feedback = "Excellent! Perfect form."
-                    elif accuracy >= 50:
-                        feedback = "Almost there! Follow the corrections."
+                    # Check if predicted mudra is physically valid for its own fingerprint
+                    is_valid_best, _ = verify_mudra_identity(clean_best, finger_angles, lm_wrapper, palm_size) if clean_best else (False, "")
+                    
+                    if clean_best and clean_best != target and (is_valid_best or best_conf >= 40.0):
+                        wrong_display = best_name.capitalize()
+                        corrections = [f"Wrong Mudra: You are showing {wrong_display} instead of {target.capitalize()}."]
+                        feedback = f"You are showing {wrong_display} instead of {target.capitalize()}."
+                    elif veto_msg:
+                        wrong_display = ""
+                        corrections = [veto_msg]
+                        feedback = veto_msg
                     else:
-                        feedback = "Adjust your fingers to match the target."
+                        wrong_display = ""
+                        corrections = [f"Wrong posture for {target.capitalize()}."]
+                        feedback = f"Wrong posture for {target.capitalize()}."
             else:
-                # No target: just give raw model accuracy
+                # No target specified: raw detection mode
                 accuracy = round(best_conf, 1)
+                status = "Correct" if accuracy >= 50 else "Needs Improvement"
                 feedback = f"Detected: {best_name.capitalize()}"
+                wrong_display = ""
 
         # Build top-3 list
         top3 = []
@@ -2512,23 +2541,37 @@ def predict_mudra():
                 for i in idxs
             ]
 
-        print(f"[predict_mudra] target={target} best={best_name} acc={accuracy}% conf={best_conf:.1f}%")
+        print(f"[predict_mudra] target={target} best={best_name} acc={accuracy}% conf={best_conf:.1f}% status={status}")
 
         return jsonify({
-            "name":         best_name,
-            "confidence":   round(best_conf, 1),
-            "accuracy":     accuracy,
-            "corrections":  corrections,
-            "feedback":     feedback,
-            "top3":         top3,
-            "detected":     best_conf > 30,
-            "handedness":   best_label
+            "name":           target if status != "Wrong Mudra" else (best_name or "Wrong Mudra"),
+            "mudra":          target if status != "Wrong Mudra" else (best_name or "Wrong Mudra"),
+            "wrong_mudra":    best_name.capitalize() if status == "Wrong Mudra" else "",
+            "confidence":     round(best_conf, 1),
+            "accuracy":       accuracy,
+            "status":         status,
+            "corrections":    corrections,
+            "feedback":       feedback,
+            "current_angles": finger_angles if 'finger_angles' in locals() else {},
+            "ref_angles":     MUDRA_REFERENCE_ANGLES.get(target, {}),
+            "top3":           top3,
+            "detected":       True if (status != "Wrong Mudra" or best_conf > 30) else False,
+            "handedness":     best_label
         })
 
     except Exception as e:
         print(f"[predict_mudra] Error: {e}")
         import traceback; traceback.print_exc()
-        return jsonify({"name": "", "confidence": 0.0, "accuracy": 0, "corrections": [f"Error: {str(e)}"]}), 500
+        return jsonify({
+            "name": "",
+            "confidence": 0.0,
+            "accuracy": 0.0,
+            "corrections": [],
+            "feedback": "Adjust your hand position",
+            "top3": [],
+            "detected": False,
+            "handedness": "Right"
+        }), 200
 # =============================================================================
 # ENTRY POINT
 # =============================================================================

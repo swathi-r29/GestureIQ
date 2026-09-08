@@ -17,7 +17,7 @@ import BorderPattern from '../components/BorderPattern';
 import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG } from '../hooks/useVoiceGuide';
 import { checkGeometricAnchors, MERGEABLE_MUDRAS } from '../utils/geometricRules';
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
-import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
+import { loadMediaPipeScripts, safeLocateFile } from '../utils/loadMediaPipe';
 import { BASE_URL, SOCKET_URL, FLASK_URL } from '../utils/constants';
 
 let Hands, HAND_CONNECTIONS, drawConnectors, drawLandmarks;
@@ -203,11 +203,11 @@ const DOUBLE_MUDRAS = Object.keys(DOUBLE_MUDRA_CONFIG).map(folder => ({
 }));
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const STABILITY_THRESHOLD    = 10;
-const WRONG_MUDRA_GATE       = 5;
-const ACCURACY_THRESHOLD     = 68;   // ← lowered from 75 (double-hand harder) [Ref IEEE ICICV 2021]
-const MAINTENANCE_THRESHOLD  = 60;   // ← lowered from 68
-const HOLD_DURATION_MS       = 1000;
+const STABILITY_THRESHOLD = 10;
+const WRONG_MUDRA_GATE = 5;
+const ACCURACY_THRESHOLD = 68;   // ← lowered from 75 (double-hand harder) [Ref IEEE ICICV 2021]
+const MAINTENANCE_THRESHOLD = 60;   // ← lowered from 68
+const HOLD_DURATION_MS = 1000;
 
 /**
  * Per-mudra accuracy thresholds.
@@ -216,40 +216,40 @@ const HOLD_DURATION_MS       = 1000;
  * Cross-wrist and interlocked mudras also have higher variance → lower gate.
  */
 const MUDRA_THRESHOLDS = {
-  // ── Joined / pressed ────────────────────────────────────
-  anjali:        58,   // palms fully overlapping — heavy occlusion
-  kapotha:       58,
-  puspaputa:     60,
-  samputa:       58,
-  sankha:        60,
-  chakra:        60,
+    // ── Joined / pressed ────────────────────────────────────
+    anjali: 58,   // palms fully overlapping — heavy occlusion
+    kapotha: 58,
+    puspaputa: 60,
+    samputa: 58,
+    sankha: 60,
+    chakra: 60,
 
-  // ── Interlocked / hooked ─────────────────────────────────
-  karkata:       58,
-  pasa:          58,
-  kilaka:        58,
+    // ── Interlocked / hooked ─────────────────────────────────
+    karkata: 58,
+    pasa: 58,
+    kilaka: 58,
 
-  // ── Crossed-wrist / arm family ───────────────────────────
-  svastika:      58,
-  utsanga:       55,   // arms cross at shoulder — hardest spatial
-  nagabandha:    58,
-  katva:         58,
-  katakavardhana:58,
-  kartarisvastika:58,
-  bherunda:      58,
-  garuda:        58,
+    // ── Crossed-wrist / arm family ───────────────────────────
+    svastika: 58,
+    utsanga: 55,   // arms cross at shoulder — hardest spatial
+    nagabandha: 58,
+    katva: 58,
+    katakavardhana: 58,
+    kartarisvastika: 58,
+    bherunda: 58,
+    garuda: 58,
 
-  // ── Stacked / overlapping ────────────────────────────────
-  sivalinga:     60,
-  matsya:        60,
-  kurma:         60,
-  varaha:        60,
+    // ── Stacked / overlapping ────────────────────────────────
+    sivalinga: 60,
+    matsya: 60,
+    kurma: 60,
+    varaha: 60,
 
-  // ── Hanging / relaxed ────────────────────────────────────
-  dola:          52,   // both hands at sides — no proximity signal
+    // ── Hanging / relaxed ────────────────────────────────────
+    dola: 52,   // both hands at sides — no proximity signal
 
-  // ── Standard ─────────────────────────────────────────────
-  sakata:        65,
+    // ── Standard ─────────────────────────────────────────────
+    sakata: 65,
 };
 
 const STAGES = { CATEGORIES: 'CATEGORIES', LIST: 'LIST', PRACTICE: 'PRACTICE' };
@@ -373,7 +373,7 @@ export default function LearnDouble() {
                 drawConnectors = mp?.drawConnectors || window.drawConnectors;
                 drawLandmarks = mp?.drawLandmarks || window.drawLandmarks;
 
-                handsRef.current = new HandsConstructor({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                handsRef.current = new HandsConstructor({ locateFile: f => safeLocateFile('hands', f) });
                 handsRef.current.setOptions({
                     maxNumHands: 2,          // ← KEY CHANGE: detect both hands
                     modelComplexity: 1,
@@ -447,7 +447,7 @@ export default function LearnDouble() {
             active = false;
             if (recoveryRef.current) clearInterval(recoveryRef.current);
             if (handsRef.current) {
-                try { handsRef.current.close(); } catch (e) {}
+                try { handsRef.current.close(); } catch (e) { }
                 handsRef.current = null;
             }
         };
@@ -533,7 +533,7 @@ export default function LearnDouble() {
 
                 // ── NO HANDS / SINGLE HAND GATING ───────────────────────────
                 const numHands = Object.keys(handMap || {}).length;
-                
+
                 if (numHands === 0) {
                     setDetected({ name: 'No Hand', confidence: 0, detected: false });
                     const now = Date.now();
@@ -562,7 +562,7 @@ export default function LearnDouble() {
                 if (numHands === 1 && !isMergeable) {
                     // For non-touching mudras, we REQUIRE two hands.
                     setDetected({ name: 'Show both hands', confidence: 0, detected: false });
-                    
+
                     if (voiceEnabledRef.current) {
                         const now = Date.now();
                         if (now - lastNoHandRef.current > 7000) {
@@ -595,7 +595,7 @@ export default function LearnDouble() {
 
                 // ── GEOMETRIC GATEKEEPER ──────────────────────────────────────
                 const geo = checkGeometricAnchors(selectedMudra.folder, Object.values(handMap).map(h => h.landmarks));
-                
+
                 // If it's NOT mergeable and fails geometry, stop.
                 // Mergeable mudras (like Anjali) skip the geo-check to allow mirroring fallback in backend.
                 if (!geo.isValid && !isMergeable) {
@@ -614,7 +614,7 @@ export default function LearnDouble() {
                     setHoldProgress((holdAccumulatorRef.current / HOLD_DURATION_MS) * 100);
 
                     isDetectingRef.current = false;
-                    return; 
+                    return;
                 }
 
                 // console.log('[LearnDouble] Polling Flask...', { target: selectedMudra.folder, r: !!rightLm, l: !!leftLm });
@@ -688,7 +688,7 @@ export default function LearnDouble() {
                         const prev = lastWrongVoiceRef.current;
                         if (stableWrongMsg !== prev.text || (now - prev.time) > 4500) {
                             lastWrongVoiceRef.current = { text: stableWrongMsg, time: now };
-                            
+
                             let voiceMsg = lang === 'ta'
                                 ? `தவறான வடிவம். காட்டுவது ${getMudraName(lang, detectedName)}.`
                                 : `Wrong mudra. Showing ${detectedName}.`;
@@ -704,11 +704,11 @@ export default function LearnDouble() {
                     } else if (fingerCorr.length > 0) {
                         // Use a 2-frame gate for immediate responsiveness
                         stableCorrFramesRef.current = Math.min(10, (stableCorrFramesRef.current || 0) + 1);
-                        
+
                         if (stableCorrFramesRef.current >= 2) {
                             const currentCorr = fingerCorr[0];
                             const prev = lastCorrVoiceRef.current;
-                            
+
                             if (currentCorr !== prev.text || (now - prev.time) > 4000) {
                                 lastCorrVoiceRef.current = { text: currentCorr, time: now };
                                 // announce.raw(translate(lang, currentCorr), 2); // SILENCED: fold your fingers like that...
@@ -804,11 +804,11 @@ export default function LearnDouble() {
                 // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
                 if (holdAccumulatorRef.current >= HOLD_DURATION_MS && !saveMutexRef.current) {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
-                    
+
                     // 1. Tell the user they did it
                     if (voiceEnabledRef.current) {
                         const msg = lang === 'ta' ? 'அற்புதம்! முடித்துவிட்டீர்கள்.' : 'Excellent! You did it.';
-                        announce.raw(msg, 4); 
+                        announce.raw(msg, 4);
                     }
 
                     // 2. Wait 1.5s for the voice before transitioning

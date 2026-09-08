@@ -165,4 +165,102 @@ router.post('/download_dance_report', async (req, res) => {
   }
 });
 
+// In-memory student practice history store
+const STUDENT_PRACTICE_HISTORY = [
+  {
+    id: 'session_demo_1',
+    timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
+    danceName: 'Alarippu',
+    overallScore: 88,
+    grade: 'A',
+    stanceBreakdown: { Araimandi: 75, Samapada: 25 },
+    talaSyncScore: 92,
+    feedback: ['Maintain knee outward alignment in Araimandi']
+  },
+  {
+    id: 'session_demo_2',
+    timestamp: new Date(Date.now() - 86400000).toISOString(),
+    danceName: 'Veeshi_Adavu_Suite',
+    overallScore: 91,
+    grade: 'A+',
+    stanceBreakdown: { Araimandi: 90, Nattadavu: 10 },
+    talaSyncScore: 94,
+    feedback: ['Excellent Veeshi arm extension!']
+  }
+];
+
+// @route   POST /api/student/save_session
+router.post('/save_session', (req, res) => {
+    try {
+        const session = {
+            id: `session_${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            danceName: req.body.danceName || 'Alarippu',
+            overallScore: req.body.overallScore || 85,
+            grade: req.body.grade || 'A',
+            stanceBreakdown: req.body.stanceBreakdown || { Araimandi: 100 },
+            talaSyncScore: req.body.talaSyncScore || 90,
+            feedback: req.body.feedback || []
+        };
+        STUDENT_PRACTICE_HISTORY.unshift(session);
+        if (STUDENT_PRACTICE_HISTORY.length > 50) STUDENT_PRACTICE_HISTORY.pop();
+        res.json({ status: 'success', session });
+    } catch (err) {
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
+// @route   GET /api/student/history
+router.get('/history', (req, res) => {
+    try {
+        const total = STUDENT_PRACTICE_HISTORY.length;
+        const avgScore = total > 0 
+            ? Math.round(STUDENT_PRACTICE_HISTORY.reduce((a, b) => a + (b.overallScore || 85), 0) / total) 
+            : 89;
+
+        // Dynamic stance analysis from stance breakdowns across history
+        const stanceScores = {};
+        STUDENT_PRACTICE_HISTORY.forEach(s => {
+          if (s.stanceBreakdown) {
+            Object.entries(s.stanceBreakdown).forEach(([st, pct]) => {
+              const cleanName = st.replace(' Stance', '').trim();
+              if (!stanceScores[cleanName]) stanceScores[cleanName] = [];
+              stanceScores[cleanName].push(s.overallScore || 85);
+            });
+          }
+        });
+
+        const mastered = [];
+        const weak = [];
+        Object.entries(stanceScores).forEach(([st, scores]) => {
+          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+          if (avg >= 85) {
+            mastered.push(`${st} Stance`);
+          } else {
+            weak.push(`${st} Stance`);
+          }
+        });
+
+        if (mastered.length === 0) mastered.push('Araimandi Stance', 'Samapada Stance');
+        if (weak.length === 0) weak.push('Muzhumandi Stance');
+
+        // Streak calculation (unique practice days)
+        const uniqueDays = new Set(STUDENT_PRACTICE_HISTORY.map(s => new Date(s.timestamp).toDateString()));
+
+        res.json({
+            status: 'success',
+            history: STUDENT_PRACTICE_HISTORY,
+            stats: {
+                totalSessions: total,
+                averageScore: avgScore,
+                masteredStances: mastered,
+                weakStances: weak,
+                currentStreak: `${uniqueDays.size} Days`
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
 module.exports = router;

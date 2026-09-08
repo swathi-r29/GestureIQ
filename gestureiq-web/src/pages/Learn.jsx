@@ -9,7 +9,7 @@ import { useVoiceGuide, LanguageSelector, MUDRA_CONFIG, translate, getMudraName 
 import { BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 import { logFingerStates } from '../utils/fingerRules';
 import { BASE_URL, SOCKET_URL, FLASK_URL } from '../utils/constants';
-import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
+import { loadMediaPipeScripts, safeLocateFile } from '../utils/loadMediaPipe';
 
 let Hands, HAND_CONNECTIONS;
 let drawConnectors, drawLandmarks;
@@ -82,8 +82,8 @@ const MUDRAS = [
 
 const STABILITY_THRESHOLD = 10;
 const WRONG_MUDRA_GATE = 3;
-const ACCURACY_THRESHOLD = 75;
-const HOLD_DURATION_MS = 1200;
+const ACCURACY_THRESHOLD = 40;
+const HOLD_DURATION_MS = 250;
 
 const STAGES = { SELECT_TYPE: 'SELECT_TYPE', SELECT_LEVEL: 'SELECT_LEVEL', MUDRA_LIST: 'MUDRA_LIST', PRACTICE: 'PRACTICE' };
 const LEVEL_CONFIG = {
@@ -91,6 +91,24 @@ const LEVEL_CONFIG = {
     'Intermediate': { title: 'The Expressions', icon: '❦' },
     'Advanced': { title: 'The Mastery', icon: '✧' },
 };
+
+function getLevelMudras(lvl, type = 'Single') {
+    const targetType = type || 'Single';
+    return MUDRAS.filter(m => m.level === lvl && m.type === targetType);
+}
+
+function getLevelProgress(lvl, type = 'Single', progressList = []) {
+    const levelMudras = getLevelMudras(lvl, type);
+    return levelMudras.filter(mudra => {
+        return (progressList || []).some(p => {
+            if (!p) return false;
+            const cleanP = String(p).toLowerCase().replace(/[^a-z0-9]/g, '');
+            const cleanF = mudra.folder.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const cleanN = mudra.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return cleanP === cleanF || cleanP === cleanN;
+        });
+    });
+}
 
 export default function Learn() {
     const { user } = useAuth();
@@ -166,6 +184,7 @@ export default function Learn() {
     const lastOkVoiceRef = useRef(0);
     const lastNoHandRef = useRef(0);
     const stableCorrFramesRef = useRef(0);
+    const noHandFramesRef = useRef(0);
 
     useEffect(() => { voiceEnabledRef.current = voiceEnabled; }, [voiceEnabled]);
     useEffect(() => { selectedMudraRef.current = selectedMudra; }, [selectedMudra]);
@@ -176,8 +195,8 @@ export default function Learn() {
         { title: 'Start Live Practice', desc: 'The AI will watch your hand and give corrections in real time.' },
     ];
 
-    const getLevelMudras = (lvl) => MUDRAS.filter(m => m.level === lvl && m.type === selectedType);
-    const getLevelProgress = (lvl) => getLevelMudras(lvl).filter(m => progress.includes(m.folder));
+    const getLevelMudrasCurrent = (lvl) => getLevelMudras(lvl, selectedType);
+    const getLevelProgressCurrent = (lvl) => getLevelProgress(lvl, selectedType, progress);
 
     useEffect(() => {
         if (user && user.role !== 'student') { navigate('/'); return; }
@@ -242,8 +261,7 @@ export default function Learn() {
                 drawLandmarks = mp.drawLandmarks;
 
                 const hands = new HandsConstructor({
-                    locateFile: (file) =>
-                        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+                    locateFile: (file) => safeLocateFile('hands', file),
                 });
 
                 const maxHands = selectedType === 'Double' ? 2 : 1;
@@ -321,15 +339,16 @@ export default function Learn() {
 
                         landmarksRef.current = { left, right };
                     } else {
-                        const lms = lmsList[0];
-                        const label = handsList[0]?.label || 'Right';
-                        const score = handsList[0]?.score || 1.0;
+                        const primaryLms = lmsList[0];
+                        const primaryMeta = handsList[0] || {};
+                        const label = primaryMeta.label || 'Right';
+                        const score = primaryMeta.score || 1.0;
 
-                        landmarksRef.current = lms;
+                        landmarksRef.current = primaryLms;
                         landmarksMetaRef.current = { handedness: label, score };
                         
                         // [TASK 5] Visualizer Fix: Force re-render with spread to guarantee reactivity
-                        setLiveLandmarks([...lms]);
+                        setLiveLandmarks([...primaryLms]);
                     }
                 } else {
                     landmarksRef.current = null;
@@ -499,28 +518,32 @@ export default function Learn() {
                         : (dataObj.length === 21)  // NormalizedLandmarkList is NOT a native Array — don't use Array.isArray
                 );
                 if (!hasHand) {
-                    setDetected({ name: 'No Hand', confidence: 0, detected: false });
-                    setHoldProgress(0);
-                    holdStartRef.current = null;
+                    noHandFramesRef.current = (noHandFramesRef.current || 0) + 1;
+                    if (noHandFramesRef.current >= 4) {
+                        setDetected({ name: 'No Hand', confidence: 0, detected: false });
+                        setHoldProgress(0);
+                        holdStartRef.current = null;
 
-                    consecutiveRef.current = { name: null, count: 0 };
-                    lastDetectedNameRef.current = '';
-                    wrongMudraFramesRef.current = 0;
-                    lowAccuracyFramesRef.current = 0; // Reset on total hand loss
+                        consecutiveRef.current = { name: null, count: 0 };
+                        lastDetectedNameRef.current = '';
+                        wrongMudraFramesRef.current = 0;
+                        lowAccuracyFramesRef.current = 0; // Reset on total hand loss
 
-                    if (voiceEnabledRef.current) {
-                        const now = Date.now();
-                        // Only announce "Show your hand" if not currently holding a success state
-                        if (holdAccumulatorRef.current === 0) {
-                            if (now - lastNoHandRef.current > 8000) {
-                                lastNoHandRef.current = now;
-                                announce.raw(lang === 'ta' ? 'உங்கள் கையை கேமராவில் காட்டுங்கள்' : 'Show your hand to the camera', 2);
+                        if (voiceEnabledRef.current) {
+                            const now = Date.now();
+                            // Only announce "Show your hand" if not currently holding a success state
+                            if (holdAccumulatorRef.current === 0) {
+                                if (now - lastNoHandRef.current > 8000) {
+                                    lastNoHandRef.current = now;
+                                    announce.raw(lang === 'ta' ? 'உங்கள் கையை கேமராவில் காட்டுங்கள்' : 'Show your hand to the camera', 2);
+                                }
                             }
                         }
                     }
                     isDetectingRef.current = false;
                     return;
                 }
+                noHandFramesRef.current = 0;
 
 
                 attemptsRef.current += 1;
@@ -530,7 +553,7 @@ export default function Learn() {
                     capturedFaceFrame = captureFrame(); // Uses your built-in fast snapshot utility
                 }
 
-                let endpoint = `/api/detect_landmarks`;
+                let endpoint = `/api/predict`;
                 let body = {};
 
                 if (selectedType === 'Double') {
@@ -541,17 +564,13 @@ export default function Learn() {
                         targetMudra: selectedMudra.folder,
                     };
                 } else {
-                    const meta = landmarksMetaRef.current;
                     const lmArray = Array.from(dataObj).map(lm => ({
                         x: lm.x ?? lm[0], y: lm.y ?? lm[1], z: lm.z ?? lm[2],
                     }));
-                    endpoint = `/api/detect_holistic`;
+                    endpoint = `/api/predict`;
                     body = {
-                        hand_landmarks: lmArray,
-                        handedness: meta.handedness || 'Right',
-                        presenceScore: meta.score || 1.0,
-                        targetMudra: selectedMudra.folder,
-                        faceFrame: capturedFaceFrame
+                        landmarks: lmArray,
+                        targetMudra: selectedMudra.folder
                     };
                 }
 
@@ -559,22 +578,30 @@ export default function Learn() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
-                    signal: AbortSignal.timeout(3000),
+                    signal: AbortSignal.timeout(8000),
                 });
+
+                if (!res.ok) return;
 
                 const data = await res.json();
                 
-                // [TASK 5] 100% Production Feedback Logic
-                let feedback = "Adjusting...";
-                const isWrong = data.status === "Wrong Mudra";
-                const isCorrect = data.status === "Correct";
+                const detectedName = (data.name || '').toLowerCase().trim();
+                const targetFolder = (selectedMudraRef.current?.folder || '').toLowerCase().trim();
+                const targetName = selectedMudraRef.current?.name || selectedMudraRef.current?.folder || 'target';
 
+                const isCorrect = (data.status === "Correct" || (data.detected && (detectedName === targetFolder || data.status === "Correct") && (data.accuracy >= 45 || data.confidence >= 45)));
+                const isWrong = (data.status === "Wrong Mudra" || (data.corrections && data.corrections.some(c => c.toLowerCase().includes('wrong mudra'))) || (detectedName && detectedName !== targetFolder && data.confidence > 40 && (data.accuracy < 40)));
+
+                let feedback = "Adjusting...";
                 if (isWrong) {
-                    feedback = data.wrong_mudra 
-                        ? `You are showing ${data.wrong_mudra} instead of ${data.target_mudra}`
-                        : "Wrong Mudra";
+                    const wrongName = data.wrong_mudra || (data.name ? data.name.charAt(0).toUpperCase() + data.name.slice(1) : 'another mudra');
+                    feedback = `You are showing ${wrongName} instead of ${targetName}`;
                 } else if (isCorrect) {
                     feedback = "Correct";
+                } else if (data.corrections && data.corrections.length > 0) {
+                    feedback = data.corrections[0];
+                } else if (data.feedback) {
+                    feedback = data.feedback;
                 }
 
                 // Voice Spam Protection
@@ -585,9 +612,18 @@ export default function Learn() {
                     }
                 }
 
+                const statusStr = isWrong ? "Wrong Mudra" : (data.status || (isCorrect ? "Correct" : "Needs Improvement"));
+
                 const displayData = {
                     ...data,
-                    feedback: feedback // Unified feedback field
+                    mudra: isWrong ? (data.wrong_mudra || data.name || 'Wrong Mudra') : (data.name || selectedMudraRef.current?.name || ''),
+                    wrong_mudra: isWrong ? (data.wrong_mudra || data.name || '') : '',
+                    status: statusStr,
+                    accuracy: isWrong ? 0 : (data.accuracy ?? data.confidence ?? 0),
+                    name: selectedMudraRef.current?.name || data.name || '',
+                    angles: data.current_angles || {},
+                    refAngles: data.ref_angles || {},
+                    feedback: feedback
                 };
 
                 // ── SUCCESS LOCK ─────────────────────────────────────────────
@@ -601,15 +637,15 @@ export default function Learn() {
                     return displayData;
                 });
 
-                const accuracy = data.accuracy || 0;
+                const accuracy = data.accuracy || data.confidence || 0;
                 const wrongMsg = isWrong ? feedback : null;
-                const holdMs = accuracy >= 95 ? 800 : HOLD_DURATION_MS;
+                const holdMs = HOLD_DURATION_MS;
 
-                const isCorrectForm = data.detected && accuracy >= ACCURACY_THRESHOLD && !wrongMsg && (data.name === selectedMudraRef.current?.folder);
+                const isCorrectForm = (isCorrect || (data.detected && accuracy >= ACCURACY_THRESHOLD && (detectedName === targetFolder || !detectedName))) && !wrongMsg;
                 const isGoodFrame = isCorrectForm;
 
                 const now = Date.now();
-                const dt = lastFrameTimeRef.current ? (now - lastFrameTimeRef.current) : 0;
+                const dt = lastFrameTimeRef.current ? Math.min(100, now - lastFrameTimeRef.current) : 50;
                 lastFrameTimeRef.current = now;
 
                 if (isGoodFrame) {
@@ -619,22 +655,18 @@ export default function Learn() {
                 } else {
                     lowAccuracyFramesRef.current++;
 
-                    if (wrongMsg || accuracy < ACCURACY_THRESHOLD) {
-                        // [PHASE 18] Wrong mudra or low accuracy — drain instantly
+                    if (wrongMsg) {
+                        // Reset to 0 only when wrong mudra is explicitly detected
                         holdAccumulatorRef.current = 0;
                         lowAccuracyFramesRef.current = 0;
                         peakAccuracyRef.current = 0;
-                    } else if (lowAccuracyFramesRef.current > 10) {
-                        // Maintain fallback for consistency drops
-                        const isPartialGood = data.detected && !wrongMsg && accuracy >= 62;
-                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * (isPartialGood ? 0.3 : 1.5));
+                    } else {
+                        // Gentle decay on minor hand wobbles so user doesn't lose all progress
+                        holdAccumulatorRef.current = Math.max(0, holdAccumulatorRef.current - dt * 0.4);
                     }
                 }
 
                 let displayPct = (holdAccumulatorRef.current / holdMs) * 100;
-                if (!isGoodFrame && (isCorrectForm && accuracy >= 62)) {
-                    displayPct = Math.min(75, displayPct);
-                }
 
                 // Functional update to avoid stale state flicker
                 setHoldProgress(() => {
@@ -642,23 +674,23 @@ export default function Learn() {
                     return displayPct;
                 });
 
-                // ── ATOMIC SUCCESS TRIGGER (Phase 12) ────────────────────────
+                // ── ATOMIC SUCCESS TRIGGER ────────────────────────
                 if (holdAccumulatorRef.current >= holdMs && !saveMutexRef.current) {
                     saveMutexRef.current = true; // Set synchronously to block next interval ticks
 
-                    // 1. First, tell the user they did it
+                    // 1. Tell the user they did it
                     if (voiceEnabledRef.current) {
                         const msg = lang === 'ta' ? 'அற்புதம்! முடித்துவிட்டீர்கள்.' : 'Excellent! You did it.';
                         announce.raw(msg, 4);
                     }
 
-                    // 2. Wait 1.5 seconds for the voice to play BEFORE showing the mastery page
+                    // 2. Fast transition to mastery page
                     setTimeout(() => {
                         masteredRef.current = true;
                         saveInProgressRef.current = true;
                         successLockRef.current = true; // Lock UI at 100%
                         handleMudraMastered(selectedMudraRef.current?.folder, peakAccuracyRef.current || accuracy);
-                    }, 1500);
+                    }, 300);
                 }
 
             } catch (err) {
@@ -666,7 +698,7 @@ export default function Learn() {
             } finally {
                 isDetectingRef.current = false;
             }
-        }, 100); // High-frequency streaming for "instant" feel
+        }, 250); // Balanced streaming (4 req/sec) to avoid Ngrok socket congestion
 
         return () => {
             clearInterval(interval);
@@ -782,16 +814,8 @@ export default function Learn() {
         isDetectingRef.current = false;         // CRITICAL: Clear API lock for next mudra
         lastResultTimeRef.current = Date.now(); // Reset watchdog timer
 
-        // Synchronous History Flush: Ensure registry is wiped BEFORE detection starts
-        try {
-            await axios.post(`${FLASK_URL}/api/clear_history`);
-            console.log('[Learn] Registry flushed successfully.');
-        } catch (e) {
-            console.error('[Learn] Flush failed:', e);
-        }
-
-        // HARD RESET: Give hardware and Flask time to settle
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Non-blocking background history flush
+        axios.post(`${FLASK_URL}/api/clear_history`).catch(e => console.error('[Learn] Flush failed:', e));
 
         // Re-unlock voice just in case browser re-locked on route/state change
         if (unlock) unlock();
@@ -909,11 +933,11 @@ export default function Learn() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                         {['Basic', 'Intermediate', 'Advanced'].map((lvl) => {
                             const config = LEVEL_CONFIG[lvl];
-                            const levelMudras = getLevelMudras(lvl);
-                            const completedCount = getLevelProgress(lvl).length;
+                            const levelMudras = getLevelMudras(lvl, selectedType);
+                            const completedCount = getLevelProgress(lvl, selectedType, progress).length;
                             let isLocked = false, lockReason = '';
-                            if (lvl === 'Intermediate' && getLevelProgress('Basic').length < 5) { isLocked = true; lockReason = 'Master 5 Basic Mudras to unlock'; }
-                            else if (lvl === 'Advanced' && getLevelProgress('Intermediate').length < getLevelMudras('Intermediate').length) { isLocked = true; lockReason = 'Master all Intermediate Mudras to unlock'; }
+                            if (lvl === 'Intermediate' && getLevelProgress('Basic', selectedType, progress).length < 5) { isLocked = true; lockReason = 'Master 5 Basic Mudras to unlock'; }
+                            else if (lvl === 'Advanced' && getLevelProgress('Intermediate', selectedType, progress).length < getLevelMudras('Intermediate', selectedType).length) { isLocked = true; lockReason = 'Master all Intermediate Mudras to unlock'; }
                             return (
                                 <div key={lvl}
                                     onClick={() => { if (!isLocked) { setSelectedLevel(lvl); setStage(STAGES.MUDRA_LIST); } }}
@@ -1090,18 +1114,29 @@ export default function Learn() {
                             {/* Reference image */}
                             <div className="w-full aspect-video rounded-xl border flex items-center justify-center relative overflow-hidden"
                                 style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-card2)' }}>
-                                {mudraContent?.primaryImage && mudraContent.mudraName === selectedMudra.folder ? (
-                                    <div className="w-full h-full relative overflow-hidden">
+                                {selectedMudra && (
+                                    <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
                                         <div className="absolute inset-0 scale-110 blur-xl opacity-30 saturate-150"
-                                            style={{ backgroundImage: `url(/uploads/mudras/${selectedMudra.folder}/images/${mudraContent.primaryImage})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-                                        <img src={`/uploads/mudras/${selectedMudra.folder}/images/${mudraContent.primaryImage}`}
+                                            style={{
+                                                backgroundImage: `url(/uploads/mudras/${selectedMudra.folder}/images/${mudraContent?.primaryImage || selectedMudra.folder + '.jpg'})`,
+                                                backgroundSize: 'cover',
+                                                backgroundPosition: 'center'
+                                            }} />
+                                        <img
+                                            src={`/uploads/mudras/${selectedMudra.folder}/images/${mudraContent?.primaryImage || selectedMudra.folder + '.jpg'}`}
+                                            onError={(e) => {
+                                                if (e.target.src.includes('/uploads/')) {
+                                                    e.target.src = `/crt images/${selectedMudra.folder}.jpg`;
+                                                } else if (e.target.src.includes('.jpg')) {
+                                                    e.target.src = `/crt images/${selectedMudra.folder}.png`;
+                                                } else if (e.target.src.includes('.png')) {
+                                                    e.target.src = `/sample_${selectedMudra.folder}.png`;
+                                                } else {
+                                                    e.target.style.display = 'none';
+                                                }
+                                            }}
                                             alt={selectedMudra.name}
                                             className="relative z-10 w-full h-full object-contain drop-shadow-2xl" />
-                                    </div>
-                                ) : (
-                                    <div className="text-center">
-                                        <div className="text-3xl mb-3 opacity-20">📸</div>
-                                        <p className="text-[10px] tracking-[4px] uppercase opacity-40 font-bold">Image Not Available</p>
                                     </div>
                                 )}
                                 {contentLoading && (

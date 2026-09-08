@@ -1,6 +1,13 @@
-/**
- * loadMediaPipe.js — Robust script loader for MediaPipe Hands and MediaPipe Pose
- */
+export const safeLocateFile = (pkg, file) => {
+  const url = `https://cdn.jsdelivr.net/npm/@mediapipe/${pkg}/${file}`;
+  if (typeof window !== 'undefined') {
+    window.PACKAGE_STATUSES = window.PACKAGE_STATUSES || {};
+    if (!window.PACKAGE_STATUSES[url]) {
+      window.PACKAGE_STATUSES[url] = { loaded: 0, total: 0 };
+    }
+  }
+  return url;
+};
 
 export const loadMediaPipeScripts = () => {
   return new Promise((resolve, reject) => {

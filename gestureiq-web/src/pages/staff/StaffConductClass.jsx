@@ -19,34 +19,65 @@ const RTC_CONFIG = {
 };
 
 // ── Skeleton overlay for student cards ──────────────────────
-const SkeletonOverlay = ({ landmarks, color = '#10B981' }) => {
+const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current || !landmarks) return;
+    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const connections = [
-      [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
-      [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
-      [0,17],[17,18],[18,19],[19,20]
-    ];
-    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
-    connections.forEach(([s, e]) => {
-      if (landmarks[s] && landmarks[e]) {
-        ctx.beginPath();
-        ctx.moveTo(landmarks[s].x * canvas.width, landmarks[s].y * canvas.height);
-        ctx.lineTo(landmarks[e].x * canvas.width, landmarks[e].y * canvas.height);
-        ctx.stroke();
-      }
-    });
-    ctx.fillStyle = '#fff';
-    landmarks.forEach(pt => {
-      ctx.beginPath();
-      ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }, [landmarks, color]);
+
+    // 1. Draw Hand Skeleton (21 points)
+    if (landmarks && landmarks.length >= 21) {
+      const connections = [
+        [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+        [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+        [0,17],[17,18],[18,19],[19,20]
+      ];
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      connections.forEach(([s, e]) => {
+        if (landmarks[s] && landmarks[e]) {
+          ctx.beginPath();
+          ctx.moveTo(landmarks[s].x * canvas.width, landmarks[s].y * canvas.height);
+          ctx.lineTo(landmarks[e].x * canvas.width, landmarks[e].y * canvas.height);
+          ctx.stroke();
+        }
+      });
+      ctx.fillStyle = '#fff';
+      landmarks.forEach(pt => {
+        if (pt && typeof pt.x === 'number') {
+          ctx.beginPath();
+          ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
+
+    // 2. Draw Full Body Pose Skeleton (33 points)
+    if (poseLandmarks && poseLandmarks.length >= 33) {
+      const bodyConnections = [
+        [11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
+        [23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[27,31],[28,32]
+      ];
+      ctx.strokeStyle = '#00F2FE'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      bodyConnections.forEach(([s, e]) => {
+        if (poseLandmarks[s] && poseLandmarks[e]) {
+          ctx.beginPath();
+          ctx.moveTo(poseLandmarks[s].x * canvas.width, poseLandmarks[s].y * canvas.height);
+          ctx.lineTo(poseLandmarks[e].x * canvas.width, poseLandmarks[e].y * canvas.height);
+          ctx.stroke();
+        }
+      });
+      ctx.fillStyle = '#FFD700';
+      poseLandmarks.forEach(pt => {
+        if (pt && typeof pt.x === 'number') {
+          ctx.beginPath();
+          ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
+  }, [landmarks, poseLandmarks, color]);
   return (
     <canvas ref={canvasRef} width={320} height={180}
       className="absolute inset-0 w-full h-full pointer-events-none z-10"
@@ -992,15 +1023,18 @@ const StaffConductClass = () => {
                       </div>
                     )}
                     
+                    {/* Real-time Skeleton Overlay (Hand + Full Body Pose) */}
+                    <SkeletonOverlay landmarks={data.landmarks} poseLandmarks={data.poseLandmarks} color={data.score >= 90 ? '#10B981' : '#F59E0B'} />
+
                     {/* Floating Circular Score Overlay */}
-                    <div className="absolute top-3 right-3 p-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 group-hover:scale-110 transition-transform duration-500">
+                    <div className="absolute top-3 right-3 p-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 group-hover:scale-110 transition-transform duration-500 z-20">
                       <CircularScore 
                         score={data.score} 
                         color={data.score >= 90 ? '#10B981' : data.score >= 75 ? '#F59E0B' : '#EF4444'} 
                       />
                     </div>
 
-                    <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-white/10 flex items-center space-x-1.5">
+                    <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-white/10 flex items-center space-x-1.5 z-20">
                       <div className={`w-1.5 h-1.5 rounded-full ${data.score >= 90 ? 'bg-emerald-500' : 'bg-zinc-500 opacity-50'} animate-pulse`} />
                       <span className="text-[8px] font-black uppercase text-white/70">Secure Handshake</span>
                     </div>
@@ -1016,6 +1050,7 @@ const StaffConductClass = () => {
                             data.mudra && data.mudra !== 'No Hand' ? 'text-blue-400' : 'text-zinc-500'
                           }`}>
                             {activeModules.mudra ? (data.mudra || 'No Action') : 'AI Paused'}
+                            {data.stanceName ? ` • ${data.stanceName}` : ''}
                           </span>
                         </div>
                       </div>

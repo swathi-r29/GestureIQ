@@ -176,42 +176,72 @@ const StaffCreateClass = () => {
               </div>
             </div>
 
-            {/* Mudra Selection */}
+            {/* Mudra & Stance Practice Focus Selection */}
             <div className="p-6 rounded-2xl border space-y-6"
               style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border)' }}>
               <div>
                 <label className="block text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
-                  Select Mudra Category
+                  Select Practice & Evaluation Focus
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <button 
                     type="button"
                     onClick={() => setMudraCategory('Single')}
-                    className={`p-4 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                    className={`p-3.5 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
                       mudraCategory === 'Single' 
                         ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
-                    <span className="text-3xl">🖐️</span>
+                    <span className="text-2xl">🖐️</span>
                     <div className="text-center">
-                      <div className="text-sm font-black" style={{ color: 'var(--text)' }}>Single Hand</div>
-                      <div className="text-[10px] opacity-50 uppercase tracking-widest font-bold">Asamyuta</div>
+                      <div className="text-xs font-black" style={{ color: 'var(--text)' }}>Single Hand</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest font-bold">Asamyuta</div>
                     </div>
                   </button>
                   <button 
                     type="button"
                     onClick={() => setMudraCategory('Double')}
-                    className={`p-4 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                    className={`p-3.5 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
                       mudraCategory === 'Double' 
                         ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
-                    <span className="text-3xl">🙌</span>
+                    <span className="text-2xl">🙌</span>
                     <div className="text-center">
-                      <div className="text-sm font-black" style={{ color: 'var(--text)' }}>Double Hand</div>
-                      <div className="text-[10px] opacity-50 uppercase tracking-widest font-bold">Samyuta</div>
+                      <div className="text-xs font-black" style={{ color: 'var(--text)' }}>Double Hand</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest font-bold">Samyuta</div>
+                    </div>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setMudraCategory('FullBody')}
+                    className={`p-3.5 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                      mudraCategory === 'FullBody' 
+                        ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-2xl">🧘</span>
+                    <div className="text-center">
+                      <div className="text-xs font-black" style={{ color: 'var(--text)' }}>Full Body Stance</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest font-bold">Araimandi / Stances</div>
+                    </div>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setMudraCategory('Combined')}
+                    className={`p-3.5 border rounded-2xl transition-all flex flex-col items-center gap-2 ${
+                      mudraCategory === 'Combined' 
+                        ? 'border-violet-500 bg-violet-500/10 shadow-lg scale-[1.02]' 
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-2xl">🎭</span>
+                    <div className="text-center">
+                      <div className="text-xs font-black" style={{ color: 'var(--text)' }}>Full Body + Mudra</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest font-bold">Full Suite</div>
                     </div>
                   </button>
                 </div>
@@ -221,7 +251,7 @@ const StaffCreateClass = () => {
                 <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-4">
                   <div className="flex items-center justify-between">
                     <label className="block text-sm font-bold" style={{ color: 'var(--text)' }}>
-                      Select Mudras to Cover
+                      Select Items to Cover in Live Session
                     </label>
                     <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest bg-violet-500/10 px-2 py-0.5 rounded">
                       {formData.mudrasList.length} Selected
@@ -258,7 +288,7 @@ const StaffCreateClass = () => {
               {formData.mudrasList.length === 0 && mudraCategory && (
                 <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest flex items-center gap-1.5 mt-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  Select at least one mudra to continue
+                  Select at least one posture/mudra item to continue
                 </p>
               )}
             </div>

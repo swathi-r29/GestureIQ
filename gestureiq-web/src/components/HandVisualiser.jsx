@@ -148,11 +148,13 @@ export default function HandVisualiser({
 
   // Use override info or fallback, ensuring nested structures exist
   const info = {
-    mudra:     infoOverride?.name || targetMudra,
-    detected:  infoOverride?.detected || (deviations && Object.keys(deviations).length > 0),
-    landmarks: infoOverride?.landmarks || landmarks,
-    angles:    infoOverride?.angles || {},
-    refAngles: infoOverride?.refAngles || {},
+    mudra:     infoOverride?.mudra || infoOverride?.name || targetMudra,
+    wrong_mudra: infoOverride?.wrong_mudra || "",
+    status:    infoOverride?.status || "",
+    detected:  infoOverride?.detected || (deviations && Object.keys(deviations).length > 0) || (landmarks && landmarks.length > 0),
+    landmarks: (infoOverride?.landmarks && infoOverride.landmarks.length > 0) ? infoOverride.landmarks : landmarks,
+    angles:    (infoOverride?.angles && Object.keys(infoOverride.angles).length > 0) ? infoOverride.angles : (infoOverride?.current_angles || {}),
+    refAngles: (infoOverride?.refAngles && Object.keys(infoOverride.refAngles).length > 0) ? infoOverride.refAngles : (infoOverride?.ref_angles || {}),
     ...infoOverride
   };
 
@@ -254,22 +256,51 @@ export default function HandVisualiser({
         <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
 
         {/* status badge */}
-        <div style={{
-          position: "absolute", top: "12px", left: "12px",
-          display: "flex", alignItems: "center", gap: "6px",
-          background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)",
-          borderRadius: "20px", padding: "4px 12px",
-          border: `1px solid ${info.detected ? "rgba(16,185,129,0.5)" : "rgba(255,255,255,0.1)"}`,
-        }}>
-          <div style={{
-            width: "8px", height: "8px", borderRadius: "50%",
-            background: info.detected ? "#10b981" : info.landmarks?.length > 0 ? "#3b82f6" : "#6b7280",
-            boxShadow: info.detected ? "0 0 6px #10b981" : info.landmarks?.length > 0 ? "0 0 6px #3b82f6" : "none",
-          }} />
-          <span style={{ fontSize: "12px", color: info.detected ? "#a7f3d0" : info.landmarks?.length > 0 ? "#bfdbfe" : "#9ca3af", fontWeight: 600 }}>
-            {loading ? "Connecting…" : info.detected ? info.mudra || "Detecting…" : info.landmarks?.length > 0 ? "Hand Tracked" : "No hand"}
-          </span>
-        </div>
+        {(() => {
+          const isWrong = info.status === "Wrong Mudra" || Boolean(info.wrong_mudra);
+          let rawMudra = isWrong ? (info.wrong_mudra || info.mudra) : info.mudra;
+          const isInvalidName = !rawMudra || rawMudra.toLowerCase() === 'no hand' || rawMudra.toLowerCase() === 'initializing...';
+          const displayMudra = isInvalidName ? null : rawMudra;
+
+          const isTracked = info.detected || (info.landmarks && info.landmarks.length > 0) || (info.angles && Object.keys(info.angles).length > 0);
+          
+          let borderColor = "rgba(255,255,255,0.1)";
+          let dotColor = "#6b7280";
+          let textColor = "#9ca3af";
+
+          if (isWrong && displayMudra) {
+            borderColor = "rgba(239,68,68,0.5)";
+            dotColor = "#ef4444";
+            textColor = "#fca5a5";
+          } else if ((info.detected || info.status === "Correct" || info.status === "Needs Improvement") && displayMudra) {
+            borderColor = "rgba(16,185,129,0.5)";
+            dotColor = "#10b981";
+            textColor = "#a7f3d0";
+          } else if (isTracked) {
+            borderColor = "rgba(59,130,246,0.5)";
+            dotColor = "#3b82f6";
+            textColor = "#bfdbfe";
+          }
+
+          return (
+            <div style={{
+              position: "absolute", top: "12px", left: "12px",
+              display: "flex", alignItems: "center", gap: "6px",
+              background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)",
+              borderRadius: "20px", padding: "4px 12px",
+              border: `1px solid ${borderColor}`,
+            }}>
+              <div style={{
+                width: "8px", height: "8px", borderRadius: "50%",
+                background: dotColor,
+                boxShadow: `0 0 6px ${dotColor}`,
+              }} />
+              <span style={{ fontSize: "12px", color: textColor, fontWeight: 600, textTransform: "lowercase" }}>
+                {loading ? "Connecting…" : displayMudra ? displayMudra : isTracked ? "hand tracked" : "no hand"}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* toggle ref button */}
         <button

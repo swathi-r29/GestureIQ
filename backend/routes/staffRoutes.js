@@ -398,14 +398,21 @@ router.get('/report/:sessionId', staffAuth, async (req, res) => {
 router.get('/report/:sessionId/pdf', staffAuth, async (req, res) => {
     try {
         const session = await ClassSession.findOne({ _id: req.params.sessionId, staffId: req.user.id });
-        if (!session || !session.pdfPath) return res.status(404).json({ msg: 'PDF not found' });
+        if (!session) return res.status(404).json({ msg: 'Class session report not found' });
         
-        if (fs.existsSync(session.pdfPath)) {
-            res.sendFile(session.pdfPath);
-        } else {
-            res.status(404).json({ msg: 'File missing on server' });
-        }
+        const staff = await User.findById(req.user.id);
+        const dateStr = new Date(session.conductedAt || Date.now()).toISOString().split('T')[0];
+        const pdfName = `${session.classId || 'session'}-${dateStr}.pdf`;
+        const pdfPath = session.pdfPath || path.join(__dirname, `../reports/${pdfName}`);
+        
+        // Regenerate to apply the latest royal PDF design system
+        await generateClassReportPDF(session, staff, pdfPath);
+        session.pdfPath = pdfPath;
+        await session.save();
+
+        res.sendFile(pdfPath);
     } catch (err) {
+        console.error('PDF Report Download Error:', err);
         res.status(500).send('Server Error');
     }
 });

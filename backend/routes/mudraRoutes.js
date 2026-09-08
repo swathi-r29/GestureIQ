@@ -8,18 +8,58 @@ const auth = require('../middleware/auth');
 // @access  Private (Staff/Admin)
 router.get('/', auth, async (req, res) => {
     try {
-        const { type } = req.query; // 'Single' or 'Double'
-        if (!type) return res.status(400).json({ msg: 'Mudra type is required' });
+        const { type } = req.query; // 'Single', 'Double', 'FullBody', or 'Combined'
+        if (!type) return res.status(400).json({ msg: 'Mudra or practice type is required' });
 
-        const handType = type.toLowerCase() === 'single' ? 'single' : 'double';
+        const reqType = type.toLowerCase();
         
+        const FULL_BODY_ITEMS = [
+            { name: 'Araimandi Stance', folder: 'araimandi' },
+            { name: 'Muzhumandi Stance', folder: 'muzhumandi' },
+            { name: 'Nattadavu Posture', folder: 'nattadavu' },
+            { name: 'Samapada Position', folder: 'samapada' },
+            { name: 'Veeshi Adavu', folder: 'veeshi_adavu' },
+            { name: 'Tatta Adavu', folder: 'tatta_adavu' }
+        ];
+
+        if (reqType === 'fullbody' || reqType === 'stance') {
+            return res.json(FULL_BODY_ITEMS);
+        }
+
         let formatted = [];
         const { isLocalMode, readLocalData } = require('../utils/dbFallback');
+
+        if (reqType === 'combined' || reqType === 'all') {
+            // Get single and double mudras + full body items
+            let singleAndDouble = [];
+            if (isLocalMode()) {
+                const data = readLocalData('mudras');
+                if (typeof data === 'object' && !Array.isArray(data)) {
+                    singleAndDouble = Object.keys(data).map(key => ({
+                        name: key.charAt(0).toUpperCase() + key.slice(1),
+                        folder: key.toLowerCase()
+                    }));
+                } else {
+                    singleAndDouble = data.map(m => ({
+                        name: m.mudraName.charAt(0).toUpperCase() + m.mudraName.slice(1),
+                        folder: m.mudraName.toLowerCase()
+                    }));
+                }
+            } else {
+                const mudras = await MudraContent.find({}).select('mudraName').sort({ mudraName: 1 });
+                singleAndDouble = mudras.map(m => ({
+                    name: m.mudraName.charAt(0).toUpperCase() + m.mudraName.slice(1),
+                    folder: m.mudraName.toLowerCase()
+                }));
+            }
+            return res.json([...FULL_BODY_ITEMS, ...singleAndDouble]);
+        }
+
+        const handType = reqType === 'single' ? 'single' : 'double';
 
         if (isLocalMode()) {
             console.log(`[MudraRoute] Service unreachable, falling back to local JSON for ${handType} mudras`);
             const data = readLocalData('mudras');
-            // Check if it's a map (db_check_result format)
             if (typeof data === 'object' && !Array.isArray(data)) {
                 formatted = Object.keys(data)
                     .filter(key => data[key].handType === handType)

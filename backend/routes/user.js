@@ -8,7 +8,15 @@ const MudraContent = require('../models/MudraContent');
 // Get mudra content for students
 router.get('/mudra/content/:mudraName', auth, async (req, res) => {
   try {
-    let content = await MudraContent.findOne({ mudraName: req.params.mudraName.toLowerCase() });
+    const { isLocalMode, getLocalMudra } = require('../utils/dbFallback');
+    const mudraName = req.params.mudraName.toLowerCase();
+
+    if (isLocalMode && isLocalMode()) {
+      const local = getLocalMudra(mudraName);
+      return res.json(local || { mudraName, primaryImage: `${mudraName}.jpg` });
+    }
+
+    let content = await MudraContent.findOne({ mudraName }).catch(() => null);
 
     // Auto-initialize if not found
     if (!content) {
@@ -18,25 +26,27 @@ router.get('/mudra/content/:mudraName', auth, async (req, res) => {
         'sakata', 'sankha', 'chakra', 'samputa', 'pasa', 'kilaka', 
         'matsya', 'kurma', 'varaha', 'garuda', 'nagabandha', 'bherunda', 'katva'
       ];
-      const isDouble = doubleMudras.includes(req.params.mudraName.toLowerCase());
+      const isDouble = doubleMudras.includes(mudraName);
       
       content = new MudraContent({
-        mudraName: req.params.mudraName.toLowerCase(),
+        mudraName,
         handType: isDouble ? 'double' : 'single'
       });
-      await content.save();
+      await content.save().catch(e => console.warn('[user.js] Could not save MudraContent to Mongo:', e.message));
     }
 
-    // Ensure primaryImage has a fallback if not explicitly set
-    const response = content.toObject ? content.toObject() : content;
+    const response = content ? (content.toObject ? content.toObject() : content) : { mudraName, primaryImage: `${mudraName}.jpg` };
     if (!response.primaryImage && response.images && response.images.length > 0) {
       response.primaryImage = response.images[0];
     }
+    if (!response.primaryImage) {
+      response.primaryImage = `${mudraName}.jpg`;
+    }
 
-    res.json(response);
+    return res.json(response);
   } catch (err) {
     console.error('API Error [/mudra/content/:mudraName]:', err);
-    res.status(500).json({ msg: 'Server error' });
+    return res.json({ mudraName: req.params.mudraName, primaryImage: `${req.params.mudraName}.jpg` });
   }
 });
 

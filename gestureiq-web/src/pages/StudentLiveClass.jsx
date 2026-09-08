@@ -7,9 +7,11 @@ import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
 import { checkGeometricAnchors } from '../utils/geometricRules';
 import { getSocket } from '../utils/socket';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
-import { loadMediaPipeScripts } from '../utils/loadMediaPipe';
+import { loadMediaPipeScripts, loadMediaPipePoseScripts, safeLocateFile } from '../utils/loadMediaPipe';
+import { evaluateFullBodyPose } from '../utils/bodyPoseRules';
 
 let Hands, HAND_CONNECTIONS;
+let Pose, POSE_CONNECTIONS;
 let drawConnectors, drawLandmarks;
 
 const RTC_CONFIG = {
@@ -55,10 +57,11 @@ const StudentLiveClass = () => {
   const [confidence, setConfidence] = useState(0);
   const [feedback, setFeedback] = useState('Show your hand to the camera');
   const [corrections, setCorrections] = useState([]);
-  const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
+  const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: true });
   const activeModulesRef = useRef(activeModules);
   useEffect(() => { activeModulesRef.current = activeModules; }, [activeModules]);
   const [rasaData, setRasaData] = useState({ rasa: '', rasa_confidence: 0, rasa_meaning: '', expression_match: false });
+  const [poseDetails, setPoseDetails] = useState(null);
   const [bestScore, setBestScore] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [announcement, setAnnouncement] = useState('');
@@ -66,7 +69,7 @@ const StudentLiveClass = () => {
   const [teacherConnected, setTeacherConnected] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
-  
+
   // MUDRA SYNC & TOAST STATES
   const [targetMudra, setTargetMudra] = useState('');
   const [showMudraToast, setShowMudraToast] = useState(false);
@@ -80,7 +83,10 @@ const StudentLiveClass = () => {
   const startTimeRef = useRef(null);
   const socketRef = useRef(null);
   const handsRef = useRef(null);
+  const poseRef = useRef(null);
   const landmarksRef = useRef(null);
+  const poseLandmarksRef = useRef(null);
+  const poseEvaluationRef = useRef(null);
   const lastResultTimeRef = useRef(Date.now());
   const requestRef = useRef(null);
   const frameCountRef = useRef(0);
@@ -183,7 +189,7 @@ const StudentLiveClass = () => {
     pc.ontrack = (event) => {
       console.log("🎧 Teacher stream received");
       const remoteStream = event.streams[0];
-      
+
       console.log("🎧 Tracks from teacher:");
       if (remoteStream) {
         remoteStream.getTracks().forEach(t => {
@@ -192,7 +198,7 @@ const StudentLiveClass = () => {
 
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.muted = false; 
+          remoteVideoRef.current.muted = false;
           remoteVideoRef.current.volume = 1.0;
 
           remoteVideoRef.current.onloadedmetadata = () => {
@@ -297,7 +303,7 @@ const StudentLiveClass = () => {
       vids.forEach(v => {
         if (v !== videoRef.current) { // Don't unmute local preview (feedback)
           v.muted = false;
-          v.play().catch(() => {});
+          v.play().catch(() => { });
         }
       });
       document.removeEventListener('click', handleFirstClick);
@@ -333,7 +339,7 @@ const StudentLiveClass = () => {
         // NEW: Real-Time Teacher-Controlled Spotlight & State Sync
         sock.on('update_class_state', (data) => {
           console.log('[Socket] Class state updated:', data);
-          
+
           if (data.targetMudra) {
             const newMudra = data.targetMudra;
             setClassData(prev => prev ? { ...prev, targetMudra: newMudra } : prev);
@@ -353,7 +359,7 @@ const StudentLiveClass = () => {
             perfectFiredRef.current = false;
             perfectCountRef.current = 0;
             setToastType('next');
-            
+
             // SHOW TOAST
             setToastData({
               name: data.name || newMudra,
@@ -361,7 +367,7 @@ const StudentLiveClass = () => {
               nameta: data.nameta || newMudra,
               meaningta: data.meaningta || ''
             });
-            
+
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
             setShowMudraToast(true);
             toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 5000);
@@ -436,22 +442,27 @@ const StudentLiveClass = () => {
     };
   }, [classId]);
 
-  // ── 2. MediaPipe Setup ─────────────────────────────────────
+  // ── 2. MediaPipe Setup (Hands + Full Body Pose) ────────────
   useEffect(() => {
     let active = true;
     const init = async () => {
       try {
-        const mp = await loadMediaPipeScripts();
+        const mpHands = await loadMediaPipeScripts();
+        const mpPose = await loadMediaPipePoseScripts();
         if (!active) return;
-        Hands = mp.Hands;
-        HAND_CONNECTIONS = mp.HAND_CONNECTIONS;
-        drawConnectors = mp.drawConnectors;
-        drawLandmarks = mp.drawLandmarks;
 
-        console.log('[MediaPipe] Scripts loaded successfully in StudentLiveClass');
+        Hands = mpHands.Hands;
+        HAND_CONNECTIONS = mpHands.HAND_CONNECTIONS;
+        drawConnectors = mpHands.drawConnectors;
+        drawLandmarks = mpHands.drawLandmarks;
+        Pose = mpPose.Pose;
+        POSE_CONNECTIONS = mpPose.POSE_CONNECTIONS;
 
+        console.log('[MediaPipe] Hands & Pose scripts loaded successfully in StudentLiveClass');
+
+        // Initialize Hands
         handsRef.current = new Hands({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+          locateFile: (file) => safeLocateFile('hands', file)
         });
         handsRef.current.setOptions({
           maxNumHands: 2, modelComplexity: 1,
@@ -465,40 +476,31 @@ const StudentLiveClass = () => {
           ctx.save();
           ctx.scale(-1, 1);
           ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
-          
-          // FIX: Use activeModulesRef to avoid stale closure in onResults
+
           if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
             const hList = results.multiHandLandmarks;
             const hness = results.multiHandedness || [];
-            
-            // Landmark average smoothing (simplified for multi-hand)
-            const averagedLms = hList.map(h => h.map((lm, i) => lm)); // for now just pass through
-            
-            landmarksRef.current = { 
-              multiHandLandmarks: hList, 
+
+            landmarksRef.current = {
+              multiHandLandmarks: hList,
               multiHandedness: hness.map((h, i) => {
-                  // [RECTIFICATION] Support spatial-relative identity tracking
-                  if (hList.length === 2) {
-                      return { ...h, label: hList[i][0].x < 0.5 ? 'Right' : 'Left' };
-                  }
-                  return h;
+                if (hList.length === 2) {
+                  return { ...h, label: hList[i][0].x < 0.5 ? 'Right' : 'Left' };
+                }
+                return h;
               }),
-              landmarks: hList[0], // backward compat for single hand logic
+              landmarks: hList[0],
               handedness: hness[0]?.label || 'Right'
             };
 
             lastLandmarkTimeRef.current = Date.now();
-            
+
             hList.forEach((lms, handIdx) => {
-              // 1. Draw Connectors (Base Layer)
               const baseColor = handIdx === 0 ? '#7C3AED' : '#10B981';
               drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: baseColor, lineWidth: 3 });
 
-              // 2. Draw Landmarks (Correction Layer)
               const deviations = fingerDeviationsRef.current;
-              
               if (deviations) {
-                // Finger-to-Landmark Index Mapping
                 const fingerMap = {
                   thumb: [1, 2, 3, 4],
                   index: [5, 6, 7, 8],
@@ -507,27 +509,20 @@ const StudentLiveClass = () => {
                   pinky: [17, 18, 19, 20]
                 };
 
-                // Draw individual joints with correction colors
-                lms.forEach((lm, lmIdx) => {
-                  let jointColor = '#ffffff'; // Default: white
-
-                  // Check which finger this landmark belongs to
-                  for (const [fingerName, indices] of Object.entries(fingerMap)) {
-                    if (indices.includes(lmIdx)) {
-                      jointColor = deviations[fingerName] || '#ffffff';
-                      break;
+                Object.entries(fingerMap).forEach(([finger, indices]) => {
+                  const hasError = deviations[finger];
+                  const ptColor = hasError ? '#EF4444' : baseColor;
+                  indices.forEach(idx => {
+                    if (lms[idx]) {
+                      ctx.beginPath();
+                      ctx.arc(lms[idx].x * canvas.width, lms[idx].y * canvas.height, hasError ? 5 : 3, 0, 2 * Math.PI);
+                      ctx.fillStyle = ptColor;
+                      ctx.fill();
                     }
-                  }
-
-                  drawLandmarks(ctx, [lm], { 
-                    color: jointColor, 
-                    lineWidth: 1, 
-                    radius: lmIdx === 0 ? 4 : 3 // Larger wrist
                   });
                 });
               } else {
-                // fallback to default white if no deviations data
-                drawLandmarks(ctx, lms, { color: '#ffffff', lineWidth: 1, radius: 3 });
+                drawLandmarks(ctx, lms, { color: '#FFFFFF', lineWidth: 1, radius: 2 });
               }
             });
           } else {
@@ -538,6 +533,52 @@ const StudentLiveClass = () => {
 
           ctx.restore();
         });
+
+        // Initialize Pose (Full Body Skeleton & Stance Classifier)
+        if (Pose) {
+          poseRef.current = new Pose({
+            locateFile: (file) => safeLocateFile('pose', file)
+          });
+          poseRef.current.setOptions({
+            modelComplexity: 1, smoothLandmarks: true,
+            minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+          });
+          poseRef.current.onResults((results) => {
+            if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
+              poseLandmarksRef.current = results.poseLandmarks;
+              const evalRes = evaluateFullBodyPose(results.poseLandmarks);
+              poseEvaluationRef.current = evalRes;
+              setPoseDetails(evalRes);
+
+              // Draw Full Body Pose Skeleton overlay on canvas
+              const canvas = canvasRef.current;
+              if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx.save();
+                ctx.scale(-1, 1);
+                if (drawConnectors && POSE_CONNECTIONS) {
+                  drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00F2FE', lineWidth: 2.5 });
+                  drawLandmarks(ctx, results.poseLandmarks, { color: '#FFD700', lineWidth: 1, radius: 3 });
+                }
+                ctx.restore();
+              }
+
+              // ── REAL-TIME VOICE CORRECTION ENGINE ──
+              if (evalRes && evalRes.feedbacks && evalRes.feedbacks.length > 0) {
+                const now = Date.now();
+                if (now - lastVoiceRef.current > 4000) {
+                  lastVoiceRef.current = now;
+                  const topFeedback = evalRes.feedbacks[0];
+                  setCorrections(evalRes.feedbacks);
+                  announce(topFeedback);
+                }
+              }
+            } else {
+              poseLandmarksRef.current = null;
+              poseEvaluationRef.current = null;
+            }
+          });
+        }
       } catch (err) {
         console.error('[MediaPipe] Initialization failed:', err);
       }
@@ -548,8 +589,9 @@ const StudentLiveClass = () => {
     return () => {
       active = false;
       handsRef.current?.close();
+      poseRef.current?.close();
     };
-  }, []);
+  }, [announce]);
 
   // ── 3. Webcam control ──────────────────────────────────────
   const stopWebcam = useCallback(() => {
@@ -588,7 +630,7 @@ const StudentLiveClass = () => {
       // Force local review is ALWAYS muted to prevent feedback loop beep
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.muted = true; 
+        videoRef.current.muted = true;
         await videoRef.current.play();
       }
       setWebcamActive(true);
@@ -653,8 +695,11 @@ const StudentLiveClass = () => {
       requestRef.current = requestAnimationFrame(processFrame);
       return;
     }
-    if (handsRef.current) {
+    if (handsRef.current && activeModulesRef.current.mudra) {
       await handsRef.current.send({ image: videoRef.current });
+    }
+    if (poseRef.current && (activeModulesRef.current.pose || activeModulesRef.current.holistic || activeModulesRef.current.mudra)) {
+      await poseRef.current.send({ image: videoRef.current });
     }
     frameCountRef.current++;
     if (frameCountRef.current % 5 === 0 && !isDetectingRef.current) {
@@ -678,21 +723,21 @@ const StudentLiveClass = () => {
     const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 1000;
     const lmData = isFresh ? landmarksRef.current : null;
     const socket = socketRef.current;
-    
+
     if (!lmData) {
       setSessionStatus('No Hand');
       sessionStatusRef.current = 'No Hand';
       setFeedback('Show your hand to the camera');
-      
+
       // Reset stability counters immediately
       consecutiveRef.current = { name: null, count: 0 };
       preStabilityRef.current = { name: null, count: 0 };
-      
+
       // [HYSTERESIS] Score and Mudra name are cleared only by the holdTimer (1.5s)
       // frameBuffer and smoothing are cleared to ensure no "legacy" score leaks back
       frameBufferRef.current = [];
       smoothedScoreRef.current = 0;
-      
+
       if (socket && socket.connected) {
         socket.emit('student_performance_update', {
           classId: classId,
@@ -743,40 +788,40 @@ const StudentLiveClass = () => {
     try {
       const endpoint = isTargetDouble ? '/api/detect_double_landmarks' : '/api/evaluate_session';
       let body = {};
-      
+
       if (isTargetDouble) {
-          let rightLm = null, leftLm = null;
-          const labels = (lmData.multiHandedness || []).map(h => h.label);
-          
-          if (lmData.multiHandLandmarks.length === 2) {
-              if (labels[0] && labels[1] && labels[0] !== labels[1]) {
-                  lmData.multiHandLandmarks.forEach((lms, idx) => {
-                      const label = labels[idx];
-                      if (label === 'Right') rightLm = lms; else leftLm = lms;
-                  });
-              } else {
-                  const lms0 = lmData.multiHandLandmarks[0];
-                  const lms1 = lmData.multiHandLandmarks[1];
-                  if (lms0[0].x < lms1[0].x) {
-                      leftLm = lms0;
-                      rightLm = lms1;
-                  } else {
-                      leftLm = lms1;
-                      rightLm = lms0;
-                  }
-              }
-          } else {
-              const lms = lmData.multiHandLandmarks[0];
-              const label = labels[0] || 'Right';
+        let rightLm = null, leftLm = null;
+        const labels = (lmData.multiHandedness || []).map(h => h.label);
+
+        if (lmData.multiHandLandmarks.length === 2) {
+          if (labels[0] && labels[1] && labels[0] !== labels[1]) {
+            lmData.multiHandLandmarks.forEach((lms, idx) => {
+              const label = labels[idx];
               if (label === 'Right') rightLm = lms; else leftLm = lms;
+            });
+          } else {
+            const lms0 = lmData.multiHandLandmarks[0];
+            const lms1 = lmData.multiHandLandmarks[1];
+            if (lms0[0].x < lms1[0].x) {
+              leftLm = lms0;
+              rightLm = lms1;
+            } else {
+              leftLm = lms1;
+              rightLm = lms0;
+            }
           }
-          body = { right_landmarks: rightLm, left_landmarks: leftLm, targetMudra: targetMudra };
+        } else {
+          const lms = lmData.multiHandLandmarks[0];
+          const label = labels[0] || 'Right';
+          if (label === 'Right') rightLm = lms; else leftLm = lms;
+        }
+        body = { right_landmarks: rightLm, left_landmarks: leftLm, targetMudra: targetMudra };
       } else {
-          body = {
-              landmarks: lmData.landmarks,
-              activeModules: activeModules,
-              activeMudras: targetMudra ? [targetMudra] : []
-          };
+        body = {
+          landmarks: lmData.landmarks,
+          activeModules: activeModules,
+          activeMudras: targetMudra ? [targetMudra] : []
+        };
       }
 
       const res = await fetch(endpoint, {
@@ -797,17 +842,17 @@ const StudentLiveClass = () => {
       if (target && detected && detected !== target) {
         setDetectedMudra(detectedName);
         detectedMudraRef.current = detectedName;
-        
+
         // RESET EVERYTHING IMMEDIATELY
         setAiScore(0);
         aiScoreRef.current = 0;
         smoothedScoreRef.current = 0;
         frameBufferRef.current = [];
-        
+
         // Reset all stability counters (consecutiveRef and preStabilityRef)
-        consecutiveRef.current = { name: null, count: 0 }; 
+        consecutiveRef.current = { name: null, count: 0 };
         preStabilityRef.current = { name: null, count: 0 };
-        
+
         // TRIGGER WARNING TOAST
         setToastType('wrong');
         setToastData({
@@ -816,7 +861,7 @@ const StudentLiveClass = () => {
           nameta: `❌ தவறான: ${detectedName}`,
           meaningta: `${targetMudra} காட்டவும்`
         });
-        
+
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
         setShowMudraToast(true);
         // Quick 2s hide for warnings
@@ -824,11 +869,11 @@ const StudentLiveClass = () => {
 
         // Clear hold timer so score doesn't linger
         if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        
+
         setSessionStatus('Incorrect');
         sessionStatusRef.current = 'Incorrect';
         setFeedback(`❌ Wrong: ${detectedName}. Show ${targetMudra}`);
-        
+
         if (socket && socket.connected) {
           socket.emit('student_performance_update', {
             classId: classId,
@@ -857,11 +902,11 @@ const StudentLiveClass = () => {
       }
 
       const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
-      
+
       if (consecutiveRef.current.count >= currentThreshold && detected) {
         frameBufferRef.current.push(score);
         if (frameBufferRef.current.length > 5) frameBufferRef.current.shift();
-        
+
         const avgScore = frameBufferRef.current.reduce((a, b) => a + b, 0) / frameBufferRef.current.length;
 
         // 🚨 STEP 4: APPLY SMOOTHING (EMA)
@@ -897,7 +942,7 @@ const StudentLiveClass = () => {
               nameta: "🌟 சிறப்பான வடிவம்!",
               meaningta: `${targetMudra}: சரியானது`
             });
-            
+
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
             setShowMudraToast(true);
             toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 3000);
@@ -909,10 +954,10 @@ const StudentLiveClass = () => {
         // HOLD LOGIC: Clears score only after 1.5s of no valid detection
         clearTimeout(holdTimerRef.current);
         holdTimerRef.current = setTimeout(() => {
-            setAiScore(0);
-            aiScoreRef.current = 0;
-            setDetectedMudra('');
-            detectedMudraRef.current = '';
+          setAiScore(0);
+          aiScoreRef.current = 0;
+          setDetectedMudra('');
+          detectedMudraRef.current = '';
         }, 1500);
 
       } else {
@@ -928,10 +973,14 @@ const StudentLiveClass = () => {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
-          mudra: detectedMudraRef.current || 'Practicing',
-          score: aiScoreRef.current,
+          mudra: detectedMudraRef.current || poseEvaluationRef.current?.stanceName || 'Practicing',
+          score: aiScoreRef.current || poseEvaluationRef.current?.totalScore || 0,
           status: sessionStatusRef.current,
-          landmarks: lmData.landmarks || null,
+          landmarks: lmData?.landmarks || null,
+          poseLandmarks: poseLandmarksRef.current || null,
+          stanceName: poseEvaluationRef.current?.stanceName || 'Araimandi Stance',
+          postureScore: poseEvaluationRef.current?.totalScore || 0,
+          corrections: poseEvaluationRef.current?.feedbacks || [],
           frame: captureFrame()
         });
       }
@@ -1215,9 +1264,9 @@ const StudentLiveClass = () => {
             {showMudraToast && (
               <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none animate-in fade-in zoom-in duration-500">
                 <div className="px-8 py-6 rounded-[32px] backdrop-blur-2xl shadow-2xl border border-white/40 flex flex-col items-center gap-2 text-center"
-                  style={{ 
+                  style={{
                     background: toastType === 'wrong' ? 'rgba(220, 38, 38, 0.9)' : toastType === 'perfect' ? 'rgba(5, 150, 105, 0.9)' : 'rgba(124, 58, 237, 0.9)',
-                    boxShadow: toastType === 'wrong' ? '0 25px 50px -12px rgba(220, 38, 38, 0.5)' : toastType === 'perfect' ? '0 25px 50px -12px rgba(5, 150, 105, 0.5)' : '0 25px 50px -12px rgba(124, 58, 237, 0.5)' 
+                    boxShadow: toastType === 'wrong' ? '0 25px 50px -12px rgba(220, 38, 38, 0.5)' : toastType === 'perfect' ? '0 25px 50px -12px rgba(5, 150, 105, 0.5)' : '0 25px 50px -12px rgba(124, 58, 237, 0.5)'
                   }}>
                   <span className="text-[10px] font-black uppercase tracking-[5px] text-white/70">
                     {toastType === 'wrong' ? 'Alert' : toastType === 'perfect' ? 'Achievement' : 'Next Mudra'}
@@ -1403,6 +1452,35 @@ const StudentLiveClass = () => {
               </div>
             </div>
           </div>
+
+          {/* Full Body Stance & Voice Feedback Widget */}
+          {poseDetails && (
+            <div className="p-3 rounded-2xl bg-teal-50/80 space-y-1.5" style={{ border: '1.5px solid #99F6E4' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-teal-600" />
+                  <p className="text-[9px] uppercase tracking-[2px] text-teal-700 font-bold">🧘 Full Body Stance</p>
+                </div>
+                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-600 text-white">
+                  🔊 Voice Active
+                </span>
+              </div>
+              <p className="text-sm font-black text-teal-900">{poseDetails.stanceName}</p>
+
+              {/* Araimandi Depth Gauge */}
+              {typeof poseDetails.araimandiDepthPct === 'number' && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[9px] font-bold text-teal-700">
+                    <span>Squat Depth</span>
+                    <span>{poseDetails.araimandiDepthPct}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-teal-500 rounded-full transition-all duration-300" style={{ width: `${poseDetails.araimandiDepthPct}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Navarasa */}
           {activeModules.face && (
