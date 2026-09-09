@@ -177,6 +177,8 @@ const io = new Server(server, {
 
 // Track socket to room/identity mapping for cleanup
 const socketRegistry = new Map();
+// Track active evaluation modes per classId
+const activeClassModes = new Map();
 
 // Socket Authentication Middleware
 io.use(async (socket, next) => {
@@ -250,6 +252,11 @@ io.on('connection', (socket) => {
                 }
             });
             socket.emit('current_participants', participants);
+        }
+
+        // Send current active evaluation mode if configured for this class
+        if (activeClassModes.has(classId)) {
+            socket.emit('teacher_update_evaluation_mode', activeClassModes.get(classId));
         }
     });
 
@@ -388,6 +395,35 @@ io.on('connection', (socket) => {
 
     socket.on('student_performance_update', (data) => {
         io.to(data.classId).emit('student_performance_update', data);
+    });
+
+    // Relays teacher's active mode selection (e.g. FULL_BODY_STANCE + Araimandi Stance)
+    socket.on('teacher_update_evaluation_mode', (data) => {
+        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
+        const registry = socketRegistry.get(socket.id);
+        if (!isAuthorized || !registry || !registry.isTeacher) {
+            console.warn(`[Socket] Unauthorized teacher_update_evaluation_mode attempt by ${socket.id}`);
+            return;
+        }
+
+        const { classId, evaluationMode, targetStance } = data || {};
+        if (!classId) return;
+
+        const modePayload = {
+            evaluationMode: evaluationMode || 'FULL_BODY_STANCE',
+            targetStance: targetStance || 'Araimandi Stance',
+            updatedAt: new Date().toISOString()
+        };
+
+        activeClassModes.set(classId, modePayload);
+        console.log(`[Socket] Room ${classId} evaluation mode -> ${modePayload.evaluationMode} (${modePayload.targetStance})`);
+        io.to(classId).emit('teacher_update_evaluation_mode', modePayload);
+    });
+
+    // Relays real-time posture telemetry from students to teacher dashboard
+    socket.on('student_posture_metric', (data) => {
+        if (!data || !data.classId) return;
+        io.to(data.classId).emit('student_posture_metric', data);
     });
 
     socket.on('class_ended', (classId) => {

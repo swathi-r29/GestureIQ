@@ -9,6 +9,7 @@ import { getSocket } from '../utils/socket';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
 import { loadMediaPipeScripts, loadMediaPipePoseScripts, safeLocateFile } from '../utils/loadMediaPipe';
 import { evaluateFullBodyPose } from '../utils/bodyPoseRules';
+import { evaluateFullBodyStance } from '../utils/bodyStanceEvaluator';
 
 let Hands, HAND_CONNECTIONS;
 let Pose, POSE_CONNECTIONS;
@@ -34,6 +35,57 @@ const formatTime = (seconds) => {
 const scoreColor = (s) => s >= 75 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626';
 const scoreBg = (s) => s >= 75 ? '#ECFDF5' : s >= 50 ? '#FFFBEB' : '#FEF2F2';
 const scoreBorder = (s) => s >= 75 ? '#A7F3D0' : s >= 50 ? '#FDE68A' : '#FECACA';
+
+function drawStanceSkeletonAndHUD(ctx, landmarks, result) {
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.clearRect(-ctx.canvas.width, 0, ctx.canvas.width, ctx.canvas.height);
+
+  const isGreen = result.score >= 75;
+  const accentColor = isGreen ? '#00FF7F' : '#FF4500';
+
+  if (drawConnectors && POSE_CONNECTIONS) {
+    drawConnectors(ctx, landmarks, POSE_CONNECTIONS, {
+      color: accentColor,
+      lineWidth: 3
+    });
+    drawLandmarks(ctx, landmarks, {
+      color: '#FFFFFF',
+      fillColor: accentColor,
+      lineWidth: 1,
+      radius: 4
+    });
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(16, 16, 260, 130, 12);
+  } else {
+    ctx.rect(16, 16, 260, 130);
+  }
+  ctx.fill();
+
+  ctx.fillStyle = accentColor;
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillText(`${result.stanceName}: ${result.score}%`, 28, 42);
+
+  ctx.fillStyle = '#E2E8F0';
+  ctx.font = '13px sans-serif';
+  if (result.kneeAngles && result.kneeAngles.left !== null) {
+    ctx.fillText(`Knees: L ${result.kneeAngles.left}° | R ${result.kneeAngles.right}°`, 28, 68);
+    ctx.fillText(`Torso Tilt: ${result.torsoTilt}°`, 28, 88);
+  }
+
+  ctx.fillStyle = isGreen ? '#86EFAC' : '#FCA5A5';
+  ctx.font = '12px sans-serif';
+  const tip = (result.feedback && result.feedback[0]) || 'Good posture';
+  ctx.fillText(tip, 28, 115);
+
+  ctx.restore();
+}
 
 const StudentLiveClass = () => {
   const { classId } = useParams();
@@ -75,6 +127,22 @@ const StudentLiveClass = () => {
   const [showMudraToast, setShowMudraToast] = useState(false);
   const [toastData, setToastData] = useState({ name: '', meaning: '', nameta: '', meaningta: '' });
   const [fingerDeviations, setFingerDeviations] = useState(null);
+
+  // FULL BODY STANCE STATES & REFS
+  const [evaluationMode, setEvaluationMode] = useState('FULL_BODY_MUDRA');
+  const [targetStance, setTargetStance] = useState('Araimandi Stance');
+  const [stanceResult, setStanceResult] = useState(null);
+
+  const evaluationModeRef = useRef('FULL_BODY_MUDRA');
+  const targetStanceRef = useRef('Araimandi Stance');
+  const stanceScoreBufferRef = useRef([]);
+  const lastPostureEmitRef = useRef(0);
+
+  const framingIssueStartRef = useRef(null);
+  const lastFramingToastTimeRef = useRef(0);
+
+  useEffect(() => { evaluationModeRef.current = evaluationMode; }, [evaluationMode]);
+  useEffect(() => { targetStanceRef.current = targetStance; }, [targetStance]);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -378,6 +446,24 @@ const StudentLiveClass = () => {
           }
         });
 
+        sock.on('teacher_update_evaluation_mode', (data) => {
+          if (!data?.evaluationMode) return;
+          console.log('[Socket] Teacher updated evaluation mode:', data);
+          setEvaluationMode(data.evaluationMode);
+          evaluationModeRef.current = data.evaluationMode;
+
+          if (data.targetStance) {
+            setTargetStance(data.targetStance);
+            targetStanceRef.current = data.targetStance;
+          }
+
+          setStanceResult(null);
+          stanceScoreBufferRef.current = [];
+          framingIssueStartRef.current = null;
+          lastFramingToastTimeRef.current = 0;
+          setShowMudraToast(false);
+        });
+
         sock.on('class_ended_broadcast', handleEndSessionFromTeacher);
         sock.on('class_announcement', (data) => {
           setAnnouncement(data.message || '');
@@ -546,36 +632,139 @@ const StudentLiveClass = () => {
           poseRef.current.onResults((results) => {
             if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
               poseLandmarksRef.current = results.poseLandmarks;
-              const evalRes = evaluateFullBodyPose(results.poseLandmarks);
-              poseEvaluationRef.current = evalRes;
-              setPoseDetails(evalRes);
 
-              // Draw Full Body Pose Skeleton overlay on canvas
-              const canvas = canvasRef.current;
-              if (canvas) {
-                const ctx = canvas.getContext('2d');
-                ctx.save();
-                ctx.scale(-1, 1);
-                if (drawConnectors && POSE_CONNECTIONS) {
-                  drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00F2FE', lineWidth: 2.5 });
-                  drawLandmarks(ctx, results.poseLandmarks, { color: '#FFD700', lineWidth: 1, radius: 3 });
+              if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+                const rawResult = evaluateFullBodyStance(results.poseLandmarks, targetStanceRef.current);
+
+                stanceScoreBufferRef.current.push(rawResult.score);
+                if (stanceScoreBufferRef.current.length > 6) {
+                  stanceScoreBufferRef.current.shift();
                 }
-                ctx.restore();
-              }
+                const smoothedScore = Math.round(
+                  stanceScoreBufferRef.current.reduce((a, b) => a + b, 0) / stanceScoreBufferRef.current.length
+                );
 
-              // ── REAL-TIME VOICE CORRECTION ENGINE ──
-              if (evalRes && evalRes.feedbacks && evalRes.feedbacks.length > 0) {
+                const finalizedResult = { ...rawResult, score: smoothedScore };
+                setStanceResult(finalizedResult);
+                setAiScore(finalizedResult.score);
+                aiScoreRef.current = finalizedResult.score;
+
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const ctx = canvas.getContext('2d');
+                  drawStanceSkeletonAndHUD(ctx, results.poseLandmarks, finalizedResult);
+                }
+
                 const now = Date.now();
-                if (now - lastVoiceRef.current > 4000) {
-                  lastVoiceRef.current = now;
-                  const topFeedback = evalRes.feedbacks[0];
-                  setCorrections(evalRes.feedbacks);
-                  announce(topFeedback);
+
+                // --- FRAMING WARNING TOAST ENGINE (WALL-CLOCK TIME BASED) ---
+                if (finalizedResult.isVisible === false) {
+                  if (framingIssueStartRef.current === null) {
+                    framingIssueStartRef.current = now;
+                  }
+                  const elapsed = now - framingIssueStartRef.current;
+                  if (elapsed >= 1200 && now - lastFramingToastTimeRef.current >= 6000) {
+                    lastFramingToastTimeRef.current = now;
+
+                    let alertMsg = "Full body not detected. Step back so your entire body is visible.";
+                    if (finalizedResult.visibilityIssue === 'FEET_MISSING') {
+                      alertMsg = "Please step back — your feet and legs are out of frame.";
+                    } else if (finalizedResult.visibilityIssue === 'UPPER_BODY_MISSING') {
+                      alertMsg = "Please adjust camera — your upper body is out of frame.";
+                    }
+
+                    setToastType('wrong');
+                    setToastData({
+                      name: "⚠️ Framing Warning",
+                      meaning: alertMsg,
+                      nameta: "⚠️ கேமரா எச்சரிக்கை",
+                      meaningta: alertMsg
+                    });
+
+                    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                    setShowMudraToast(true);
+                    toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 3500);
+                  }
+                } else {
+                  framingIssueStartRef.current = null;
+                }
+
+                if (now - lastPostureEmitRef.current >= 500) {
+                  lastPostureEmitRef.current = now;
+                  const socket = socketRef.current;
+                  if (socket && socket.connected) {
+                    socket.emit('student_posture_metric', {
+                      classId,
+                      studentId: user?._id || user?.id || 'unknown',
+                      studentName: user?.name || 'Student',
+                      timestamp: new Date().toISOString(),
+                      evaluationMode: 'FULL_BODY_STANCE',
+                      stance: finalizedResult.stanceName,
+                      score: finalizedResult.score,
+                      feedback: finalizedResult.feedback,
+                      kneeAngles: finalizedResult.kneeAngles,
+                      torsoTilt: finalizedResult.torsoTilt,
+                      turnoutRatio: finalizedResult.turnoutRatio
+                    });
+                  }
+                }
+              } else {
+                framingIssueStartRef.current = null;
+                const evalRes = evaluateFullBodyPose(results.poseLandmarks);
+                poseEvaluationRef.current = evalRes;
+                setPoseDetails(evalRes);
+
+                // Draw Full Body Pose Skeleton overlay on canvas
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const ctx = canvas.getContext('2d');
+                  ctx.save();
+                  ctx.scale(-1, 1);
+                  if (drawConnectors && POSE_CONNECTIONS) {
+                    drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00F2FE', lineWidth: 2.5 });
+                    drawLandmarks(ctx, results.poseLandmarks, { color: '#FFD700', lineWidth: 1, radius: 3 });
+                  }
+                  ctx.restore();
+                }
+
+                // ── REAL-TIME VOICE CORRECTION ENGINE ──
+                if (evalRes && evalRes.feedbacks && evalRes.feedbacks.length > 0) {
+                  const nowVoice = Date.now();
+                  if (nowVoice - lastVoiceRef.current > 4000) {
+                    lastVoiceRef.current = nowVoice;
+                    const topFeedback = evalRes.feedbacks[0];
+                    setCorrections(evalRes.feedbacks);
+                    announce(topFeedback);
+                  }
                 }
               }
             } else {
               poseLandmarksRef.current = null;
               poseEvaluationRef.current = null;
+              if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+                setStanceResult(null);
+                const now = Date.now();
+                if (framingIssueStartRef.current === null) {
+                  framingIssueStartRef.current = now;
+                }
+                const elapsed = now - framingIssueStartRef.current;
+                if (elapsed >= 1200 && now - lastFramingToastTimeRef.current >= 6000) {
+                  lastFramingToastTimeRef.current = now;
+
+                  const alertMsg = "Full body not detected. Step back so your entire body is visible.";
+                  setToastType('wrong');
+                  setToastData({
+                    name: "⚠️ Framing Warning",
+                    meaning: alertMsg,
+                    nameta: "⚠️ கேமரா எச்சரிக்கை",
+                    meaningta: alertMsg
+                  });
+
+                  if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                  setShowMudraToast(true);
+                  toastTimerRef.current = setTimeout(() => setShowMudraToast(false), 3500);
+                }
+              }
             }
           });
         }
@@ -1453,33 +1642,59 @@ const StudentLiveClass = () => {
             </div>
           </div>
 
-          {/* Full Body Stance & Voice Feedback Widget */}
-          {poseDetails && (
-            <div className="p-3 rounded-2xl bg-teal-50/80 space-y-1.5" style={{ border: '1.5px solid #99F6E4' }}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-teal-600" />
-                  <p className="text-[9px] uppercase tracking-[2px] text-teal-700 font-bold">🧘 Full Body Stance</p>
-                </div>
-                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-600 text-white">
-                  🔊 Voice Active
+          {/* Full Body Stance Mode Widget */}
+          {evaluationMode === 'FULL_BODY_STANCE' ? (
+            <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/40 text-white space-y-3 shadow-lg">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                  Stance Mode Active
+                </span>
+                <span className="text-[9px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold">
+                  Hand Detection: OFF
                 </span>
               </div>
-              <p className="text-sm font-black text-teal-900">{poseDetails.stanceName}</p>
-
-              {/* Araimandi Depth Gauge */}
-              {typeof poseDetails.araimandiDepthPct === 'number' && (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[9px] font-bold text-teal-700">
-                    <span>Squat Depth</span>
-                    <span>{poseDetails.araimandiDepthPct}%</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-teal-500 rounded-full transition-all duration-300" style={{ width: `${poseDetails.araimandiDepthPct}%` }} />
-                  </div>
+              <div className="text-lg font-black text-white">{targetStance}</div>
+              <div className="flex justify-between items-center text-xs text-slate-300">
+                <span>Alignment Score</span>
+                <span className={`font-black text-sm ${stanceResult?.score >= 75 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                  {stanceResult ? `${stanceResult.score}%` : 'Evaluating...'}
+                </span>
+              </div>
+              {stanceResult?.kneeAngles?.left !== null && (
+                <div className="text-[11px] text-slate-400 space-y-0.5 border-t border-slate-800 pt-2">
+                  <div>Knee Flexion: L {stanceResult.kneeAngles.left}° | R {stanceResult.kneeAngles.right}°</div>
+                  <div>Torso Tilt: {stanceResult.torsoTilt}°</div>
                 </div>
               )}
             </div>
+          ) : (
+            poseDetails && (
+              <div className="p-3 rounded-2xl bg-teal-50/80 space-y-1.5" style={{ border: '1.5px solid #99F6E4' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-teal-600" />
+                    <p className="text-[9px] uppercase tracking-[2px] text-teal-700 font-bold">🧘 Full Body Stance</p>
+                  </div>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-600 text-white">
+                    🔊 Voice Active
+                  </span>
+                </div>
+                <p className="text-sm font-black text-teal-900">{poseDetails.stanceName}</p>
+
+                {/* Araimandi Depth Gauge */}
+                {typeof poseDetails.araimandiDepthPct === 'number' && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[9px] font-bold text-teal-700">
+                      <span>Squat Depth</span>
+                      <span>{poseDetails.araimandiDepthPct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-teal-500 rounded-full transition-all duration-300" style={{ width: `${poseDetails.araimandiDepthPct}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
           )}
 
           {/* Navarasa */}

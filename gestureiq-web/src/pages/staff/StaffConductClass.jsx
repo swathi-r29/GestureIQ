@@ -152,6 +152,9 @@ const StaffConductClass = () => {
   const [classData, setClassData] = useState(null);
   const [students, setStudents] = useState({});
   const [currentMudra, setCurrentMudra] = useState('');
+  const [evaluationMode, setEvaluationMode] = useState('FULL_BODY_MUDRA');
+  const [targetStance, setTargetStance] = useState('Araimandi Stance');
+  const [studentPostures, setStudentPostures] = useState({});
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(true);
   const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
@@ -651,6 +654,22 @@ const StaffConductClass = () => {
       s.on('score_update', updateStudentData);
       s.on('student_performance_update', updateStudentData);
 
+      s.on('student_posture_metric', (data) => {
+        if (!data || !data.studentId) return;
+        setStudentPostures((prev) => ({
+          ...prev,
+          [data.studentId]: {
+            ...data,
+            receivedAt: Date.now()
+          }
+        }));
+      });
+
+      s.on('teacher_update_evaluation_mode', (data) => {
+        if (data?.evaluationMode) setEvaluationMode(data.evaluationMode);
+        if (data?.targetStance) setTargetStance(data.targetStance);
+      });
+
       timerRef.current = setInterval(() => setTimer(p => p + 1), 1000);
 
     } catch (err) {
@@ -711,6 +730,19 @@ const StaffConductClass = () => {
       });
       // Backward compatibility
       sock.emit('set_target_mudra', { classId: classId, target: newMudra });
+    }
+  };
+
+  const handleSelectMode = (modeKey, stanceName = targetStance) => {
+    setEvaluationMode(modeKey);
+    if (stanceName) setTargetStance(stanceName);
+    const sock = socketRef.current;
+    if (sock && sock.connected) {
+      sock.emit('teacher_update_evaluation_mode', {
+        classId: classId,
+        evaluationMode: modeKey,
+        targetStance: stanceName
+      });
     }
   };
 
@@ -817,20 +849,56 @@ const StaffConductClass = () => {
         <div className="flex items-center space-x-6">
           {/* Unified Spotlight Pill */}
           <div className="flex items-center bg-zinc-950 rounded-2xl p-1 border border-white/10 shadow-2xl shadow-black/50 overflow-hidden">
+            {/* Mode Selection */}
             <div className="flex items-center px-4 py-1.5 space-x-3 border-r border-white/5 bg-gradient-to-r from-orange-500/10 to-transparent">
               <Target className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
               <div className="flex flex-col">
-                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Target Mudra</span>
+                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Eval Mode</span>
                 <select 
-                  value={currentMudra} 
-                  onChange={e => handleMudraChange(e.target.value)}
+                  value={evaluationMode} 
+                  onChange={e => handleSelectMode(e.target.value, targetStance)}
                   className="bg-transparent text-xs font-black text-[#f97316] outline-none cursor-pointer hover:text-orange-400 transition-colors"
                   style={{ textShadow: '0 0 10px rgba(249,115,22,0.3)' }}
                 >
-                  {(classData?.mudrasList || []).map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
+                  <option value="FULL_BODY_MUDRA" className="bg-zinc-900">Mudra Mode</option>
+                  <option value="FULL_BODY_STANCE" className="bg-zinc-900">Full Body Stance Mode</option>
                 </select>
               </div>
             </div>
+
+            {/* Target Stance or Target Mudra */}
+            {evaluationMode === 'FULL_BODY_STANCE' ? (
+              <div className="flex items-center px-4 py-1.5 space-x-3 border-r border-white/5 bg-gradient-to-r from-emerald-500/10 to-transparent">
+                <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Target Stance</span>
+                  <select
+                    value={targetStance}
+                    onChange={e => handleSelectMode('FULL_BODY_STANCE', e.target.value)}
+                    className="bg-transparent text-xs font-black text-emerald-400 outline-none cursor-pointer hover:text-emerald-300 transition-colors"
+                  >
+                    <option value="Araimandi Stance" className="bg-zinc-900">Araimandi Stance</option>
+                    <option value="Samapada Stance" className="bg-zinc-900">Samapada Stance</option>
+                    <option value="Muzhumandi Stance" className="bg-zinc-900">Muzhumandi Stance</option>
+                    <option value="Nattadavu Posture" className="bg-zinc-900">Nattadavu Posture</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center px-4 py-1.5 space-x-3 border-r border-white/5">
+                <div className="flex flex-col">
+                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Target Mudra</span>
+                  <select 
+                    value={currentMudra} 
+                    onChange={e => handleMudraChange(e.target.value)}
+                    className="bg-transparent text-xs font-black text-[#f97316] outline-none cursor-pointer hover:text-orange-400 transition-colors"
+                    style={{ textShadow: '0 0 10px rgba(249,115,22,0.3)' }}
+                  >
+                    {(classData?.mudrasList || []).map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
             <div className="flex items-center px-5 py-1.5 space-x-4">
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">AI Module</span>
@@ -993,6 +1061,51 @@ const StaffConductClass = () => {
             <h2 className="text-[10px] font-black uppercase tracking-[3px] text-zinc-400">Student Monitoring</h2>
             <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">Real-time AI</span>
           </div>
+
+          {evaluationMode === 'FULL_BODY_STANCE' && (
+            <div className="mb-6 p-4 bg-zinc-900/90 border border-emerald-500/30 rounded-2xl shadow-xl">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-3">
+                <h3 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                  <Activity size={14} /> Live Posture Alignment ({targetStance})
+                </h3>
+                <span className="text-[10px] text-zinc-400 font-bold">
+                  {Object.keys(studentPostures).length} Active
+                </span>
+              </div>
+              {Object.keys(studentPostures).length > 0 ? (
+                <div className="divide-y divide-zinc-800/80 space-y-2">
+                  {Object.values(studentPostures).map((st) => (
+                    <div key={st.studentId} className="pt-2 flex items-center justify-between text-xs">
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-zinc-100">{st.studentName}</span>
+                        <div className="text-[10px] text-zinc-400 flex gap-2">
+                          {st.kneeAngles?.left !== null && (
+                            <span>Knees: L {st.kneeAngles?.left}° | R {st.kneeAngles?.right}°</span>
+                          )}
+                          {st.torsoTilt !== null && (
+                            <span>Tilt: {st.torsoTilt}°</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-xs font-black border ${
+                            st.score >= 75
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                          }`}
+                        >
+                          {st.score}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-zinc-500 italic">Waiting for student posture metrics...</p>
+              )}
+            </div>
+          )}
 
           {Object.keys(students).length > 0 ? (
             <div className="space-y-6">
