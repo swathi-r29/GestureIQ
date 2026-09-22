@@ -399,9 +399,10 @@ io.on('connection', (socket) => {
 
     // Relays teacher's active mode selection (e.g. FULL_BODY_STANCE + Araimandi Stance)
     socket.on('teacher_update_evaluation_mode', (data) => {
-        const isAuthorized = socket.user?.role === 'staff' || socket.user?.role === 'admin';
+        const isAuthorizedRole = socket.user?.role === 'staff' || socket.user?.role === 'admin' || socket.user?.role === 'teacher';
         const registry = socketRegistry.get(socket.id);
-        if (!isAuthorized || !registry || !registry.isTeacher) {
+        const isTeacher = isAuthorizedRole || (registry && registry.isTeacher);
+        if (!isTeacher) {
             console.warn(`[Socket] Unauthorized teacher_update_evaluation_mode attempt by ${socket.id}`);
             return;
         }

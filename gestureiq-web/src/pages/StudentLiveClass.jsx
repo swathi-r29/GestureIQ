@@ -38,8 +38,11 @@ const scoreBorder = (s) => s >= 75 ? '#A7F3D0' : s >= 50 ? '#FDE68A' : '#FECACA'
 
 function drawStanceSkeletonAndHUD(ctx, landmarks, result) {
   ctx.save();
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  // Mirror transformation: translate to right edge and flip horizontal axis
+  ctx.translate(ctx.canvas.width, 0);
   ctx.scale(-1, 1);
-  ctx.clearRect(-ctx.canvas.width, 0, ctx.canvas.width, ctx.canvas.height);
 
   const isGreen = result.score >= 75;
   const accentColor = isGreen ? '#00FF7F' : '#FF4500';
@@ -77,6 +80,9 @@ function drawStanceSkeletonAndHUD(ctx, landmarks, result) {
   if (result.kneeAngles && result.kneeAngles.left !== null) {
     ctx.fillText(`Knees: L ${result.kneeAngles.left}° | R ${result.kneeAngles.right}°`, 28, 68);
     ctx.fillText(`Torso Tilt: ${result.torsoTilt}°`, 28, 88);
+  } else if (result.evaluationTier === 'UPPER_BODY') {
+    ctx.fillText(`Upper Body Mode — Torso Tilt: ${result.torsoTilt}°`, 28, 68);
+    ctx.fillText(`Framing too close for leg tracking`, 28, 88);
   }
 
   ctx.fillStyle = isGreen ? '#86EFAC' : '#FCA5A5';
@@ -386,6 +392,22 @@ const StudentLiveClass = () => {
         setClassData(res.data);
         classDataRef.current = res.data;
 
+        // Detect if this class/adavu is a stance/full-body session
+        const initialMode = res.data.evaluationMode || 
+          (res.data.targetMudra?.toLowerCase().includes('adavu') || 
+           res.data.title?.toLowerCase().includes('adavu') || 
+           res.data.title?.toLowerCase().includes('stance')
+            ? 'FULL_BODY_STANCE' 
+            : 'FULL_BODY_MUDRA');
+
+        setEvaluationMode(initialMode);
+        evaluationModeRef.current = initialMode;
+
+        if (res.data.targetStance) {
+          setTargetStance(res.data.targetStance);
+          targetStanceRef.current = res.data.targetStance;
+        }
+
         const sock = getSocket();
         socketRef.current = sock;
 
@@ -555,6 +577,11 @@ const StudentLiveClass = () => {
           minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
         });
         handsRef.current.onResults((results) => {
+          // If in stance mode, let poseRef handle canvas drawing completely
+          if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+            return;
+          }
+
           lastResultTimeRef.current = Date.now();
           const canvas = canvasRef.current;
           if (!canvas) return;
@@ -649,6 +676,12 @@ const StudentLiveClass = () => {
                 setAiScore(finalizedResult.score);
                 aiScoreRef.current = finalizedResult.score;
 
+                if (finalizedResult.feedback && finalizedResult.feedback.length > 0) {
+                  setFeedback(finalizedResult.feedback[0]);
+                } else {
+                  setFeedback(`${finalizedResult.stanceName}: ${finalizedResult.score}%`);
+                }
+
                 const canvas = canvasRef.current;
                 if (canvas) {
                   const ctx = canvas.getContext('2d');
@@ -699,6 +732,7 @@ const StudentLiveClass = () => {
                       studentName: user?.name || 'Student',
                       timestamp: new Date().toISOString(),
                       evaluationMode: 'FULL_BODY_STANCE',
+                      evaluationTier: finalizedResult.evaluationTier || 'FULL_BODY',
                       stance: finalizedResult.stanceName,
                       score: finalizedResult.score,
                       feedback: finalizedResult.feedback,
@@ -719,6 +753,7 @@ const StudentLiveClass = () => {
                 if (canvas) {
                   const ctx = canvas.getContext('2d');
                   ctx.save();
+                  ctx.translate(canvas.width, 0);
                   ctx.scale(-1, 1);
                   if (drawConnectors && POSE_CONNECTIONS) {
                     drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00F2FE', lineWidth: 2.5 });
@@ -737,12 +772,46 @@ const StudentLiveClass = () => {
                     announce(topFeedback);
                   }
                 }
+
+                // ── POSTURE TELEMETRY IN MUDRA MODE ──
+                // Previously this only fired inside FULL_BODY_STANCE mode, so the teacher's
+                // posture panel stayed empty during ordinary mudra classes. Emit here too,
+                // throttled with the same 500ms window used by the stance branch.
+                if (evalRes && evalRes.isFullyVisible) {
+                  const nowPosture = Date.now();
+                  if (nowPosture - lastPostureEmitRef.current >= 500) {
+                    lastPostureEmitRef.current = nowPosture;
+                    const socket = socketRef.current;
+                    if (socket && socket.connected) {
+                      const araimandi = evalRes.details?.araimandi;
+                      const spine = evalRes.details?.spine;
+                      socket.emit('student_posture_metric', {
+                        classId,
+                        studentId: user?._id || user?.id || 'unknown',
+                        studentName: user?.name || 'Student',
+                        timestamp: new Date().toISOString(),
+                        evaluationMode: 'FULL_BODY_MUDRA',
+                        evaluationTier: 'FULL_BODY',
+                        stance: evalRes.stanceName,
+                        score: evalRes.totalScore,
+                        feedback: evalRes.feedbacks,
+                        kneeAngles: {
+                          left: araimandi?.leftKneeAngle ?? null,
+                          right: araimandi?.rightKneeAngle ?? null
+                        },
+                        torsoTilt: spine?.tiltAngle ?? null,
+                        turnoutRatio: null
+                      });
+                    }
+                  }
+                }
               }
             } else {
               poseLandmarksRef.current = null;
               poseEvaluationRef.current = null;
               if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
                 setStanceResult(null);
+                setFeedback("Full body not detected. Step back so your entire body is visible.");
                 const now = Date.now();
                 if (framingIssueStartRef.current === null) {
                   framingIssueStartRef.current = now;
@@ -884,11 +953,38 @@ const StudentLiveClass = () => {
       requestRef.current = requestAnimationFrame(processFrame);
       return;
     }
-    if (handsRef.current && activeModulesRef.current.mudra) {
-      await handsRef.current.send({ image: videoRef.current });
-    }
-    if (poseRef.current && (activeModulesRef.current.pose || activeModulesRef.current.holistic || activeModulesRef.current.mudra)) {
-      await poseRef.current.send({ image: videoRef.current });
+    try {
+      const mode = evaluationModeRef.current;
+
+      if (mode === 'FULL_BODY_STANCE') {
+        // Mode 3: Full Body Stance (Pose AI only, Hand Detection OFF)
+        if (poseRef.current) {
+          await poseRef.current.send({ image: videoRef.current });
+        }
+      } else if (mode === 'FULL_BODY_MUDRA' || mode === 'Single' || mode === 'Double') {
+        // Mode 1 & 2: Standard Mudra Mode (Hands AI only - normal mudra functioning)
+        if (handsRef.current && activeModulesRef.current.mudra) {
+          await handsRef.current.send({ image: videoRef.current });
+        }
+      } else if (mode === 'COMBINED' || mode === 'FULL_SUITE' || mode === 'FullBodyMudra') {
+        // Mode 4: Full Body + Mudra Combined Mode (Both Hands & Pose AI)
+        if (handsRef.current && activeModulesRef.current.mudra) {
+          await handsRef.current.send({ image: videoRef.current });
+        }
+        if (poseRef.current) {
+          await poseRef.current.send({ image: videoRef.current });
+        }
+      } else {
+        // Default fallback
+        if (handsRef.current && activeModulesRef.current.mudra) {
+          await handsRef.current.send({ image: videoRef.current });
+        }
+        if (poseRef.current && activeModulesRef.current.pose) {
+          await poseRef.current.send({ image: videoRef.current });
+        }
+      }
+    } catch (err) {
+      console.warn('[Frame Processing] MediaPipe frame error:', err);
     }
     frameCountRef.current++;
     if (frameCountRef.current % 5 === 0 && !isDetectingRef.current) {
@@ -908,6 +1004,10 @@ const StudentLiveClass = () => {
   }, []);
 
   const runDetection = async () => {
+    if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+      // Full Body Stance telemetry is processed & emitted by MediaPipe Pose onResults
+      return;
+    }
 
     const isFresh = (Date.now() - lastLandmarkTimeRef.current) < 1000;
     const lmData = isFresh ? landmarksRef.current : null;
@@ -1512,6 +1612,19 @@ const StudentLiveClass = () => {
 
             {/* Media Controls & Recovery */}
             <div className="absolute bottom-5 right-5 flex items-center gap-2 z-20">
+              {/* Manual Mode Switcher */}
+              <button
+                onClick={() => {
+                  const nextMode = evaluationMode === 'FULL_BODY_STANCE' ? 'FULL_BODY_MUDRA' : 'FULL_BODY_STANCE';
+                  setEvaluationMode(nextMode);
+                  evaluationModeRef.current = nextMode;
+                }}
+                className="px-3.5 py-2.5 rounded-2xl backdrop-blur-md border bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all shadow-lg shadow-violet-500/20"
+                title="Switch Evaluation Mode"
+              >
+                {evaluationMode === 'FULL_BODY_STANCE' ? '🧘 Stance Active' : '✋ Hand Mode'}
+              </button>
+
               {/* Refresh Camera Button */}
               <button
                 onClick={() => {
@@ -1660,7 +1773,12 @@ const StudentLiveClass = () => {
                   {stanceResult ? `${stanceResult.score}%` : 'Evaluating...'}
                 </span>
               </div>
-              {stanceResult?.kneeAngles?.left !== null && (
+              {stanceResult?.evaluationTier === 'UPPER_BODY' && (
+                <div className="text-[10px] font-bold text-amber-400 border-t border-slate-800 pt-2">
+                  Upper Body Mode — step back for full leg tracking
+                </div>
+              )}
+              {stanceResult?.kneeAngles?.left != null && (
                 <div className="text-[11px] text-slate-400 space-y-0.5 border-t border-slate-800 pt-2">
                   <div>Knee Flexion: L {stanceResult.kneeAngles.left}° | R {stanceResult.kneeAngles.right}°</div>
                   <div>Torso Tilt: {stanceResult.torsoTilt}°</div>

@@ -33,8 +33,7 @@ function hasLowerBody(landmarks) {
   if (!landmarks || landmarks.length < 33) return false;
   const hasHips = isLandmarkReal(landmarks[23]) || isLandmarkReal(landmarks[24]);
   const hasKnees = isLandmarkReal(landmarks[25]) || isLandmarkReal(landmarks[26]);
-  const hasAnkles = isLandmarkReal(landmarks[27]) || isLandmarkReal(landmarks[28]);
-  return hasHips && hasKnees && hasAnkles;
+  return hasHips && hasKnees;
 }
 
 /**
@@ -196,6 +195,54 @@ export function checkSpineAlignment(landmarks) {
   const score = Math.max(40, Math.round(100 - tiltAngle * 3));
 
   return { isPass, isVisible: true, score, tiltAngle, feedback };
+}
+
+/**
+ * 5b. Upper-Body Posture Fallback — requires ONLY shoulders (+ hips if available for spine tilt).
+ * Used when the student is framed too close for lower-body landmarks to register (seated/close-up view).
+ * Evaluates shoulder levelness and, when hips are visible too, spine tilt from checkSpineAlignment.
+ * Never requires knees/ankles, so it never blocks on "step back."
+ */
+export function checkUpperBodyPosture(landmarks) {
+  if (!landmarks || landmarks.length < 33) {
+    return { isPass: false, isVisible: false, score: 0, feedback: "Upper body not detected." };
+  }
+
+  const pShoulderL = landmarks[11];
+  const pShoulderR = landmarks[12];
+
+  if (!isLandmarkReal(pShoulderL) || !isLandmarkReal(pShoulderR) || pShoulderL.y > 0.82 || pShoulderR.y > 0.82) {
+    return { isPass: false, isVisible: false, score: 0, feedback: "Step back 6–8 ft — shoulders cut off at bottom of frame." };
+  }
+
+  // Shoulder levelness: vertical delta between shoulders, normalized by shoulder width
+  const shoulderTiltRaw = Math.abs(pShoulderL.y - pShoulderR.y);
+  const shoulderWidth = Math.abs(pShoulderR.x - pShoulderL.x) || 0.001;
+  const shoulderLevelness = Number((shoulderTiltRaw / shoulderWidth).toFixed(3));
+  const shoulderScore = Math.max(30, Math.round(100 - shoulderLevelness * 300));
+
+  // Spine tilt, when hips happen to be visible too — otherwise assume neutral
+  const spineRes = checkSpineAlignment(landmarks);
+  const spineScore = spineRes.isVisible ? spineRes.score : 70;
+  const torsoTilt = spineRes.isVisible ? spineRes.tiltAngle : 0;
+
+  const score = Math.round(shoulderScore * 0.45 + spineScore * 0.55);
+  const isPass = score >= 75;
+
+  const feedbackList = [];
+  if (shoulderLevelness > 0.08) feedbackList.push("Level your shoulders — one side is higher.");
+  if (spineRes.isVisible && !spineRes.isPass) feedbackList.push(spineRes.feedback);
+  if (feedbackList.length === 0) feedbackList.push("Good upper-body posture.");
+
+  return {
+    isPass,
+    isVisible: true,
+    score,
+    shoulderLevelness,
+    torsoTilt,
+    feedback: feedbackList[0],
+    feedbackList
+  };
 }
 
 /**

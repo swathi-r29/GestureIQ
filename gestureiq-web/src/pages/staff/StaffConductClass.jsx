@@ -30,9 +30,9 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
     // 1. Draw Hand Skeleton (21 points)
     if (landmarks && landmarks.length >= 21) {
       const connections = [
-        [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
-        [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
-        [0,17],[17,18],[18,19],[19,20]
+        [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+        [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16],
+        [0, 17], [17, 18], [18, 19], [19, 20]
       ];
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
       connections.forEach(([s, e]) => {
@@ -56,8 +56,8 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
     // 2. Draw Full Body Pose Skeleton (33 points)
     if (poseLandmarks && poseLandmarks.length >= 33) {
       const bodyConnections = [
-        [11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
-        [23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[27,31],[28,32]
+        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24],
+        [23, 25], [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [27, 31], [28, 32]
       ];
       ctx.strokeStyle = '#00F2FE'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
       bodyConnections.forEach(([s, e]) => {
@@ -87,14 +87,14 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
 
 const StudentVideo = ({ stream, name }) => {
   const videoRef = useRef(null);
-  
+
   useEffect(() => {
     if (videoRef.current && stream) {
       if (videoRef.current.srcObject !== stream) {
         console.log('[WebRTC Teacher] Attaching stream to monitor for:', name);
         videoRef.current.srcObject = stream;
       }
-      
+
       // Auto-play the monitor (Audio will play if the browser is 'unlocked' by a user gesture)
       const playPromise = videoRef.current.play();
       if (playPromise !== undefined) {
@@ -110,7 +110,7 @@ const StudentVideo = ({ stream, name }) => {
       ref={videoRef}
       autoPlay
       playsInline
-      muted={false} 
+      muted={false}
       className="w-full h-full object-cover bg-zinc-950"
       style={{ transform: 'scaleX(-1)' }}
       onLoadedMetadata={() => {
@@ -133,8 +133,8 @@ const CircularScore = ({ score, color = '#10B981', size = 42 }) => {
   return (
     <div className="relative flex items-center justify-center transition-all duration-700" style={{ width: size, height: size }}>
       <svg className="transform -rotate-90" width={size} height={size}>
-        <circle cx={size/2} cy={size/2} r={radius} stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/5" />
-        <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="3" fill="transparent"
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/5" />
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke={color} strokeWidth="3" fill="transparent"
           strokeDasharray={circumference}
           style={{ strokeDashoffset: offset, transition: 'stroke-dashoffset 0.8s ease-in-out', strokeLinecap: 'round' }}
         />
@@ -157,7 +157,7 @@ const StaffConductClass = () => {
   const [studentPostures, setStudentPostures] = useState({});
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: false });
+  const [activeModules, setActiveModules] = useState({ mudra: true, face: true, pose: true });
   const [announcement, setAnnouncement] = useState('');
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -190,7 +190,7 @@ const StaffConductClass = () => {
       vids.forEach(v => {
         if (v !== localVideoRef.current) { // Don't unmute local preview
           v.muted = false;
-          v.play().catch(() => {});
+          v.play().catch(() => { });
         }
       });
       document.removeEventListener('click', handleFirstClick);
@@ -250,7 +250,7 @@ const StaffConductClass = () => {
           autoGainControl: true
         }
       });
-      
+
       localStreamRef.current = stream;
       streamReadyRef.current = true;
 
@@ -263,8 +263,8 @@ const StaffConductClass = () => {
       // Debug tracks & Settings
       console.log("🎤 Teacher tracks captured:");
       stream.getAudioTracks().forEach(t => {
-          console.log(`[Audio Track] ${t.label}: ${t.enabled} settings:`, t.getSettings());
-          t.enabled = true; // Force ON
+        console.log(`[Audio Track] ${t.label}: ${t.enabled} settings:`, t.getSettings());
+        t.enabled = true; // Force ON
       });
       stream.getVideoTracks().forEach(t => console.log(`[Video Track] ${t.label}: ${t.enabled}`));
 
@@ -358,7 +358,7 @@ const StaffConductClass = () => {
       if (peerConnectionsRef.current.get(studentSocketId) !== pc) return;
 
       console.log(`[WebRTC Teacher] Got track from student ${studentSocketId}:`, event.track.kind);
-      
+
       const studentId = socketToUserIdRef.current[studentSocketId];
       if (!studentId) {
         console.warn('[WebRTC Teacher] ontrack — no userId registered for socket:', studentSocketId);
@@ -410,7 +410,7 @@ const StaffConductClass = () => {
     }
 
     const pc = peerConnectionsRef.current.get(studentSocketId);
-    
+
     // GUARD: If already processing a handshake, don't interrupt it
     if (pc && pc.signalingState !== 'stable') {
       console.warn('[WebRTC Teacher] signalingState is', pc.signalingState, '— skipping reset for:', studentSocketId);
@@ -429,7 +429,7 @@ const StaffConductClass = () => {
     try {
       console.log('[WebRTC Teacher] Starting new handshake (Audio + Video) for:', studentSocketId);
       const newPC = createPeerConnection(studentSocketId);
-      
+
       // Ensure tracks are added (redundant but safe)
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => {
@@ -446,7 +446,7 @@ const StaffConductClass = () => {
         offerToReceiveVideo: true
       });
       await newPC.setLocalDescription(offer);
-      
+
       socketRef.current?.emit('webrtc_offer', {
         classId: classId,
         to: studentSocketId,
@@ -527,12 +527,12 @@ const StaffConductClass = () => {
       // Students already in room when teacher joins
       s.on('current_participants', (participants) => {
         participants.forEach(p => {
-            if (p.name === 'Teacher' || p.isTeacher) return;
-            
-            // ✅ Register mapping for existing participants
-            socketToUserIdRef.current[p.id] = p.userId;
+          if (p.name === 'Teacher' || p.isTeacher) return;
 
-            setStudents(prev => prev[p.userId] ? prev : {
+          // ✅ Register mapping for existing participants
+          socketToUserIdRef.current[p.id] = p.userId;
+
+          setStudents(prev => prev[p.userId] ? prev : {
             ...prev,
             [p.userId]: {
               socketId: p.id, name: p.name || 'Student',
@@ -825,9 +825,9 @@ const StaffConductClass = () => {
       setSidebarHidden(false); // Restore sidebar on end
       alert('Session completed. Report generated.');
       navigate('/staff/reports');
-    } catch (error) { 
+    } catch (error) {
       setSidebarHidden(false); // Restore sidebar even on error
-      alert('Error ending session'); 
+      alert('Error ending session');
     }
   };
 
@@ -854,14 +854,15 @@ const StaffConductClass = () => {
               <Target className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Eval Mode</span>
-                <select 
-                  value={evaluationMode} 
+                <select
+                  value={evaluationMode}
                   onChange={e => handleSelectMode(e.target.value, targetStance)}
                   className="bg-transparent text-xs font-black text-[#f97316] outline-none cursor-pointer hover:text-orange-400 transition-colors"
                   style={{ textShadow: '0 0 10px rgba(249,115,22,0.3)' }}
                 >
-                  <option value="FULL_BODY_MUDRA" className="bg-zinc-900">Mudra Mode</option>
-                  <option value="FULL_BODY_STANCE" className="bg-zinc-900">Full Body Stance Mode</option>
+                  <option value="FULL_BODY_MUDRA" className="bg-zinc-900">Mudra Mode (Hands Only)</option>
+                  <option value="FULL_BODY_STANCE" className="bg-zinc-900">Full Body Stance Mode (Pose Only)</option>
+                  <option value="FULL_SUITE" className="bg-zinc-900">Full Body + Mudra (Combined)</option>
                 </select>
               </div>
             </div>
@@ -888,8 +889,8 @@ const StaffConductClass = () => {
               <div className="flex items-center px-4 py-1.5 space-x-3 border-r border-white/5">
                 <div className="flex flex-col">
                   <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Target Mudra</span>
-                  <select 
-                    value={currentMudra} 
+                  <select
+                    value={currentMudra}
                     onChange={e => handleMudraChange(e.target.value)}
                     className="bg-transparent text-xs font-black text-[#f97316] outline-none cursor-pointer hover:text-orange-400 transition-colors"
                     style={{ textShadow: '0 0 10px rgba(249,115,22,0.3)' }}
@@ -901,7 +902,7 @@ const StaffConductClass = () => {
             )}
             <div className="flex items-center px-5 py-1.5 space-x-4">
               <div className="flex flex-col">
-                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">AI Module</span>
+                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Mudra AI</span>
                 <div
                   onClick={() => handleModuleToggle('mudra')}
                   className="w-9 h-4.5 rounded-full cursor-pointer transition-all duration-500 relative border border-white/10 shadow-inner"
@@ -913,16 +914,30 @@ const StaffConductClass = () => {
                   <div className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-md transition-all duration-500 ${activeModules.mudra ? 'left-5' : 'left-0.5'}`} />
                 </div>
               </div>
+              <div className="flex flex-col">
+                <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500 leading-none mb-1">Pose AI</span>
+                <div
+                  onClick={() => handleModuleToggle('pose')}
+                  className="w-9 h-4.5 rounded-full cursor-pointer transition-all duration-500 relative border border-white/10 shadow-inner"
+                  style={{
+                    backgroundColor: activeModules.pose ? '#10B981' : '#374151',
+                    boxShadow: activeModules.pose ? '0 0 15px rgba(16,185,129,0.2)' : 'none'
+                  }}
+                  title="Toggle full-body pose tracking for all students"
+                >
+                  <div className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow-md transition-all duration-500 ${activeModules.pose ? 'left-5' : 'left-0.5'}`} />
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
-            <Volume2 
-              className="w-4 h-4 text-emerald-500 cursor-pointer hover:scale-110 transition-transform" 
+            <Volume2
+              className="w-4 h-4 text-emerald-500 cursor-pointer hover:scale-110 transition-transform"
               onClick={() => {
                 const audios = document.querySelectorAll('video');
                 audios.forEach(a => {
-                  a.play().catch(() => {});
+                  a.play().catch(() => { });
                   if (a.paused) a.muted = false;
                 });
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -996,13 +1011,13 @@ const StaffConductClass = () => {
               <Send className="w-3.5 h-3.5 text-blue-500" />
               <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Broadcast</p>
             </div>
-            <textarea 
-              value={announcement} 
+            <textarea
+              value={announcement}
               onChange={e => setAnnouncement(e.target.value)}
-              placeholder="Type announcement..." 
-              className="w-full bg-black/30 border border-white/5 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-blue-500/50 transition-all resize-none h-20" 
+              placeholder="Type announcement..."
+              className="w-full bg-black/30 border border-white/5 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-blue-500/50 transition-all resize-none h-20"
             />
-            <button 
+            <button
               onClick={handleBroadcastAnnouncement}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
             >
@@ -1024,21 +1039,19 @@ const StaffConductClass = () => {
           <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-5 z-20">
             <button
               onClick={toggleMic}
-              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${
-                isMicOn 
-                ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' 
-                : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
-              }`}
+              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${isMicOn
+                  ? 'bg-white/10 border-white/20 text-white hover:bg-white/20'
+                  : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
+                }`}
             >
               {isMicOn ? <Mic size={24} /> : <MicOff size={24} />}
             </button>
             <button
               onClick={toggleCamera}
-              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${
-                isCameraOn 
-                ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' 
-                : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
-              }`}
+              className={`p-5 rounded-[2.5rem] backdrop-blur-xl border-2 transition-all duration-500 hover:scale-110 active:scale-95 ${isCameraOn
+                  ? 'bg-white/10 border-white/20 text-white hover:bg-white/20'
+                  : 'bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.5)]'
+                }`}
             >
               {isCameraOn ? <Video size={24} /> : <VideoOff size={24} />}
             </button>
@@ -1062,66 +1075,73 @@ const StaffConductClass = () => {
             <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">Real-time AI</span>
           </div>
 
-          {evaluationMode === 'FULL_BODY_STANCE' && (
+          {Object.keys(studentPostures).length > 0 && (
             <div className="mb-6 p-4 bg-zinc-900/90 border border-emerald-500/30 rounded-2xl shadow-xl">
               <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-3">
                 <h3 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                  <Activity size={14} /> Live Posture Alignment ({targetStance})
+                  <Activity size={14} />
+                  {evaluationMode === 'FULL_BODY_STANCE'
+                    ? `Live Posture Alignment (${targetStance})`
+                    : 'Live Posture (background, Mudra Mode)'}
                 </h3>
                 <span className="text-[10px] text-zinc-400 font-bold">
                   {Object.keys(studentPostures).length} Active
                 </span>
               </div>
-              {Object.keys(studentPostures).length > 0 ? (
-                <div className="divide-y divide-zinc-800/80 space-y-2">
-                  {Object.values(studentPostures).map((st) => (
-                    <div key={st.studentId} className="pt-2 flex items-center justify-between text-xs">
-                      <div className="space-y-0.5">
-                        <span className="font-bold text-zinc-100">{st.studentName}</span>
-                        <div className="text-[10px] text-zinc-400 flex gap-2">
-                          {st.kneeAngles?.left !== null && (
-                            <span>Knees: L {st.kneeAngles?.left}° | R {st.kneeAngles?.right}°</span>
-                          )}
-                          {st.torsoTilt !== null && (
-                            <span>Tilt: {st.torsoTilt}°</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`px-2.5 py-1 rounded-lg text-xs font-black border ${
-                            st.score >= 75
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                          }`}
-                        >
-                          {st.score}%
-                        </span>
+              <div className="divide-y divide-zinc-800/80 space-y-2">
+                {Object.values(studentPostures).map((st) => (
+                  <div key={st.studentId} className="pt-2 flex items-center justify-between text-xs">
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-zinc-100">{st.studentName}</span>
+                      <div className="text-[10px] text-zinc-400 flex gap-2 flex-wrap">
+                        {st.kneeAngles?.left !== null && st.kneeAngles?.left !== undefined && (
+                          <span>Knees: L {st.kneeAngles?.left}° | R {st.kneeAngles?.right}°</span>
+                        )}
+                        {st.torsoTilt !== null && st.torsoTilt !== undefined && (
+                          <span>Tilt: {st.torsoTilt}°</span>
+                        )}
+                        {st.evaluationTier === 'UPPER_BODY' && (
+                          <span className="text-amber-400 font-bold">Upper Body Mode</span>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[11px] text-zinc-500 italic">Waiting for student posture metrics...</p>
-              )}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black border ${st.score >= 75
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                          }`}
+                      >
+                        {st.score}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {Object.keys(students).length > 0 ? (
             <div className="space-y-6">
-              {Object.entries(students).map(([studentId, data], idx) => (
+              {Object.entries(students).map(([studentId, data], idx) => {
+                const posture = studentPostures[studentId];
+                const mudraScore = data.score || 0;
+                const postureScore = posture?.score;
+                const combinedScore = evaluationMode === 'FULL_BODY_STANCE'
+                  ? (postureScore !== undefined ? postureScore : 0)
+                  : (postureScore !== undefined && activeModules.pose ? Math.round((mudraScore * 0.5) + (postureScore * 0.5)) : mudraScore);
+
+                return (
                 <div key={studentId}
-                  className={`relative p-5 rounded-[2rem] border-2 transition-all duration-700 animate-fadeIn overflow-hidden ${
-                    data.score >= 90 ? 'border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_40px_rgba(16,185,129,0.15)]' :
-                    data.score >= 75 ? 'border-amber-500/40 bg-amber-500/5 shadow-[0_0_30px_rgba(245,158,11,0.1)]' :
-                    'border-red-500/40 bg-red-500/5 shadow-[0_0_30px_rgba(239,68,68,0.1)]'
-                  }`}
+                  className={`relative p-5 rounded-[2rem] border-2 transition-all duration-700 animate-fadeIn overflow-hidden ${combinedScore >= 90 ? 'border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_40px_rgba(16,185,129,0.15)]' :
+                      combinedScore >= 75 ? 'border-amber-500/40 bg-amber-500/5 shadow-[0_0_30px_rgba(245,158,11,0.1)]' :
+                        'border-red-500/40 bg-red-500/5 shadow-[0_0_30px_rgba(239,68,68,0.1)]'
+                    }`}
                   style={{ animationDelay: `${idx * 150}ms` }}
                 >
                   {/* Decorative corner glow */}
-                  <div className={`absolute -top-10 -right-10 w-32 h-32 rounded-full blur-[60px] opacity-20 ${
-                    data.score >= 90 ? 'bg-emerald-500' : data.score >= 75 ? 'bg-amber-500' : 'bg-red-500'
-                  }`} />
+                  <div className={`absolute -top-10 -right-10 w-32 h-32 rounded-full blur-[60px] opacity-20 ${combinedScore >= 90 ? 'bg-emerald-500' : combinedScore >= 75 ? 'bg-amber-500' : 'bg-red-500'
+                    }`} />
 
                   <div className="relative aspect-video rounded-2xl bg-black mb-5 overflow-hidden border border-white/10 group shadow-2xl">
                     {data.remoteStream ? (
@@ -1135,20 +1155,20 @@ const StaffConductClass = () => {
                         <span className="text-[10px] font-black uppercase tracking-[3px]">Awaiting Stream</span>
                       </div>
                     )}
-                    
+
                     {/* Real-time Skeleton Overlay (Hand + Full Body Pose) */}
-                    <SkeletonOverlay landmarks={data.landmarks} poseLandmarks={data.poseLandmarks} color={data.score >= 90 ? '#10B981' : '#F59E0B'} />
+                    <SkeletonOverlay landmarks={data.landmarks} poseLandmarks={data.poseLandmarks} color={combinedScore >= 90 ? '#10B981' : '#F59E0B'} />
 
                     {/* Floating Circular Score Overlay */}
                     <div className="absolute top-3 right-3 p-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 group-hover:scale-110 transition-transform duration-500 z-20">
-                      <CircularScore 
-                        score={data.score} 
-                        color={data.score >= 90 ? '#10B981' : data.score >= 75 ? '#F59E0B' : '#EF4444'} 
+                      <CircularScore
+                        score={combinedScore}
+                        color={combinedScore >= 90 ? '#10B981' : combinedScore >= 75 ? '#F59E0B' : '#EF4444'}
                       />
                     </div>
 
                     <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-white/10 flex items-center space-x-1.5 z-20">
-                      <div className={`w-1.5 h-1.5 rounded-full ${data.score >= 90 ? 'bg-emerald-500' : 'bg-zinc-500 opacity-50'} animate-pulse`} />
+                      <div className={`w-1.5 h-1.5 rounded-full ${combinedScore >= 90 ? 'bg-emerald-500' : 'bg-zinc-500 opacity-50'} animate-pulse`} />
                       <span className="text-[8px] font-black uppercase text-white/70">Secure Handshake</span>
                     </div>
                   </div>
@@ -1159,35 +1179,48 @@ const StaffConductClass = () => {
                         <h3 className="text-sm font-black text-white tracking-wide">{data.name}</h3>
                         <div className="flex items-center space-x-2 mt-1">
                           <Activity className="w-3 h-3 text-zinc-500" />
-                          <span className={`text-[11px] font-black uppercase tracking-tight ${
-                            data.mudra && data.mudra !== 'No Hand' ? 'text-blue-400' : 'text-zinc-500'
-                          }`}>
+                          <span className={`text-[11px] font-black uppercase tracking-tight ${data.mudra && data.mudra !== 'No Hand' ? 'text-blue-400' : 'text-zinc-500'
+                            }`}>
                             {activeModules.mudra ? (data.mudra || 'No Action') : 'AI Paused'}
                             {data.stanceName ? ` • ${data.stanceName}` : ''}
                           </span>
                         </div>
                       </div>
-                      <span className={`text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-xl border ${
-                        data.score >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
-                        data.score >= 75 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' :
-                        'text-red-400 border-red-500/30 bg-red-500/10'
-                      }`}>{data.status}</span>
+                      <span className={`text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-xl border ${combinedScore >= 90 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
+                          combinedScore >= 75 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' :
+                            'text-red-400 border-red-500/30 bg-red-500/10'
+                        }`}>{data.status}</span>
+                    </div>
+
+                    {/* Combined Mudra + Posture badges */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[9px] font-bold px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 uppercase tracking-wide">
+                        ✋ Mudra {mudraScore}%
+                      </span>
+                      {postureScore !== undefined && (
+                        <span className="text-[9px] font-bold px-2 py-1 rounded-lg bg-teal-500/10 border border-teal-500/30 text-teal-300 uppercase tracking-wide">
+                          🧘 Posture {postureScore}%
+                        </span>
+                      )}
+                      <span className="text-[9px] font-bold px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-zinc-300 uppercase tracking-wide">
+                        Combined {combinedScore}%
+                      </span>
                     </div>
 
                     {/* Premium Gradient Progress Bar */}
                     <div className="relative h-2.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                       <div
-                        className={`absolute top-0 left-0 h-full transition-all duration-1000 ease-out rounded-full bg-gradient-to-r ${
-                          data.score >= 90 ? 'from-emerald-600 to-emerald-400' :
-                          data.score >= 75 ? 'from-amber-600 to-amber-400' :
-                          'from-red-600 to-red-400'
-                        }`}
-                        style={{ width: `${data.score}%`, boxShadow: '0 0 20px rgba(0,0,0,0.5)' }}
+                        className={`absolute top-0 left-0 h-full transition-all duration-1000 ease-out rounded-full bg-gradient-to-r ${combinedScore >= 90 ? 'from-emerald-600 to-emerald-400' :
+                            combinedScore >= 75 ? 'from-amber-600 to-amber-400' :
+                              'from-red-600 to-red-400'
+                          }`}
+                        style={{ width: `${combinedScore}%`, boxShadow: '0 0 20px rgba(0,0,0,0.5)' }}
                       />
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="h-[60vh] flex flex-col items-center justify-center opacity-20 space-y-6 text-center">

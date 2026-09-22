@@ -64,7 +64,7 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5173,
       strictPort: true,
-      allowedHosts: true, 
+      allowedHosts: true, // Accepts all incoming hostnames
       cors: true,
       hmr: {
         clientPort: 443
@@ -80,7 +80,7 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5173,
       strictPort: true,
-      allowedHosts: true,
+      allowedHosts: true, // Accepts all incoming hostnames
       cors: true,
       headers: {
         'ngrok-skip-browser-warning': 'true',

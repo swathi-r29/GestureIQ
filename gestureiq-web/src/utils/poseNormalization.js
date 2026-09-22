@@ -49,8 +49,12 @@ export function normalizePoseLandmarks(landmarks) {
 export function calculate3DAngle(pA, pB, pC) {
   if (!pA || !pB || !pC) return 0;
 
-  const vectorBA = [pA.x - pB.x, pA.y - pB.y, pA.z - pB.z];
-  const vectorBC = [pC.x - pB.x, pC.y - pB.y, pC.z - pB.z];
+  const zA = (typeof pA.z === 'number' && !isNaN(pA.z)) ? pA.z : 0;
+  const zB = (typeof pB.z === 'number' && !isNaN(pB.z)) ? pB.z : 0;
+  const zC = (typeof pC.z === 'number' && !isNaN(pC.z)) ? pC.z : 0;
+
+  const vectorBA = [pA.x - pB.x, pA.y - pB.y, zA - zB];
+  const vectorBC = [pC.x - pB.x, pC.y - pB.y, zC - zB];
 
   const dotProduct = vectorBA[0] * vectorBC[0] + vectorBA[1] * vectorBC[1] + vectorBA[2] * vectorBC[2];
   const magBA = Math.sqrt(vectorBA[0] ** 2 + vectorBA[1] ** 2 + vectorBA[2] ** 2);
@@ -59,7 +63,8 @@ export function calculate3DAngle(pA, pB, pC) {
   if (magBA === 0 || magBC === 0) return 0;
 
   const cosine = Math.max(-1, Math.min(1, dotProduct / (magBA * magBC)));
-  return (Math.acos(cosine) * 180) / Math.PI;
+  const angle = (Math.acos(cosine) * 180) / Math.PI;
+  return Number.isNaN(angle) ? 0 : angle;
 }
 
 /**
@@ -76,5 +81,6 @@ export function calculateVerticalTilt(pA, pB) {
   // Angle with vertical axis (0, -1)
   const dot = (dx * 0) + (dy * -1); // Upward vertical
   const cosine = Math.max(-1, Math.min(1, dot / mag));
-  return (Math.acos(cosine) * 180) / Math.PI;
+  const tilt = (Math.acos(cosine) * 180) / Math.PI;
+  return Number.isNaN(tilt) ? 0 : tilt;
 }
