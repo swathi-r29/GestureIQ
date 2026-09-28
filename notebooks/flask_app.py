@@ -164,16 +164,24 @@ hands_double = mp_hands.Hands(
 )
 
 _mp_face   = mp.solutions.face_mesh
-_face_mesh = _mp_face.FaceMesh(
-    static_image_mode=False,
-    max_num_faces=1,
-    refine_landmarks=False,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5,
-)
+try:
+    _face_mesh = _mp_face.FaceMesh(
+        static_image_mode=False,
+        max_num_faces=1,
+        refine_landmarks=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+except Exception as e:
+    print(f"[WARNING] Could not initialize MediaPipe FaceMesh: {e}")
+    _face_mesh = None
 
-_mp_selfie = mp.solutions.selfie_segmentation
-_segmentor = _mp_selfie.SelfieSegmentation(model_selection=1) # 1 for landscape/fast
+try:
+    _mp_selfie = mp.solutions.selfie_segmentation
+    _segmentor = _mp_selfie.SelfieSegmentation(model_selection=1)
+except Exception as e:
+    print(f"[WARNING] Could not initialize SelfieSegmentation: {e}")
+    _segmentor = None
 
 # --- GLOBAL STABILITY REGISTRY ---
 WRIST_HISTORY = deque(maxlen=5) # Task 1: Velocity Gating
@@ -722,6 +730,8 @@ def detect_navarasa(rgb_frame, current_mudra_name=""):
     }
 
     try:
+        if _face_mesh is None:
+            return empty
         result = _face_mesh.process(rgb_frame)
         if not result.multi_face_landmarks:
             navarasa_stable_count = 0
@@ -2611,14 +2621,24 @@ def evaluate_session():
         # Use the hand orientation with highest overall top confidence
         best_probs = max(all_probs, key=lambda p: float(max(p)))
 
-        # If active_mudras specified, only score against those
+        # Resolve active_mudras against model classes
         search_list = active_mudras if active_mudras else classes
+        valid_search = []
+        for m in search_list:
+            clean_m = clean_mudra_name(m) if 'clean_mudra_name' in globals() else m
+            clean_m = clean_m.replace('mudra', '').strip()
+            for c in classes:
+                c_clean = c.lower().replace('mudra', '').strip()
+                if c == m or c == clean_m or c_clean == clean_m or c_clean in clean_m or clean_m in c_clean:
+                    if c not in valid_search:
+                        valid_search.append(c)
+
+        if not valid_search:
+            valid_search = classes
 
         best_name = ""
         best_raw_conf = 0.0
-        for m_name in search_list:
-            if m_name not in classes:
-                continue
+        for m_name in valid_search:
             idx = classes.index(m_name)
             conf = float(best_probs[idx])
             if conf > best_raw_conf:
@@ -2631,20 +2651,29 @@ def evaluate_session():
 
         # Boost: if the winner is clearly dominating among active mudras
         if active_mudras:
-            active_sum = sum(
-                float(best_probs[classes.index(m)])
-                for m in active_mudras if m in classes
-            )
-            if active_sum > 0:
-                subset_normalized = (best_raw_conf / active_sum) * 100.0
-                # Take the higher of the two — raw or subset-normalized
-                normalized_conf = max(normalized_conf, subset_normalized)
+            valid_active = [m for m in valid_search if m in classes]
+            if valid_active:
+                active_sum = sum(
+                    float(best_probs[classes.index(m)])
+                    for m in valid_active
+                )
+                if active_sum > 0:
+                    subset_normalized = (best_raw_conf / active_sum) * 100.0
+                    normalized_conf = max(normalized_conf, subset_normalized)
 
         score_pct = round(min(normalized_conf, 100.0), 1)
 
-        # Also run geometry check for target mudra if only one target
-        if len(active_mudras) == 1 and active_mudras[0] in MUDRA_REFERENCE_ANGLES:
-            target_key = active_mudras[0]
+        # Also run geometry check for target mudra if target matches reference angles
+        target_key = None
+        if active_mudras:
+            raw_t = active_mudras[0].replace('mudra', '').strip()
+            for k in MUDRA_REFERENCE_ANGLES.keys():
+                k_clean = k.lower().replace('mudra', '').strip()
+                if k_clean == raw_t or k_clean in raw_t or raw_t in k_clean:
+                    target_key = k
+                    break
+
+        if target_key:
             finger_angles = get_finger_angles_dict(lm_list)
             lm_wrapper = LMWrapper(lm_list)
             p_w = [lm_list[0].x, lm_list[0].y, lm_list[0].z]

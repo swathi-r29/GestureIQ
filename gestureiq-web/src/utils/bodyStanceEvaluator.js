@@ -31,12 +31,15 @@ export function calculateJointAngle(a, b, c) {
   return Number.isNaN(angle) ? 0 : Math.round(angle);
 }
 
-function isLandmarkValid(pt, minVis = 0.1) {
+function isLandmarkValid(pt, minVis = 0.45) {
   if (!pt) return false;
   if (typeof pt.x !== 'number' || typeof pt.y !== 'number') return false;
   if (isNaN(pt.x) || isNaN(pt.y)) return false;
   if (pt.x === 0 && pt.y === 0) return false;
+  if (pt.y > 0.94 || pt.y < 0.03 || pt.x > 0.98 || pt.x < 0.02) return false;
+
   if (typeof pt.visibility === 'number' && pt.visibility < minVis) return false;
+
   return true;
 }
 
@@ -78,7 +81,7 @@ function buildUpperBodyResult(targetStance, upperResult) {
 }
 
 export function evaluateFullBodyStance(poseLandmarks, targetStance = 'Araimandi Stance') {
-  if (!poseLandmarks || poseLandmarks.length < 33) {
+  if (!poseLandmarks || poseLandmarks.length < 28) {
     return buildMissingResult(
       targetStance,
       'Full body not detected. Step back so your entire body is visible.',
@@ -94,10 +97,10 @@ export function evaluateFullBodyStance(poseLandmarks, targetStance = 'Araimandi 
   const rKnee = poseLandmarks[26];
   const lAnkle = poseLandmarks[27];
   const rAnkle = poseLandmarks[28];
-  const minVis = 0.1;
+  const minVis = 0.45;
   const upperBodyValid = isLandmarkValid(lShoulder, minVis) && isLandmarkValid(rShoulder, minVis) && lShoulder.y < 0.82 && rShoulder.y < 0.82;
-  const hipsValid = isLandmarkValid(lHip, minVis) || isLandmarkValid(rHip, minVis);
-  const kneesValid = isLandmarkValid(lKnee, minVis) || isLandmarkValid(rKnee, minVis);
+  const hipsValid = isLandmarkValid(lHip, minVis) && isLandmarkValid(rHip, minVis);
+  const kneesValid = isLandmarkValid(lKnee, minVis) && isLandmarkValid(rKnee, minVis);
   const feetValid = isLandmarkValid(lAnkle, minVis) || isLandmarkValid(rAnkle, minVis);
 
   if (!upperBodyValid) {
@@ -113,7 +116,29 @@ export function evaluateFullBodyStance(poseLandmarks, targetStance = 'Araimandi 
   if (!hipsValid || !kneesValid) {
     return buildMissingResult(
       targetStance,
-      'Step back 6–8 ft — hips & knees must be visible for stance scoring.',
+      'Full body not detected. Step back so your entire body is visible.',
+      'FEET_MISSING'
+    );
+  }
+
+  // MANDATORY STANDING POSTURE GATE:
+  // Disambiguates a standing dancer from a seated desk posture where wrists are misidentified as knees/ankles.
+  const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
+  const avgHipY = (lHip.y + rHip.y) / 2;
+  const avgLegY = (lAnkle?.y && rAnkle?.y && isLandmarkValid(lAnkle) && isLandmarkValid(rAnkle))
+    ? (lAnkle.y + rAnkle.y) / 2
+    : (lKnee.y + rKnee.y) / 2;
+
+  const torsoHeight = Math.abs(avgHipY - avgShoulderY);
+  const legDrop = avgLegY - avgHipY;
+  const legToTorsoRatio = torsoHeight > 0.05 ? (legDrop / torsoHeight) : 0;
+
+  // In a real standing stance, leg vertical drop must be at least 0.15 and legToTorsoRatio >= 0.48.
+  // Seated desk postures (hands on desk mapped as legs) result in legDrop < 0.12 and ratio < 0.40.
+  if (legDrop < 0.15 || legToTorsoRatio < 0.48) {
+    return buildMissingResult(
+      targetStance,
+      'Full body stance required — please stand up and step back 6–8 ft from the camera.',
       'FEET_MISSING'
     );
   }

@@ -27,8 +27,20 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Draw Hand Skeleton (21 points)
-    if (landmarks && landmarks.length >= 21) {
+    // Disambiguate hand landmarks (21 pts) vs pose landmarks (33 pts)
+    let actualHandLms = null;
+    let actualPoseLms = poseLandmarks;
+
+    if (landmarks && Array.isArray(landmarks)) {
+      if (landmarks.length === 21) {
+        actualHandLms = landmarks;
+      } else if (landmarks.length >= 33) {
+        actualPoseLms = landmarks;
+      }
+    }
+
+    // 1. Draw Hand Skeleton (EXACTLY 21 points)
+    if (actualHandLms && actualHandLms.length === 21) {
       const connections = [
         [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
         [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16],
@@ -36,15 +48,15 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
       ];
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
       connections.forEach(([s, e]) => {
-        if (landmarks[s] && landmarks[e]) {
+        if (actualHandLms[s] && actualHandLms[e]) {
           ctx.beginPath();
-          ctx.moveTo(landmarks[s].x * canvas.width, landmarks[s].y * canvas.height);
-          ctx.lineTo(landmarks[e].x * canvas.width, landmarks[e].y * canvas.height);
+          ctx.moveTo(actualHandLms[s].x * canvas.width, actualHandLms[s].y * canvas.height);
+          ctx.lineTo(actualHandLms[e].x * canvas.width, actualHandLms[e].y * canvas.height);
           ctx.stroke();
         }
       });
       ctx.fillStyle = '#fff';
-      landmarks.forEach(pt => {
+      actualHandLms.forEach(pt => {
         if (pt && typeof pt.x === 'number') {
           ctx.beginPath();
           ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 2, 0, Math.PI * 2);
@@ -53,26 +65,40 @@ const SkeletonOverlay = ({ landmarks, poseLandmarks, color = '#10B981' }) => {
       });
     }
 
-    // 2. Draw Full Body Pose Skeleton (33 points)
-    if (poseLandmarks && poseLandmarks.length >= 33) {
+    // 2. Draw Full Body Pose Skeleton (33 points) - Matching Student Side Anatomical Topology
+    if (actualPoseLms && actualPoseLms.length >= 33) {
       const bodyConnections = [
-        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24],
-        [23, 25], [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [27, 31], [28, 32]
+        // Face
+        [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10],
+        // Shoulders & Torso
+        [11, 12], [11, 23], [12, 24], [23, 24],
+        // Left Arm
+        [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
+        // Right Arm
+        [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
+        // Legs
+        [23, 25], [25, 27], [27, 29], [27, 31], [29, 31],
+        [24, 26], [26, 28], [28, 30], [28, 32], [30, 32]
       ];
-      ctx.strokeStyle = '#00F2FE'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.strokeStyle = '#F97316'; // High legibility orange/amber
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       bodyConnections.forEach(([s, e]) => {
-        if (poseLandmarks[s] && poseLandmarks[e]) {
+        if (actualPoseLms[s] && actualPoseLms[e] &&
+            typeof actualPoseLms[s].x === 'number' && typeof actualPoseLms[e].x === 'number' &&
+            actualPoseLms[s].x > 0.01 && actualPoseLms[e].x > 0.01) {
           ctx.beginPath();
-          ctx.moveTo(poseLandmarks[s].x * canvas.width, poseLandmarks[s].y * canvas.height);
-          ctx.lineTo(poseLandmarks[e].x * canvas.width, poseLandmarks[e].y * canvas.height);
+          ctx.moveTo(actualPoseLms[s].x * canvas.width, actualPoseLms[s].y * canvas.height);
+          ctx.lineTo(actualPoseLms[e].x * canvas.width, actualPoseLms[e].y * canvas.height);
           ctx.stroke();
         }
       });
-      ctx.fillStyle = '#FFD700';
-      poseLandmarks.forEach(pt => {
-        if (pt && typeof pt.x === 'number') {
+      ctx.fillStyle = '#FFFFFF';
+      actualPoseLms.forEach((pt, idx) => {
+        if (pt && typeof pt.x === 'number' && pt.x > 0.01) {
           ctx.beginPath();
-          ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 3, 0, Math.PI * 2);
+          ctx.arc(pt.x * canvas.width, pt.y * canvas.height, idx <= 10 ? 2 : 3.5, 0, Math.PI * 2);
           ctx.fill();
         }
       });
@@ -111,7 +137,7 @@ const StudentVideo = ({ stream, name }) => {
       autoPlay
       playsInline
       muted={false}
-      className="w-full h-full object-cover bg-zinc-950"
+      className="w-full h-full object-contain bg-zinc-950"
       style={{ transform: 'scaleX(-1)' }}
       onLoadedMetadata={() => {
         console.log('[WebRTC Teacher] Monitor metadata loaded, unmuting audio for:', name);
@@ -161,6 +187,7 @@ const StaffConductClass = () => {
   const [announcement, setAnnouncement] = useState('');
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isExpandedMonitoring, setIsExpandedMonitoring] = useState(false);
 
   const { announce, unlock } = useVoiceGuide({ language: 'en' });
 
@@ -663,6 +690,22 @@ const StaffConductClass = () => {
             receivedAt: Date.now()
           }
         }));
+        setStudents(prev => {
+          const sId = data.studentId;
+          if (!sId || !prev[sId]) return prev;
+          const currentStudent = prev[sId];
+          const status = data.score >= 90 ? 'Excellent' : data.score >= 75 ? 'Good' : 'Practicing';
+          return {
+            ...prev,
+            [sId]: {
+              ...currentStudent,
+              score: data.score !== undefined ? data.score : currentStudent.score || 0,
+              mudra: data.stance || currentStudent.mudra || '',
+              status,
+              lastSeen: Date.now()
+            }
+          };
+        });
       });
 
       s.on('teacher_update_evaluation_mode', (data) => {
@@ -1068,11 +1111,19 @@ const StaffConductClass = () => {
         </div>
 
         {/* Right: Student monitoring */}
-        <div className="w-[450px] border-l overflow-y-auto shrink-0 bg-zinc-950 p-6"
+        <div className={`${isExpandedMonitoring ? 'w-[750px] 2xl:w-[850px]' : 'w-[580px] 2xl:w-[650px]'} border-l overflow-y-auto shrink-0 bg-zinc-950 p-6 transition-all duration-500`}
           style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-[10px] font-black uppercase tracking-[3px] text-zinc-400">Student Monitoring</h2>
-            <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">Real-time AI</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsExpandedMonitoring(!isExpandedMonitoring)}
+                className="px-2.5 py-1 text-[10px] font-bold text-zinc-300 bg-zinc-800/80 hover:bg-zinc-700 rounded-lg border border-zinc-700 flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                {isExpandedMonitoring ? '← Standard View' : '↔ Expand View'}
+              </button>
+              <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded uppercase">Real-time AI</span>
+            </div>
           </div>
 
           {Object.keys(studentPostures).length > 0 && (

@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useVoiceGuide, LanguageSelector } from '../hooks/useVoiceGuide';
-import { checkGeometricAnchors } from '../utils/geometricRules';
+import { checkGeometricAnchors, isValidHand } from '../utils/geometricRules';
 import { getSocket } from '../utils/socket';
 import { Video, VideoOff, Mic, MicOff, Users, Clock, Activity, AlertTriangle, LogOut, Send, UserCheck, Zap, Award, Target, RefreshCw, Camera, CheckCircle, AlertCircle } from 'lucide-react';
 import { loadMediaPipeScripts, loadMediaPipePoseScripts, safeLocateFile } from '../utils/loadMediaPipe';
@@ -30,6 +30,20 @@ const formatTime = (seconds) => {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
+};
+
+const STANCE_KEYS = ['araimandi', 'muzhumandi', 'samapada', 'nattadavu', 'tillana', 'stance', 'adavu', 'posture'];
+const isStanceTarget = (target) => {
+  if (!target) return false;
+  const t = target.toLowerCase();
+  return STANCE_KEYS.some(k => t.includes(k));
+};
+
+const isMudraMatch = (d, t) => {
+  if (!d || !t) return false;
+  const normD = d.toLowerCase().replace(/[^a-z]/g, '');
+  const normT = t.toLowerCase().replace(/[^a-z]/g, '');
+  return normD === normT || normD.includes(normT) || normT.includes(normD);
 };
 
 const scoreColor = (s) => s >= 75 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626';
@@ -393,15 +407,20 @@ const StudentLiveClass = () => {
         classDataRef.current = res.data;
 
         // Detect if this class/adavu is a stance/full-body session
-        const initialMode = res.data.evaluationMode || 
-          (res.data.targetMudra?.toLowerCase().includes('adavu') || 
-           res.data.title?.toLowerCase().includes('adavu') || 
-           res.data.title?.toLowerCase().includes('stance')
-            ? 'FULL_BODY_STANCE' 
-            : 'FULL_BODY_MUDRA');
+        const initialTarget = res.data.targetMudra || res.data.mudrasList?.[0] || '';
+        const initialMode = res.data.evaluationMode || (isStanceTarget(initialTarget) || isStanceTarget(res.data.title) ? 'FULL_BODY_STANCE' : 'FULL_BODY_MUDRA');
 
         setEvaluationMode(initialMode);
         evaluationModeRef.current = initialMode;
+
+        if (initialTarget) {
+          setTargetMudra(initialTarget);
+          targetMudraRef.current = initialTarget;
+          if (isStanceTarget(initialTarget)) {
+            setTargetStance(initialTarget);
+            targetStanceRef.current = initialTarget;
+          }
+        }
 
         if (res.data.targetStance) {
           setTargetStance(res.data.targetStance);
@@ -422,8 +441,18 @@ const StudentLiveClass = () => {
 
         sock.on('modules_changed', (data) => setActiveModules(data.modules || data));
         sock.on('target_changed', (data) => {
-          setClassData(prev => prev ? { ...prev, targetMudra: data.target || data.mudra } : prev);
-          targetMudraRef.current = data.target || data.mudra;
+          const t = data.target || data.mudra;
+          setClassData(prev => prev ? { ...prev, targetMudra: t } : prev);
+          targetMudraRef.current = t;
+          if (isStanceTarget(t)) {
+            setEvaluationMode('FULL_BODY_STANCE');
+            evaluationModeRef.current = 'FULL_BODY_STANCE';
+            setTargetStance(t);
+            targetStanceRef.current = t;
+          } else {
+            setEvaluationMode('FULL_BODY_MUDRA');
+            evaluationModeRef.current = 'FULL_BODY_MUDRA';
+          }
         });
 
         // NEW: Real-Time Teacher-Controlled Spotlight & State Sync
@@ -435,6 +464,16 @@ const StudentLiveClass = () => {
             setClassData(prev => prev ? { ...prev, targetMudra: newMudra } : prev);
             targetMudraRef.current = newMudra;
             setTargetMudra(newMudra);
+
+            if (isStanceTarget(newMudra)) {
+              setEvaluationMode('FULL_BODY_STANCE');
+              evaluationModeRef.current = 'FULL_BODY_STANCE';
+              setTargetStance(newMudra);
+              targetStanceRef.current = newMudra;
+            } else {
+              setEvaluationMode('FULL_BODY_MUDRA');
+              evaluationModeRef.current = 'FULL_BODY_MUDRA';
+            }
 
             // --- GURU SYNC: CLEAR BUFFERS ON MUDRA CHANGE ---
             setDetectedMudra('');
@@ -590,10 +629,16 @@ const StudentLiveClass = () => {
           ctx.scale(-1, 1);
           ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
 
-          if (activeModulesRef.current.mudra && results.multiHandLandmarks?.length > 0) {
-            const hList = results.multiHandLandmarks;
-            const hness = results.multiHandedness || [];
+          const rawHList = results.multiHandLandmarks || [];
+          const rawHness = results.multiHandedness || [];
+          const validIndices = [];
+          rawHList.forEach((lms, idx) => {
+            if (isValidHand(lms)) validIndices.push(idx);
+          });
+          const hList = validIndices.map(i => rawHList[i]);
+          const hness = validIndices.map(i => rawHness[i]);
 
+          if (activeModulesRef.current.mudra && hList.length > 0) {
             landmarksRef.current = {
               multiHandLandmarks: hList,
               multiHandedness: hness.map((h, i) => {
@@ -657,7 +702,7 @@ const StudentLiveClass = () => {
             minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
           });
           poseRef.current.onResults((results) => {
-            if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
+            if (results.poseLandmarks && results.poseLandmarks.length >= 23) {
               poseLandmarksRef.current = results.poseLandmarks;
 
               if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
@@ -675,6 +720,12 @@ const StudentLiveClass = () => {
                 setStanceResult(finalizedResult);
                 setAiScore(finalizedResult.score);
                 aiScoreRef.current = finalizedResult.score;
+
+                if (finalizedResult.score > bestScoreRef.current) {
+                  bestScoreRef.current = finalizedResult.score;
+                  setBestScore(finalizedResult.score);
+                  bestMudraRef.current = finalizedResult.stanceName || targetStanceRef.current || 'Araimandi Stance';
+                }
 
                 if (finalizedResult.feedback && finalizedResult.feedback.length > 0) {
                   setFeedback(finalizedResult.feedback[0]);
@@ -739,6 +790,16 @@ const StudentLiveClass = () => {
                       kneeAngles: finalizedResult.kneeAngles,
                       torsoTilt: finalizedResult.torsoTilt,
                       turnoutRatio: finalizedResult.turnoutRatio
+                    });
+                    socket.emit('student_performance_update', {
+                      classId: classId,
+                      studentId: user?.id || user?._id || 'unknown',
+                      studentName: user?.name || 'Student',
+                      mudra: finalizedResult.stanceName,
+                      score: finalizedResult.score,
+                      status: finalizedResult.score >= 75 ? 'Good' : 'Practicing',
+                      landmarks: results.poseLandmarks || null,
+                      frame: null
                     });
                   }
                 }
@@ -1056,7 +1117,7 @@ const StudentLiveClass = () => {
     }
 
     // Determine target
-    const targetMudra = targetMudraRef.current?.toLowerCase() || classDataRef.current?.targetMudra?.toLowerCase();
+    const targetMudra = (targetMudraRef.current || classDataRef.current?.targetMudra || classDataRef.current?.mudrasList?.[0] || '')?.toLowerCase()?.trim();
     const DOUBLE_MUDRAS = ['anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 'sivalinga', 'svastika', 'utsanga', 'varaha'];
     const isTargetDouble = targetMudra && DOUBLE_MUDRAS.includes(targetMudra);
 
@@ -1124,11 +1185,10 @@ const StudentLiveClass = () => {
 
       let detectedName = data.matchedMudra || data.name || '';
       const score = data.score || data.accuracy || 0;
-      const detected = detectedName?.toLowerCase();
-      const target = targetMudra?.toLowerCase();
+      const isMatch = isMudraMatch(detectedName, targetMudra);
 
       // 🚨 HARD BLOCK WRONG MUDRA (STRICT TARGET-CONSTRAINED ENFORCEMENT)
-      if (target && detected && detected !== target) {
+      if (targetMudra && detectedName && !isMatch) {
         setDetectedMudra(detectedName);
         detectedMudraRef.current = detectedName;
 
@@ -1179,15 +1239,16 @@ const StudentLiveClass = () => {
       }
 
       // 🚨 HARD GATE BEFORE STABILITY: If target exists and mismatch, stop now
-      if (target && detected !== target) {
+      if (targetMudra && !isMatch) {
         return;
       }
 
       // ── STABILITY (ONLY FOR CORRECT MUDRA) ──
-      if (detected === consecutiveRef.current.name) {
+      const currName = detectedName || targetMudra;
+      if (consecutiveRef.current.name && isMudraMatch(currName, consecutiveRef.current.name)) {
         consecutiveRef.current.count++;
       } else {
-        consecutiveRef.current = { name: detected, count: 1 };
+        consecutiveRef.current = { name: currName, count: 1 };
       }
 
       const currentThreshold = isTargetDouble ? STABILITY_THRESHOLD_DOUBLE : STABILITY_THRESHOLD;
@@ -1217,6 +1278,7 @@ const StudentLiveClass = () => {
         if (finalScore > bestScoreRef.current) {
           bestScoreRef.current = finalScore;
           setBestScore(finalScore);
+          bestMudraRef.current = detectedName || targetMudraRef.current || 'Mudra Stance';
         }
 
         // 🌟 PERFECT FORM TOAST (Fire once per target after 5 stable frames)
@@ -1320,14 +1382,23 @@ const StudentLiveClass = () => {
 
   const saveReport = useCallback(async () => {
     const timeTaken = Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
+    const finalScore = Math.max(bestScoreRef.current || 0, aiScoreRef.current || 0, stanceResult?.score || 0);
+    const finalMudra = bestMudraRef.current || 
+                       stanceResult?.stanceName || 
+                       targetStanceRef.current || 
+                       targetMudraRef.current || 
+                       classDataRef.current?.targetMudra || 
+                       classDataRef.current?.title || 
+                       'Araimandi Stance';
+
     const reportData = {
       studentId: user?.id || user?._id || 'unknown',
       classId,
-      mudraName: bestMudraRef.current || 'N/A',
-      aiScore: bestScoreRef.current || 0,
+      mudraName: finalMudra,
+      aiScore: finalScore,
       timeTaken,
       timestamp: new Date().toISOString(),
-      feedback: bestScoreRef.current >= 75 ? 'Excellent' : 'Needs Practice'
+      feedback: finalScore >= 75 ? 'Excellent Stance & Posture' : finalScore >= 50 ? 'Good Stance Practice' : 'Needs Practice'
     };
 
     setReportLoading(true);
@@ -1347,7 +1418,7 @@ const StudentLiveClass = () => {
       setReportLoading(false);
       setSessionEnded(true);
     }
-  }, [classId, user]);
+  }, [classId, user, stanceResult]);
 
   const leaveClass = useCallback(async () => {
     stopWebcam(); stop();
@@ -1539,11 +1610,11 @@ const StudentLiveClass = () => {
         <div className="flex-1 relative flex items-center justify-center p-5"
           style={{ background: 'linear-gradient(135deg, #F8F7FF 0%, #EDE9FE 40%, #F8F7FF 100%)' }}>
 
-          <div className="relative w-full max-w-4xl aspect-video rounded-3xl overflow-hidden shadow-2xl shadow-violet-200/60"
+          <div className="relative w-full max-w-4xl aspect-video rounded-3xl overflow-hidden shadow-2xl shadow-violet-200/60 bg-black flex items-center justify-center"
             style={{ border: '2px solid #DDD6FE' }}>
 
             <video ref={videoRef} autoPlay playsInline muted
-              className="absolute inset-0 w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-contain bg-black"
               style={{ transform: 'scaleX(-1)' }} />
             <canvas ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none z-10"

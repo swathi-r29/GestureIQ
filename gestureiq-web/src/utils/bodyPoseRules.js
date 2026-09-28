@@ -17,12 +17,17 @@ import { calculate3DAngle, calculateVerticalTilt } from './poseNormalization';
  * visibility=0 or undefined even when the joint is clearly visible in the image.
  * Coordinate presence is the only reliable check for static images.
  */
-function isLandmarkReal(lm) {
+function isLandmarkReal(lm, minVis = 0.45) {
   if (!lm) return false;
   if (typeof lm.x !== 'number' || typeof lm.y !== 'number') return false;
   if (isNaN(lm.x) || isNaN(lm.y)) return false;
-  // Reject clearly out-of-bounds or zero-initialized landmarks
+  // Reject zero-initialized or edge-cropped out-of-frame landmarks
   if (lm.x === 0 && lm.y === 0) return false;
+  if (lm.y > 0.94 || lm.y < 0.03 || lm.x > 0.98 || lm.x < 0.02) return false;
+
+  // Confidence check when visibility property is provided by MediaPipe
+  if (typeof lm.visibility === 'number' && lm.visibility < minVis) return false;
+
   return true;
 }
 
@@ -30,17 +35,43 @@ function isLandmarkReal(lm) {
  * Checks that hips, knees, AND ankles are detected — mandatory for any leg stance classification.
  */
 function hasLowerBody(landmarks) {
-  if (!landmarks || landmarks.length < 33) return false;
-  const hasHips = isLandmarkReal(landmarks[23]) || isLandmarkReal(landmarks[24]);
-  const hasKnees = isLandmarkReal(landmarks[25]) || isLandmarkReal(landmarks[26]);
-  return hasHips && hasKnees;
+  if (!landmarks || landmarks.length < 28) return false;
+  const hasHips = isLandmarkReal(landmarks[23]) && isLandmarkReal(landmarks[24]);
+  const hasKnees = isLandmarkReal(landmarks[25]) && isLandmarkReal(landmarks[26]);
+  if (!hasHips || !hasKnees) return false;
+
+  const lShoulder = landmarks[11];
+  const rShoulder = landmarks[12];
+  const lHip = landmarks[23];
+  const rHip = landmarks[24];
+  const lKnee = landmarks[25];
+  const rKnee = landmarks[26];
+  const lAnkle = landmarks[27];
+  const rAnkle = landmarks[28];
+
+  if (!lShoulder || !rShoulder) return false;
+
+  const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
+  const avgHipY = (lHip.y + rHip.y) / 2;
+  const avgLegY = (lAnkle && rAnkle && isLandmarkReal(lAnkle) && isLandmarkReal(rAnkle))
+    ? (lAnkle.y + rAnkle.y) / 2
+    : (lKnee.y + rKnee.y) / 2;
+
+  const torsoHeight = Math.abs(avgHipY - avgShoulderY);
+  const legDrop = avgLegY - avgHipY;
+  const legToTorsoRatio = torsoHeight > 0.05 ? (legDrop / torsoHeight) : 0;
+
+  // Seated desk postures (hands on desk mapped to legs) have legDrop < 0.15 and ratio < 0.48
+  if (legDrop < 0.15 || legToTorsoRatio < 0.48) return false;
+
+  return true;
 }
 
 /**
  * 1. Araimandi (Half-Squat) Evaluation
  */
 export function checkAraimandi(landmarks) {
-  if (!landmarks || landmarks.length < 33) {
+  if (!landmarks || landmarks.length < 23) {
     return { isPass: false, isVisible: false, score: 0, feedback: "Step back — full body must be visible." };
   }
 
@@ -85,7 +116,7 @@ export function checkAraimandi(landmarks) {
  * 2. Muzhumandi (Full Sitting Squat) Evaluation
  */
 export function checkMuzhumandi(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
 
   if (!hasLowerBody(landmarks)) {
     return { isPass: false, isVisible: false, score: 0, feedback: "Step back — hips & knees must be visible." };
@@ -119,7 +150,7 @@ export function checkMuzhumandi(landmarks) {
  * 3. Samapada (Standing Straight) Evaluation
  */
 export function checkSamapada(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
 
   if (!hasLowerBody(landmarks)) {
     return { isPass: false, isVisible: false, score: 0, feedback: "Step back — hips & knees must be visible." };
@@ -147,7 +178,7 @@ export function checkSamapada(landmarks) {
  * 4. Nattadavu (Side Leg Extension) Evaluation
  */
 export function checkNattadavu(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
 
   if (!hasLowerBody(landmarks)) {
     return { isPass: false, isVisible: false, score: 0, feedback: "Step back — hips & knees must be visible." };
@@ -173,7 +204,7 @@ export function checkNattadavu(landmarks) {
  * 5. Spine Alignment Evaluation — requires shoulders + hips
  */
 export function checkSpineAlignment(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false, isVisible: false, score: 0, feedback: "Torso incomplete." };
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Torso incomplete." };
 
   const shouldersVisible = isLandmarkReal(landmarks[11]) && isLandmarkReal(landmarks[12]);
   const hipsVisible = isLandmarkReal(landmarks[23]) || isLandmarkReal(landmarks[24]);
@@ -204,7 +235,7 @@ export function checkSpineAlignment(landmarks) {
  * Never requires knees/ankles, so it never blocks on "step back."
  */
 export function checkUpperBodyPosture(landmarks) {
-  if (!landmarks || landmarks.length < 33) {
+  if (!landmarks || landmarks.length < 23) {
     return { isPass: false, isVisible: false, score: 0, feedback: "Upper body not detected." };
   }
 
@@ -249,7 +280,7 @@ export function checkUpperBodyPosture(landmarks) {
  * 6. Natyarambham (Arm Stance) Evaluation — requires shoulders + elbows
  */
 export function checkNatyarambham(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false, isVisible: false, score: 0, feedback: "Upper body incomplete." };
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Upper body incomplete." };
 
   const armsVisible = isLandmarkReal(landmarks[11]) && isLandmarkReal(landmarks[12]) &&
                       (isLandmarkReal(landmarks[13]) || isLandmarkReal(landmarks[14]));
@@ -279,7 +310,7 @@ export function checkNatyarambham(landmarks) {
  * Tillana Overhead Pose Evaluation — checks if wrists are elevated above shoulders/head
  */
 export function checkTillanaPose(landmarks) {
-  if (!landmarks || landmarks.length < 33) return { isPass: false };
+  if (!landmarks || landmarks.length < 23) return { isPass: false };
   const pShoulderL = landmarks[11], pShoulderR = landmarks[12];
   const pWristL = landmarks[15], pWristR = landmarks[16];
 
@@ -297,7 +328,7 @@ export function checkTillanaPose(landmarks) {
  * Requires actual lower body detection; never invents fake scores.
  */
 export function evaluateFullBodyPose(landmarks) {
-  if (!landmarks || landmarks.length < 33) {
+  if (!landmarks || landmarks.length < 23) {
     return {
       stanceName: "No Pose Detected",
       totalScore: 0, isPass: false, isFullyVisible: false,

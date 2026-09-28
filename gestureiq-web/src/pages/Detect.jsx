@@ -11,7 +11,7 @@ import {
   Plus, Video, Loader2, Sun, Music, UserCheck
 } from 'lucide-react';
 import { loadMediaPipeScripts, loadMediaPipePoseScripts, loadMediaPipeHolisticScripts, safeLocateFile } from '../utils/loadMediaPipe';
-import { evaluateSingleMudra, evaluateDoubleMudra } from '../utils/geometricRules';
+import { evaluateSingleMudra, evaluateDoubleMudra, isValidHand } from '../utils/geometricRules';
 import { normalizePoseLandmarks } from '../utils/poseNormalization';
 import { evaluateFullBodyPose } from '../utils/bodyPoseRules';
 import { evaluateHolisticPose } from '../utils/holisticScoreEngine';
@@ -530,7 +530,7 @@ export default function MudraDetect() {
         userId: user?.id || user?._id || 'anonymous',
         landmarks: lms,
         handedness
-      });
+      }, { timeout: 1500 });
       const modelRes = response.data;
       const accuracy = modelRes.accuracy ?? modelRes.confidence ?? 0;
 
@@ -549,7 +549,7 @@ export default function MudraDetect() {
         finalConf = local.confidence;
       }
     } catch (e) {
-      // Fallback to local geometry if server is offline
+      // Fallback to local geometry if server is offline or timed out
       const local = evaluateSingleMudra(lms, null, handedness, 1.0);
       finalName = local.name;
       finalConf = local.confidence;
@@ -559,14 +559,6 @@ export default function MudraDetect() {
 
     let name = finalName;
     let conf = finalConf;
-
-    const nowTime = Date.now();
-    if (nowTime < detectionLockRef.current.until) {
-      name = detectionLockRef.current.name;
-      conf = Math.max(conf, 85);
-    } else if (name && conf >= 85) {
-      detectionLockRef.current = { name, until: nowTime + 1500 };
-    }
 
     // ── TEMPORAL STABILITY (Sliding Window Majority Vote) ──
     bufferRef.current.push(name);
@@ -601,14 +593,22 @@ export default function MudraDetect() {
     if (isProcessingRef.current) return;
     const results = landmarksRef.current;
 
-    // Support 1-hand merged set (Svastika / Anjali crossed hands) AND 2 distinct hand sets
     const leftLms = results?.left_landmarks;
     const rightLms = results?.right_landmarks;
-    const rawHands = results?.raw_hands || (leftLms && rightLms ? [leftLms, rightLms] : (leftLms ? [leftLms] : (rightLms ? [rightLms] : [])));
+    const rawHands = results?.raw_hands || [];
 
     if (!rawHands || rawHands.length === 0) {
       setHandPresent(false);
       setDoubleMsg('Show both hands to the camera');
+      handleDetection(null, 0);
+      bufferRef.current = [];
+      detectionLockRef.current.until = 0;
+      return;
+    }
+
+    if (rawHands.length < 2 || !leftLms || !rightLms) {
+      setHandPresent(true);
+      setDoubleMsg('Show BOTH hands clearly to the camera');
       handleDetection(null, 0);
       bufferRef.current = [];
       detectionLockRef.current.until = 0;
@@ -620,8 +620,8 @@ export default function MudraDetect() {
     let finalConf = 0;
     let corrections = [];
 
-    const l_hand = leftLms || rawHands[0];
-    const r_hand = rightLms || (rawHands.length > 1 ? rawHands[1] : rawHands[0]);
+    const l_hand = leftLms;
+    const r_hand = rightLms;
 
     isProcessingRef.current = true;
     try {
@@ -631,7 +631,7 @@ export default function MudraDetect() {
         left_landmarks: l_hand,
         right_landmarks: r_hand,
         landmarks: [l_hand, r_hand]
-      });
+      }, { timeout: 1500 });
       const modelRes = response.data;
       const accuracy = modelRes.accuracy ?? modelRes.confidence ?? 0;
 
@@ -643,13 +643,21 @@ export default function MudraDetect() {
         finalConf = Math.max(vetoRes.confidence, accuracy);
         corrections = vetoRes.corrections || [];
       } else if (modelRes.name && (accuracy > 40 || modelRes.detected)) {
-        finalName = modelRes.name;
-        finalConf = accuracy || 85;
-        corrections = modelRes.corrections || [];
+        const anchorCheck = checkGeometricAnchors(modelRes.name, [l_hand, r_hand]);
+        if (anchorCheck.isValid) {
+          finalName = modelRes.name;
+          finalConf = accuracy || 85;
+          corrections = modelRes.corrections || [];
+        } else {
+          const local = evaluateDoubleMudra([l_hand, r_hand]);
+          finalName = local.name || 'samputa';
+          finalConf = local.confidence || 85;
+          corrections = anchorCheck.corrections || [];
+        }
       } else {
         const local = evaluateDoubleMudra(rawHands);
-        finalName = local.name;
-        finalConf = local.confidence;
+        finalName = local.name || 'samputa';
+        finalConf = local.confidence || 85;
         corrections = local.corrections || [];
       }
     } catch (e) {
@@ -664,13 +672,6 @@ export default function MudraDetect() {
     let name = finalName;
     let conf = finalConf;
 
-    const nowTime = Date.now();
-    if (nowTime < detectionLockRef.current.until) {
-      name = detectionLockRef.current.name;
-      conf = Math.max(conf, 85);
-    } else if (name && conf >= 85) {
-      detectionLockRef.current = { name, until: nowTime + 1500 };
-    }
     // ── TEMPORAL STABILITY (Sliding Window Majority Vote) ──
     bufferRef.current.push(name);
     if (bufferRef.current.length > 6) {
@@ -725,14 +726,29 @@ export default function MudraDetect() {
     h.setOptions({
       maxNumHands: numHands,
       modelComplexity: numHands === 2 ? 1 : 0,
-      minDetectionConfidence: numHands === 2 ? 0.25 : 0.5,
-      minTrackingConfidence: numHands === 2 ? 0.25 : 0.5
+      minDetectionConfidence: 0.65,
+      minTrackingConfidence: 0.65
     });
     h._maxNumHands = numHands;
     h.onResults((results) => {
-      if (results.multiHandLandmarks?.length > 0) {
-        console.log(`Hand Detected (${results.multiHandLandmarks.length} hands) - Engine Running`);
+      const rawHandLandmarks = results.multiHandLandmarks || [];
+      const rawHandedness = results.multiHandedness || [];
+
+      // Quality Gate: filter out false detections (e.g. facial noise)
+      const validIndices = [];
+      rawHandLandmarks.forEach((lms, idx) => {
+        if (isValidHand(lms)) {
+          validIndices.push(idx);
+        }
+      });
+
+      const handLandmarks = validIndices.map(i => rawHandLandmarks[i]);
+      const handednessList = validIndices.map(i => rawHandedness[i]);
+
+      if (handLandmarks.length > 0) {
+        console.log(`Hand Detected (${handLandmarks.length} valid hands) - Engine Running`);
       }
+
       const canvas = canvasRef.current;
       const video = videoRef.current;
       if (!canvas) return;
@@ -757,8 +773,8 @@ export default function MudraDetect() {
 
       const activeMaxHands = handsRef.current?._maxNumHands || 1;
       if (activeMaxHands === 1) {
-        const lms = results.multiHandLandmarks?.[0] || null;
-        const handedness = results.multiHandedness?.[0]?.label || 'Right';
+        const lms = handLandmarks[0] || null;
+        const handedness = handednessList[0]?.label || 'Right';
         if (lms) {
           const drawColor = '#C0392B'; // Vermillion
           drawConnectors(ctx, lms, HAND_CONNECTIONS, { color: drawColor + '60', lineWidth: 2 });
@@ -766,8 +782,6 @@ export default function MudraDetect() {
         }
         landmarksRef.current = lms ? { landmarks: lms, handedness } : null;
       } else {
-        const handLandmarks = results.multiHandLandmarks || [];
-        const handednessList = results.multiHandedness || [];
         let leftLms = null;
         let rightLms = null;
 
@@ -779,31 +793,43 @@ export default function MudraDetect() {
         });
 
         if (handLandmarks.length >= 2) {
-          const label0 = handednessList[0]?.label || 'Left';
-          if (label0 === 'Left') {
+          const h0_x = handLandmarks[0]?.[0]?.x || 0;
+          const h1_x = handLandmarks[1]?.[0]?.x || 0;
+          const label0 = handednessList[0]?.label;
+          const label1 = handednessList[1]?.label;
+
+          if (label0 === 'Left' && label1 !== 'Left') {
             leftLms = handLandmarks[0];
             rightLms = handLandmarks[1];
-          } else {
-            rightLms = handLandmarks[0];
+          } else if (label1 === 'Left' && label0 !== 'Left') {
             leftLms = handLandmarks[1];
+            rightLms = handLandmarks[0];
+          } else {
+            if (h0_x < h1_x) {
+              rightLms = handLandmarks[0];
+              leftLms = handLandmarks[1];
+            } else {
+              leftLms = handLandmarks[0];
+              rightLms = handLandmarks[1];
+            }
           }
         } else if (handLandmarks.length === 1) {
           const label0 = handednessList[0]?.label || 'Right';
           if (label0 === 'Left') {
             leftLms = handLandmarks[0];
-            rightLms = handLandmarks[0];
+            rightLms = null;
           } else {
             rightLms = handLandmarks[0];
-            leftLms = handLandmarks[0];
+            leftLms = null;
           }
         }
 
         // Store them as left_landmarks and right_landmarks
-        landmarksRef.current = {
+        landmarksRef.current = (leftLms || rightLms) ? {
           left_landmarks: leftLms,
           right_landmarks: rightLms,
           raw_hands: handLandmarks
-        };
+        } : null;
       }
       ctx.restore();
     });
@@ -1652,7 +1678,7 @@ export default function MudraDetect() {
                   style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: 'block' }}
                 />
               )}
-              <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+              <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: imagePreview ? 'contain' : 'cover', pointerEvents: 'none' }} />
 
               {status === 'analyzing' && (
                 <div className={`scan-line ${mode === 'double' ? 'scan-line-teal' : ''}`} />

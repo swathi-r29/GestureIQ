@@ -121,6 +121,31 @@ export const getFingerState = (angle, isThumb = false) => {
   return 2; // CURVED
 };
 
+export const isValidHand = (lms) => {
+  if (!lms || !Array.isArray(lms) || lms.length < 21) return false;
+
+  const w = lms[0];
+  const mcp = lms[9];
+  const tip = lms[12];
+  if (!w || !mcp || !tip) return false;
+
+  const dxPalm = mcp.x - w.x;
+  const dyPalm = mcp.y - w.y;
+  const palmDist = Math.sqrt(dxPalm * dxPalm + dyPalm * dyPalm);
+
+  const dxTotal = tip.x - w.x;
+  const dyTotal = tip.y - w.y;
+  const totalDist = Math.sqrt(dxTotal * dxTotal + dyTotal * dyTotal);
+
+  // Palm size check: A real hand held up in camera view has palm length between 0.055 and 0.65
+  if (palmDist < 0.055 || palmDist > 0.65) return false;
+
+  // Proportion check: Total length (wrist to middle tip) must be 0.85x to 3.5x of palm length
+  if (totalDist < palmDist * 0.85 || totalDist > palmDist * 3.5) return false;
+
+  return true;
+};
+
 // ── Main exports ──────────────────────────────────────────────────────────────
 
 /**
@@ -159,7 +184,7 @@ export const normalizeLandmarks = (lms, handedness = 'Right') => {
  */
 export const evaluateSingleMudra = (rawLms, targetMudra = null, handedness = 'Right', detectionConfidence = 1.0) => {
   // 0. LANDMARK QUALITY GATE
-  if (!rawLms || rawLms.length < 21 || detectionConfidence < 0.3) {
+  if (!rawLms || rawLms.length < 21 || detectionConfidence < 0.3 || !isValidHand(rawLms)) {
     return { name: null, confidence: 0, corrections: [] };
   }
 
@@ -376,20 +401,65 @@ export const evaluateDoubleMudra = (multiHandLandmarks, targetMudraName = null) 
   // For now, if they match a known Samyuta pattern, return it.
   const name = targetMudraName?.toLowerCase();
   if (name && anchorCheck.isValid) {
-    // If the teacher has set a target, and they pass the geometric gate, 
-    // we give them a high confidence score for that target.
     return { name: targetMudraName, confidence: 90, corrections: [] };
   }
 
-  const candidate = h1.name === h2.name ? h1.name : null;
-  const validDoubleKeys = [
-    'anjali', 'bherunda', 'chakra', 'dola', 'garuda', 'kapotha', 'karkata', 
-    'kartarisvastika', 'katakavardhana', 'katva', 'kilaka', 'kurma', 'matsya', 
-    'nagabandha', 'pasa', 'puspaputa', 'sakata', 'samputa', 'sankha', 
-    'sivalinga', 'svastika', 'utsanga', 'varaha'
-  ];
-  const doubleName = (candidate && validDoubleKeys.includes(candidate)) ? candidate : null;
-  return { name: doubleName, confidence: (h1.confidence + h2.confidence) / 2, corrections: [] };
+  const w1 = multiHandLandmarks[0]?.[0];
+  const p1 = multiHandLandmarks[0]?.[9];
+  const tip1 = multiHandLandmarks[0]?.[8];
+  const w2 = multiHandLandmarks[1]?.[0];
+  const p2 = multiHandLandmarks[1]?.[9];
+  const tip2 = multiHandLandmarks[1]?.[8];
+
+  const wristDist = d2(w1, w2);
+  const palmDist = (p1 && p2) ? d2(p1, p2) : wristDist;
+  const tipDist = (tip1 && tip2) ? d2(tip1, tip2) : wristDist;
+
+  const dx1 = p1 && w1 ? p1.x - w1.x : 0;
+  const dx2 = p2 && w2 ? p2.x - w2.x : 0;
+  const isDivergingX = (dx1 * dx2 < 0) && (w1 && w2 && ((w1.x < w2.x && dx1 < 0 && dx2 > 0) || (w1.x > w2.x && dx1 > 0 && dx2 < 0)));
+  const isXSwapped = (w1 && p1 && w2 && p2) ? ((w1.x < w2.x && p1.x > p2.x) || (w1.x > w2.x && p1.x < p2.x)) : false;
+
+  const isWristsCrossed = isXSwapped || (wristDist < 0.32 && isDivergingX) || (wristDist < 0.26 && (palmDist > wristDist + 0.03 || tipDist > 0.18));
+
+  const s1 = h1.name?.toLowerCase();
+  const s2 = h2.name?.toLowerCase();
+  let doubleName = null;
+
+  if (isWristsCrossed) {
+    if (s1 === 'kartarimukha' || s2 === 'kartarimukha' || s1 === 'tripataka' || s2 === 'tripataka' || s1 === 'suchi' || s2 === 'suchi' || s1 === 'ardhapataka' || s2 === 'ardhapataka') {
+      doubleName = 'kartarisvastika';
+    } else if (s1 === 'katakamukha' || s2 === 'katakamukha' || s1 === 'shikhara' || s2 === 'shikhara' || s1 === 'kapittha' || s2 === 'kapittha') {
+      doubleName = 'katakavardhana';
+    } else if (s1 === 'pataka' && s2 === 'pataka') {
+      doubleName = 'svastika';
+    } else if (s1 === 'trishula' || s2 === 'trishula') {
+      doubleName = 'bherunda';
+    } else {
+      doubleName = 'kartarisvastika';
+    }
+  } else {
+    // Uncrossed wrists (Joined gestures like Samputa, Anjali, Puspaputa)
+    if (wristDist < 0.40) {
+      if (s1 === 'pataka' && s2 === 'pataka') {
+        doubleName = wristDist < 0.22 ? 'anjali' : 'dola';
+      } else if (s1 === 'shikhara' && s2 === 'shikhara') {
+        doubleName = 'kilaka';
+      } else if (s1 === 'mushti' && s2 === 'mushti') {
+        doubleName = 'karkata';
+      } else if (s1 === 'alapadma' && s2 === 'alapadma') {
+        doubleName = 'puspaputa';
+      } else {
+        // Cupped/covered box hands facing each other (Samputa)
+        doubleName = 'samputa';
+      }
+    } else {
+      doubleName = 'dola';
+    }
+  }
+
+  const conf = (h1.confidence && h2.confidence) ? (h1.confidence + h2.confidence) / 2 : (h1.confidence || h2.confidence || 85);
+  return { name: doubleName, confidence: conf, corrections: [] };
 };
 
 /**
@@ -414,9 +484,29 @@ export const checkGeometricAnchors = (mudraName, multiHandLandmarks) => {
 
   if (!h1?.[0] || !h2?.[0]) return { isValid: true, corrections: [] };
 
-  const wristDist = d2(h1[0], h2[0]);
+  const w1 = h1[0], p1 = h1[9], w2 = h2[0], p2 = h2[9];
+  const tip1 = h1[8], tip2 = h2[8];
+  const wristDist = d2(w1, w2);
+  const palmDist = (p1 && p2) ? d2(p1, p2) : wristDist;
+  const tipDist = (tip1 && tip2) ? d2(tip1, tip2) : wristDist;
+
+  const dx1 = p1 && w1 ? p1.x - w1.x : 0;
+  const dx2 = p2 && w2 ? p2.x - w2.x : 0;
+  const isDivergingX = (dx1 * dx2 < 0) && (w1 && w2 && ((w1.x < w2.x && dx1 < 0 && dx2 > 0) || (w1.x > w2.x && dx1 > 0 && dx2 < 0)));
+  const isCrossed = (w1 && p1 && w2 && p2) ?
+    ((w1.x < w2.x && p1.x > p2.x) || (w1.x > w2.x && p1.x < p2.x) || (wristDist < 0.32 && isDivergingX) || (wristDist < 0.26 && (palmDist > wristDist + 0.03 || tipDist > 0.18))) : false;
+
+  if (CROSS_MUDRAS.includes(name)) {
+    if (!isCrossed && wristDist > 0.30) {
+      return { isValid: false, corrections: ['Cross your wrists/forearms over each other'] };
+    }
+    return { isValid: true, corrections: [] };
+  }
 
   if (JOINED_MUDRAS.includes(name)) {
+    if (isCrossed && (tipDist > 0.20 || palmDist > wristDist + 0.04)) {
+      return { isValid: false, corrections: ['Uncross your wrists and hold palms together'] };
+    }
     const valid = wristDist < 0.40;
     return { isValid: valid, corrections: valid ? [] : ['Bring both hands closer together — palms should nearly touch'] };
   }
@@ -426,11 +516,6 @@ export const checkGeometricAnchors = (mudraName, multiHandLandmarks) => {
     const avgY2 = h2[9] ? (h2[0].y + h2[9].y) / 2 : h2[0].y;
     const valid = Math.abs(avgY1 - avgY2) > 0.05;
     return { isValid: valid, corrections: valid ? [] : ['Stack one hand clearly on top of the other'] };
-  }
-
-  if (CROSS_MUDRAS.includes(name)) {
-    const valid = wristDist < 0.45;
-    return { isValid: valid, corrections: valid ? [] : ['Cross or fold your wrists closer to the centre of your body'] };
   }
 
   if (INTERLOCKED_MUDRAS.includes(name)) {
