@@ -99,20 +99,64 @@ export const TRANSLATIONS = {
         "Straighten your ring finger": "மோதிர விரலை நேராக்குங்கள்",
         "Straighten your little finger": "சிறு விரலை நேராக்குங்கள்",
         "Bend your thumb inward": "கட்டை விரலை உள்ளே மடக்குங்கள்",
-        "Bend your ring finger all the way to your palm": "மோதிர விரலை உள்ளங்கை வரை மடக்கவும்",
+        "Full body not detected. Step back so your entire body is visible.": "முழு உடல் தெரியவில்லை. உங்கள் முழு உடலும் தெரிய பின்வாங்குங்கள்.",
+        "Please step back — your feet and legs are out of frame.": "தயவுசெய்து பின்வாங்கவும் — உங்கள் கால்கள் கேமராவில் தெரியவில்லை.",
+        "Please step back — you are framed too close to the camera.": "தயவுசெய்து பின்வாங்கவும் — கேமரா மிக அருகில் உள்ளது.",
+        "Please adjust camera — your upper body is out of frame.": "கேமராவை சரிசெய்யவும் — மேல் உடல் கேமராவில் தெரியவில்லை.",
+        "⚠️ Framing Warning": "⚠️ கேமரா எச்சரிக்கை",
+        "Showing": "காட்டுவது"
     },
     'hi': {
         "Show your hand to the camera": "अपना हाथ कैमरे के सामने रखें",
         "Good! Now hold this position.": "अच्छा! अब इस स्थिति को बनाए रखें",
         "Correct! Great form.": "सही है! बहुत अच्छा",
-        "Bend your ring finger more": "अपनी अनामिका उंगली को और मोड़ें",
-        "Straighten your index finger": "अपनी तर्जनी उंगली सीधी करें",
-        "Straighten your middle finger": "अपनी मध्यमा उंगली सीधी करें",
-        "Straighten your ring finger": "अपनी अनामिका उंगली सीधी करें",
-        "Straighten your little finger": "अपनी कनिष्ठा उंगली सीधी करें",
-        "Bend your thumb inward": "अंगूठे को अंदर की ओर मोड़ें",
+        "Full body not detected. Step back so your entire body is visible.": "पूरा शरीर नहीं दिख रहा है। कृपया पीछे हटें।",
+        "Please step back — your feet and legs are out of frame.": "कृपया पीछे हटें — आपके पैर कैमरे में दिखाई नहीं दे रहे हैं।",
+        "Please step back — you are framed too close to the camera.": "कृपया पीछे हटें — आप कैमरे के बहुत करीब हैं।",
+        "Please adjust camera — your upper body is out of frame.": "कैमरा समायोजित करें — आपका ऊपरी शरीर बाहर है।",
+        "⚠️ Framing Warning": "⚠️ कैमरा चेतावनी",
+        "Showing": "दिखाया जा रहा है"
+    },
+    'te': {
+        "Show your hand to the camera": "కెమెరాకి మీ చేయి చూపించండి",
+        "Good! Now hold this position.": "మంచిది! ఇప్పుడు ఈ స్థితిని పట్టుకోండి",
+        "Correct! Great form.": "సరైనది! గొప్ప రూపం",
+        "Full body not detected. Step back so your entire body is visible.": "పూర్తి శరీరం కనపడలేదు. దయచేసి వెనుకకు జరగండి.",
+        "Please step back — your feet and legs are out of frame.": "దయచేసి వెనుకకు జరగండి — మీ కాళ్ళు కనిపించడం లేదు.",
+        "Please step back — you are framed too close to the camera.": "దయచేసి వెనుకకు జరగండి — మీరు కెమెరాకి చాలా దగ్గరగా ఉన్నారు.",
+        "Please adjust camera — your upper body is out of frame.": "కెమెరాను సర్దుబాటు చేయండి — మీ పై శరీరం కనిపించడం లేదు.",
+        "⚠️ Framing Warning": "⚠️ కెమెరా హెచ్చరిక",
+        "Showing": "చూపిస్తోంది"
+    },
+    'kn': {
+        "Show your hand to the camera": "ಕ್ಯಾಮರಾಗೆ ನಿಮ್ಮ ಕೈ ತೋರಿಸಿ",
+        "Good! Now hold this position.": "ಉತ್ತಮ! ಈಗ ಈ ಸ್ಥಿತಿಯನ್ನು ಹಿಡಿದುಕೊಳ್ಳಿ",
+        "Correct! Great form.": "ಸರಿಯಾಗಿದೆ! ಅದ್ಭುತ ರೂಪ",
+        "Full body not detected. Step back so your entire body is visible.": "ಪೂರ್ಣ ದೇಹ ಕಾಣಿಸುತ್ತಿಲ್ಲ. ದಯವಿಟ್ಟು ಹಿಂದೆ ಸರಿಯಿರಿ.",
+        "Please step back — your feet and legs are out of frame.": "ದಯವಿಟ್ಟು ಹಿಂದೆ ಸರಿಯಿರಿ — ನಿಮ್ಮ ಕಾಲುಗಳು ಕಾಣಿಸುತ್ತಿಲ್ಲ.",
+        "Please step back — you are framed too close to the camera.": "ದಯವಿಟ್ಟು ಹಿಂದೆ ಸರಿಯಿರಿ — ನೀವು ಕ್ಯಾಮೆರಾಗೆ ತುಂಬಾ ಹತ್ತಿರದಲ್ಲಿದ್ದೀರಿ.",
+        "Please adjust camera — your upper body is out of frame.": "ಕ್ಯಾಮೆರಾವನ್ನು ಹೊಂದಿಸಿ — ನಿಮ್ಮ ಮೇಲ್ಭಾಗದ ದೇಹ ಕಾಣಿಸುತ್ತಿಲ್ಲ.",
+        "⚠️ Framing Warning": "⚠️ ಕ್ಯಾಮೆರಾ ಎಚ್ಚರಿಕೆ",
+        "Showing": "ತೋರಿಸಲಾಗುತ್ತಿದೆ"
+    },
+    'ml': {
+        "Show your hand to the camera": "ക്യാമറയിൽ കൈ കാണിക്കുക",
+        "Good! Now hold this position.": "നന്നായിട്ടുണ്ട്! ഇനി ഈ നില തുടരുക",
+        "Correct! Great form.": "ശരിയാണ്! മികച്ച രൂപം",
+        "Full body not detected. Step back so your entire body is visible.": "പൂർണ്ണ ശരീരം കാണുന്നില്ല. ദയവായി പിന്നോട്ട് നീങ്ങുക.",
+        "Please step back — your feet and legs are out of frame.": "ദയവായി പിന്നോട്ട് നീങ്ങുക — നിങ്ങളുടെ കാലുകൾ കാണുന്നില്ല.",
+        "Please step back — you are framed too close to the camera.": "ദയവായി പിന്നോട്ട് നീങ്ങുക — നിങ്ങൾ ക്യാമറയ്ക്ക് വളരെ അടുത്താണ്.",
+        "Please adjust camera — your upper body is out of frame.": "ക്യാമറ ക്രമീകരിക്കുക — നിങ്ങളുടെ മുകൾ ഭാഗം കാണുന്നില്ല.",
+        "⚠️ Framing Warning": "⚠️ ക്യാമറ മുന്നറിയിപ്പ്",
+        "Showing": "കാണിക്കുന്നത്"
     }
 };
+
+export function translate(lang = 'en', text = '') {
+    if (!text) return '';
+    if (lang === 'en' || !TRANSLATIONS[lang]) return text;
+    return TRANSLATIONS[lang][text] || text;
+}
 
 export const MUDRA_NAMES = {
     ta: {
@@ -139,55 +183,46 @@ export const MUDRA_NAMES = {
         mushti: "मुष्टि", shikhara: "शिखर", suchi: "सूची",
         alapadma: "अलपद्म", padmakosha: "पद्मकोष", trishula: "त्रिशूल",
     },
+    te: {
+        pataka: "పతాక", tripataka: "త్రిపతాక", mushti: "ముష్టి", shikhara: "శిఖర",
+    },
+    kn: {
+        pataka: "ಪತಾಕ", tripataka: "ತ್ರಿಪತಾಕ", mushti: "ಮುಷ್ಟಿ", shikhara: "ಶಿಖರ",
+    },
+    ml: {
+        pataka: "പതാക", tripataka: "ത്രിപതാക", mushti: "മുഷ്ടി", shikhara: "ശിഖര",
+    }
 };
 
 export function getMudraName(lang, key) {
+    if (!key) return '';
     return MUDRA_NAMES[lang]?.[key.toLowerCase()] || key;
 }
 
-export function translate(lang, text) {
-    if (!lang || lang === 'en' || !text) return text;
-    const map = TRANSLATIONS[lang];
-    if (!map) return text;
-
-    // 1. Exact match
-    if (map[text]) return map[text];
-
-    // 2. Fuzzy match - strip technical suffixes
-    let base = text.split(' — ')[0].split(' for ')[0].trim();
-    if (map[base]) return map[base];
-
-    // 3. Fallback to substring matching
-    for (const [key, val] of Object.entries(map)) {
-        if (base.toLowerCase().startsWith(key.toLowerCase())) return val;
-        if (key.toLowerCase().startsWith(base.toLowerCase().slice(0, 20))) return val;
-    }
-    return text;
-}
 
 function getBestVoice(lang) {
     const voices = window.speechSynthesis.getVoices();
     if (!voices.length) return null;
     if (lang === 'ta') {
         return voices.find(v => v.name.includes('தமிழ்')) ||
-               voices.find(v => v.name.includes('Tamil')) ||
-               voices.find(v => v.lang === 'ta-IN') ||
-               voices.find(v => v.lang.startsWith('ta')) || null;
+            voices.find(v => v.name.includes('Tamil')) ||
+            voices.find(v => v.lang === 'ta-IN') ||
+            voices.find(v => v.lang.startsWith('ta')) || null;
     }
     if (lang === 'hi') {
         return voices.find(v => v.name.includes('हिन्दी')) ||
-               voices.find(v => v.name.includes('Hindi')) ||
-               voices.find(v => v.lang === 'hi-IN') ||
-               voices.find(v => v.lang.startsWith('hi')) || null;
+            voices.find(v => v.name.includes('Hindi')) ||
+            voices.find(v => v.lang === 'hi-IN') ||
+            voices.find(v => v.lang.startsWith('hi')) || null;
     }
     if (lang === 'te') return voices.find(v => v.lang === 'te-IN') || voices.find(v => v.name.toLowerCase().includes('telugu')) || null;
     if (lang === 'kn') return voices.find(v => v.lang === 'kn-IN') || voices.find(v => v.name.toLowerCase().includes('kannada')) || null;
     if (lang === 'ml') return voices.find(v => v.lang === 'ml-IN') || voices.find(v => v.name.toLowerCase().includes('malayalam')) || null;
-    
+
     return voices.find(v => v.name === 'Google UK English Female') ||
-           voices.find(v => v.name === 'Google US English') ||
-           voices.find(v => v.lang.startsWith('en')) ||
-           voices[0];
+        voices.find(v => v.name === 'Google US English') ||
+        voices.find(v => v.lang.startsWith('en')) ||
+        voices[0];
 }
 
 function langCode(lang) {
@@ -210,12 +245,12 @@ export function useVoiceGuide({ language = 'en' } = {}) {
     const WRONG_MUDRA_GATE = 3;
 
     // NEW: State Awareness Refs for Sync Fix
-    const lastStatusRef   = useRef('');
-    const lastScoreRef    = useRef(0);
-    const lastMudraRef    = useRef('');
-    const isFetchingRef   = useRef(false);  // Lock: prevents concurrent gTTS requests
+    const lastStatusRef = useRef('');
+    const lastScoreRef = useRef(0);
+    const lastMudraRef = useRef('');
+    const isFetchingRef = useRef(false);  // Lock: prevents concurrent gTTS requests
     const fetchControllerRef = useRef(null); // ABORT: cancels outdated gTTS requests
-    const activeAudioRef  = useRef(null);   // Tracks the currently playing Audio object
+    const activeAudioRef = useRef(null);   // Tracks the currently playing Audio object
     const pendingSpeechRef = useRef(null);
 
     useEffect(() => {
@@ -245,7 +280,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         if (isSpeakingRef.current || isFetchingRef.current) {
             // If the new request is lower priority, discard it
             if (priority < currentPrioRef.current) return;
-            
+
             // If equal priority (and not urgent), queue it instead of killing current
             if (priority === currentPrioRef.current && priority < PRIO.HIGH) {
                 pendingSpeechRef.current = { message, priority, opts };
@@ -269,12 +304,12 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         }
 
         if (activeAudioRef.current) {
-            try { 
-                activeAudioRef.current.pause(); 
+            try {
+                activeAudioRef.current.pause();
                 activeAudioRef.current.currentTime = 0;
-                activeAudioRef.current.src = ''; 
-                activeAudioRef.current.load(); 
-            } catch (_) {}
+                activeAudioRef.current.src = '';
+                activeAudioRef.current.load();
+            } catch (_) { }
             activeAudioRef.current = null;
         }
         window.speechSynthesis.cancel();
@@ -284,14 +319,19 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         isFetchingRef.current = true;
 
         // --- Natural Teacher Layer: Backend Voice Bridge ---
+        const currentLang = langRef.current;
+        const messageToSpeak = translate(currentLang, message);
+        const containsIndic = /[\u0900-\u0DFF]/.test(messageToSpeak);
+        const targetLang = containsIndic ? currentLang : 'en';
+
         try {
             const response = await fetch('/api/get_voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: message, lang: langRef.current }),
+                body: JSON.stringify({ text: messageToSpeak, lang: targetLang }),
                 signal: controller.signal
             });
-            
+
             if (!response.ok) {
                 throw new Error(`Server returned ${response.status}`);
             }
@@ -302,12 +342,12 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 const audio = new Audio("data:audio/mp3;base64," + data.audio);
                 activeAudioRef.current = audio;
 
-                audio.onplay  = () => { 
-                    isSpeakingRef.current = true;  
-                    currentPrioRef.current = priority; 
+                audio.onplay = () => {
+                    isSpeakingRef.current = true;
+                    currentPrioRef.current = priority;
                 };
                 audio.onended = () => {
-                    isSpeakingRef.current  = false;
+                    isSpeakingRef.current = false;
                     currentPrioRef.current = 0;
                     activeAudioRef.current = null;
                     if (opts.onEnd) opts.onEnd();
@@ -354,7 +394,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
         const lang = langRef.current;
         const message = translate(lang, text);
         const now = Date.now();
-        
+
         if (mustRepeat > 0) {
             if (message === lastCorrectionRef.current) {
                 corrRepeatCountRef.current++;
@@ -366,7 +406,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             if (corrRepeatCountRef.current < mustRepeat + 1) return;
             corrRepeatCountRef.current = 0;
         }
-        
+
         if (message === lastCorrectionRef.current && now - lastCorrectionTimeRef.current < minInterval) return;
         lastCorrectionTimeRef.current = now;
         _doSpeak(message, priority);
@@ -374,7 +414,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
 
     const unlock = useCallback(() => {
         unlockedRef.current = true; // Immediate unlock on user interaction
-        
+
         // --- WebRTC Audio Unblocker ---
         // Resume AudioContext if it exists (some browsers require this to wake up WebRTC audio)
         try {
@@ -383,7 +423,7 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 const ctx = new AudioCtx();
                 if (ctx.state === 'suspended') ctx.resume();
             }
-        } catch (_) {}
+        } catch (_) { }
 
         const dummy = new SpeechSynthesisUtterance(' ');
         dummy.volume = 0;
@@ -392,75 +432,114 @@ export function useVoiceGuide({ language = 'en' } = {}) {
 
     const test = useCallback(() => {
         const lang = langRef.current;
-        const msg = lang === 'ta' ? 'ஜஸ்டர் ஐக்யூ தயாராக உள்ளது' : 
-                    lang === 'hi' ? 'जेस्चर आईक्यू तैयार है' : 
-                    'GestureIQ is ready';
+        const testMessages = {
+            ta: 'ஜெஸ்டர் ஐக்யூ தயாராக உள்ளது',
+            hi: 'जेस्चर आईक्यू तैयार है',
+            te: 'జెస్టర్ ఐక్యూ సిద్ధంగా ఉంది',
+            kn: 'ಜೆಸ್ಟಾರ್ ಐಕ್ಯೂ ಸಿದ್ಧವಾಗಿದೆ',
+            ml: 'ജെസ്റ്റർ ഐക്യു തയ്യാറാണ്',
+            en: 'GestureIQ is ready'
+        };
+        const msg = testMessages[lang] || testMessages.en;
         unlockedRef.current = true;
         _doSpeak(msg, PRIO.HIGH);
     }, [_doSpeak]);
 
     const getInstruction = useCallback((mudraFolder) => {
+        if (!mudraFolder) return '';
         const lang = langRef.current;
-        const config = MUDRA_CONFIG[mudraFolder];
-        if (!config) return `Now practicing ${mudraFolder} mudra`;
+        const key = mudraFolder.toLowerCase();
+        const config = MUDRA_CONFIG[key];
+        const localizedName = getMudraName(lang, key);
 
-        if (lang === 'ta') {
-            const taName = getMudraName('ta', mudraFolder);
-            return `${taName} முத்திரை. ${translate('ta', config.fingers)}`;
+        if (!config) {
+            const msgs = {
+                ta: `இப்போது ${localizedName} முத்திரை பயிற்சி செய்யுங்கள்`,
+                hi: `अब ${localizedName} मुद्रा का अभ्यास करें`,
+                te: `ఇప్పుడు ${localizedName} ముద్ర సాధన చేయండి`,
+                kn: `ಈಗ ${localizedName} ಮುದ್ರೆ ಅಭ್ಯಾಸ ಮಾಡಿ`,
+                ml: `ഇപ്പോൾ ${localizedName} മുദ്ര പരിശീലിക്കുക`,
+                en: `Now practicing ${localizedName} mudra`
+            };
+            return msgs[lang] || msgs.en;
         }
-        if (lang === 'hi') {
-            const hiName = getMudraName('hi', mudraFolder);
-            return `${hiName} मुद्रा। ${translate('hi', config.fingers)}`;
-        }
+
+        const fingerInstr = translate(lang, config.fingers);
+
+        if (lang === 'ta') return `${localizedName} முத்திரை. ${fingerInstr}`;
+        if (lang === 'hi') return `${localizedName} मुद्रा। ${fingerInstr}`;
+        if (lang === 'te') return `${localizedName} ముద్ర. ${fingerInstr}`;
+        if (lang === 'kn') return `${localizedName} ಮುದ್ರೆ. ${fingerInstr}`;
+        if (lang === 'ml') return `${localizedName} മുദ്ര. ${fingerInstr}`;
+
         const name = mudraFolder.charAt(0).toUpperCase() + mudraFolder.slice(1);
         return `${name} mudra. ${config.fingers}`;
     }, []);
 
-    const announce = useMemo(() => ({
-        cameraActive: (mudraName) => {
+    const announce = useMemo(() => {
+        const fn = (msg, priority = PRIO.MEDIUM, opts = {}) => {
+            if (!msg) return '';
+            const currentLang = langRef.current;
+            const translatedMsg = translate(currentLang, msg);
+            _doSpeak(translatedMsg, priority, opts);
+            return translatedMsg;
+        };
+
+        fn.raw = fn;
+        fn.cameraActive = (mudraName) => {
             const inst = getInstruction(mudraName);
             _doSpeak(inst, PRIO.HIGH);
-        },
-        correct: () => {
+        };
+        fn.correct = () => {
             const lang = langRef.current;
-            const msgs = { en: "Excellent!", ta: "அருமை!", hi: "बहुत बढ़िया!" };
+            const msgs = {
+                en: "Excellent!",
+                ta: "அருமை!",
+                hi: "बहुत बढ़िया!",
+                te: "అద్భుతం!",
+                kn: "ಅದ್ಭುತ!",
+                ml: "മികച്ചത്!"
+            };
             const msg = msgs[lang] || msgs.en;
             _doSpeak(msg, PRIO.HIGH);
             return msg;
-        },
-        noHand: () => {
+        };
+        fn.noHand = () => {
             const msg = "Show your hand to the camera";
             speak(msg, { minInterval: 6000, priority: PRIO.MEDIUM });
             return msg;
-        },
-        
-        start: (folder) => {
+        };
+        fn.start = (folder) => {
             const inst = getInstruction(folder);
             _doSpeak(inst, PRIO.HIGH);
             return inst;
-        },
-        
-        mastered: ({ mudra, score }) => {
+        };
+        fn.mastered = ({ mudra, score }) => {
             const lang = langRef.current;
             const name = getMudraName(lang, mudra);
-            let msg = "";
-            if (lang === 'ta') {
-                msg = `அற்புதம்! நீங்கள் ${name} முத்திரையை ${score} சதவீத துல்லியத்துடன் கற்றுக்கொண்டீர்கள்.`;
-            } else {
-                msg = `Excellent! You mastered ${mudra} with ${score} percent accuracy.`;
-            }
+            const msgs = {
+                ta: `அற்புதம்! நீங்கள் ${name} முத்திரையை ${score} சதவீத துல்லியத்துடன் கற்றுக்கொண்டீர்கள்.`,
+                hi: `शाबाश! आपने ${name} मुद्रा को ${score} प्रतिशत सटीकता के साथ सीख लिया है।`,
+                te: `అద్భుతం! మీరు ${name} ముద్రను ${score} శాతం ఖచ్చితత్వంతో సాధించారు.`,
+                kn: `ಅದ್ಭುತ! ನೀವು ${name} ಮುದ್ರೆಯನ್ನು ${score} ಶೇಕಡಾ ನಿಖರತೆಯೊಂದಿಗೆ ಕರಗತ ಮಾಡಿಕೊಂಡಿದ್ದೀರಿ.`,
+                ml: `മികച്ചത്! നിങ്ങൾ ${name} മുദ്ര ${score} ശതമാനം കൃത്യതയോടെ പഠിച്ചു.`,
+                en: `Excellent! You mastered ${mudra} with ${score} percent accuracy.`
+            };
+            const msg = msgs[lang] || msgs.en;
             _doSpeak(msg, PRIO.HIGH);
             return msg;
-        },
-        raw: (msg, priority = PRIO.MEDIUM, opts = {}) => {
-            _doSpeak(msg, priority, opts);
-            return msg;
-        },
-        fromResult: (data, targetMudra = null) => {
+        };
+        fn.raw = (msg, priority = PRIO.MEDIUM, opts = {}) => {
+            const currentLang = langRef.current;
+            const translatedMsg = translate(currentLang, msg);
+            _doSpeak(translatedMsg, priority, opts);
+            return translatedMsg;
+        };
+        fn.fromResult = (data, targetMudra = null) => {
             if (!data) return null;
             const lang = langRef.current;
             const now = Date.now();
-            
+
             const currentStatus = data.status || 'Incorrect';
             const currentScore = data.score || 0;
             const currentMudra = data.name || data.matchedMudra || 'No Hand';
@@ -476,7 +555,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             if (currentScore >= 95) {
                 if (isStatusTransition || scoreJump || now - lastOkVoiceRef.current > 10000) {
                     lastOkVoiceRef.current = now;
-                    const msgs = { en: "Perfect! Hold it right there.", ta: "மிகச்சிறப்பு! அப்படியே பிடியுங்கள்.", hi: "बेहतरीन! इसे ऐसे ही बनाए रखें।" };
+                    const msgs = {
+                        en: "Perfect! Hold it right there.",
+                        ta: "மிகச்சிறப்பு! அப்படியே பிடியுங்கள்.",
+                        hi: "बेहतरीन! इसे ऐसे ही बनाए रखें।",
+                        te: "అద్భుతం! అలాగే పట్టుకోండి.",
+                        kn: "ಅತ್ಯುತ್ತಮ! ಹಾಗೆಯೇ ಹಿಡಿದುಕೊಳ್ಳಿ.",
+                        ml: "മികച്ചത്! അങ്ങനെ തന്നെ നിർത്തുക."
+                    };
                     const msg = msgs[lang] || msgs.en;
                     _doSpeak(msg, PRIO.HIGH);
                     return msg;
@@ -487,7 +573,14 @@ export function useVoiceGuide({ language = 'en' } = {}) {
             if (currentScore >= 75) {
                 if (isStatusTransition || now - lastOkVoiceRef.current > 8000) {
                     lastOkVoiceRef.current = now;
-                    const msgs = { en: "Good! Now hold this position.", ta: "நல்லது! இந்த நிலையை பிடித்திருங்கள்.", hi: "अच्छा! अब इस स्थिति को बनाए रखें।" };
+                    const msgs = {
+                        en: "Good! Now hold this position.",
+                        ta: "நல்லது! இந்த நிலையை பிடித்திருங்கள்.",
+                        hi: "अच्छा! अब इस स्थिति को बनाए रखें।",
+                        te: "బాగుంది! ఇప్పుడు ఈ స్థితిని పట్టుకోండి.",
+                        kn: "ಉತ್ತಮ! ಈಗ ಈ ಸ್ಥಿತಿಯನ್ನು ಹಿಡಿದುಕೊಳ್ಳಿ.",
+                        ml: "നന്നായിട്ടുണ്ട്! ഇനി ഈ നില തുടരുക."
+                    };
                     const msg = msgs[lang] || msgs.en;
                     _doSpeak(msg, PRIO.MEDIUM);
                     return msg;
@@ -517,16 +610,15 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                     lastCorrectionTimeRef.current = now;
                     const detName = currentMudra;
                     let voiceMsg = lang === 'ta'
-                                    ? `காட்டுவது ${getMudraName(lang, detName)}.`
-                                    : `Showing ${detName}.`;
+                        ? `காட்டுவது ${getMudraName(lang, detName)}.`
+                        : `Showing ${detName}.`;
                     _doSpeak(voiceMsg, PRIO.MEDIUM);
                     return voiceMsg;
                 }
             }
-            return null;
-        },
-        resetWrongGate: () => { wrongMudraCountRef.current = 0; },
-        poseFeedback: (feedbacks = []) => {
+        };
+        fn.resetWrongGate = () => { wrongMudraCountRef.current = 0; };
+        fn.poseFeedback = (feedbacks = []) => {
             if (!feedbacks || feedbacks.length === 0) return null;
             const lang = langRef.current;
             const now = Date.now();
@@ -540,25 +632,27 @@ export function useVoiceGuide({ language = 'en' } = {}) {
                 return translated;
             }
             return null;
-        }
-    }), [getInstruction, _doSpeak, speak]);
+        };
 
-    return { 
-        speak, 
+        return fn;
+    }, [getInstruction, _doSpeak, speak]);
+
+    return {
+        speak,
         stop: () => {
             window.speechSynthesis.cancel();
             if (activeAudioRef.current) {
                 try {
                     activeAudioRef.current.pause();
                     activeAudioRef.current.src = '';
-                } catch (_) {}
+                } catch (_) { }
                 activeAudioRef.current = null;
             }
             isSpeakingRef.current = false;
             currentPrioRef.current = 0;
             pendingSpeechRef.current = null;
-        }, 
-        test, unlock, announce, getInstruction 
+        },
+        test, unlock, announce, getInstruction
     };
 }
 

@@ -41,8 +41,8 @@ router.get('/class/join/:classId', async (req, res) => {
 
         res.json({
             title: liveClass.title,
-            staffName: liveClass.staffId.name,
-            institutionName: liveClass.staffId.institution_name,
+            staffName: liveClass.staffId?.name || 'Instructor',
+            institutionName: liveClass.staffId?.institution_name || 'Institution',
             scheduledAt: liveClass.scheduledAt,
             duration: liveClass.duration,
             status: liveClass.status,
@@ -50,6 +50,7 @@ router.get('/class/join/:classId', async (req, res) => {
             mudrasList: liveClass.mudrasList || []
         });
     } catch (err) {
+        console.error('[StudentRoutes] Error in /class/join/:classId:', err);
         res.status(500).send('Server Error');
     }
 });

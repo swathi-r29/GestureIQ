@@ -36,10 +36,7 @@ function isLandmarkReal(lm, minVis = 0.45) {
  */
 function hasLowerBody(landmarks) {
   if (!landmarks || landmarks.length < 28) return false;
-  const hasHips = isLandmarkReal(landmarks[23]) && isLandmarkReal(landmarks[24]);
-  const hasKnees = isLandmarkReal(landmarks[25]) && isLandmarkReal(landmarks[26]);
-  if (!hasHips || !hasKnees) return false;
-
+  const minVisLower = 0.70;
   const lShoulder = landmarks[11];
   const rShoulder = landmarks[12];
   const lHip = landmarks[23];
@@ -49,19 +46,25 @@ function hasLowerBody(landmarks) {
   const lAnkle = landmarks[27];
   const rAnkle = landmarks[28];
 
-  if (!lShoulder || !rShoulder) return false;
+  if (!isLandmarkReal(lShoulder, 0.50) || !isLandmarkReal(rShoulder, 0.50)) return false;
+  if (!isLandmarkReal(lHip, minVisLower) || !isLandmarkReal(rHip, minVisLower)) return false;
+  if (!isLandmarkReal(lKnee, minVisLower) || !isLandmarkReal(rKnee, minVisLower)) return false;
+  if (!isLandmarkReal(lAnkle, minVisLower) || !isLandmarkReal(rAnkle, minVisLower)) return false;
 
   const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
   const avgHipY = (lHip.y + rHip.y) / 2;
-  const avgLegY = (lAnkle && rAnkle && isLandmarkReal(lAnkle) && isLandmarkReal(rAnkle))
-    ? (lAnkle.y + rAnkle.y) / 2
-    : (lKnee.y + rKnee.y) / 2;
+  const avgAnkleY = (lAnkle.y + rAnkle.y) / 2;
+
+  // Reject close-up postures where shoulders occupy the middle of screen (y >= 0.42)
+  if (avgShoulderY >= 0.42) return false;
+
+  const fullBodySpan = avgAnkleY - avgShoulderY;
+  if (fullBodySpan < 0.54 || avgAnkleY > 0.90) return false;
 
   const torsoHeight = Math.abs(avgHipY - avgShoulderY);
-  const legDrop = avgLegY - avgHipY;
+  const legDrop = avgAnkleY - avgHipY;
   const legToTorsoRatio = torsoHeight > 0.05 ? (legDrop / torsoHeight) : 0;
 
-  // Seated desk postures (hands on desk mapped to legs) have legDrop < 0.15 and ratio < 0.48
   if (legDrop < 0.15 || legToTorsoRatio < 0.48) return false;
 
   return true;

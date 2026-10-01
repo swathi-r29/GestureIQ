@@ -66,7 +66,7 @@ function buildUpperBodyResult(targetStance, upperResult) {
     score: upperResult.score,
     isAligned: upperResult.score >= 75,
     isVisible: true,
-    visibilityIssue: null,
+    visibilityIssue: 'FEET_MISSING',
     evaluationTier: 'UPPER_BODY',
     feedback: upperResult.feedbackList && upperResult.feedbackList.length > 0
       ? upperResult.feedbackList
@@ -97,23 +97,41 @@ export function evaluateFullBodyStance(poseLandmarks, targetStance = 'Araimandi 
   const rKnee = poseLandmarks[26];
   const lAnkle = poseLandmarks[27];
   const rAnkle = poseLandmarks[28];
-  const minVis = 0.45;
-  const upperBodyValid = isLandmarkValid(lShoulder, minVis) && isLandmarkValid(rShoulder, minVis) && lShoulder.y < 0.82 && rShoulder.y < 0.82;
-  const hipsValid = isLandmarkValid(lHip, minVis) && isLandmarkValid(rHip, minVis);
-  const kneesValid = isLandmarkValid(lKnee, minVis) && isLandmarkValid(rKnee, minVis);
-  const feetValid = isLandmarkValid(lAnkle, minVis) || isLandmarkValid(rAnkle, minVis);
+  
+  const minVisUpper = 0.50;
+  const minVisLower = 0.70;
+  
+  const upperBodyValid = isLandmarkValid(lShoulder, minVisUpper) && isLandmarkValid(rShoulder, minVisUpper);
+  const hipsValid = isLandmarkValid(lHip, minVisLower) && isLandmarkValid(rHip, minVisLower);
+  const kneesValid = isLandmarkValid(lKnee, minVisLower) && isLandmarkValid(rKnee, minVisLower);
+  const feetValid = isLandmarkValid(lAnkle, minVisLower) && isLandmarkValid(rAnkle, minVisLower);
+
+  const avgShoulderY = (lShoulder && rShoulder) ? (lShoulder.y + rShoulder.y) / 2 : 0;
+  const avgAnkleY = (lAnkle && rAnkle) ? (lAnkle.y + rAnkle.y) / 2 : 0;
+  const fullBodySpan = avgAnkleY - avgShoulderY;
 
   if (!upperBodyValid) {
     return buildMissingResult(
       targetStance,
-      'Please adjust camera or step back — shoulders out of frame.',
+      'Please adjust camera or step back — upper body out of frame.',
       'UPPER_BODY_MISSING'
     );
   }
 
-  // MANDATORY STANCE RULE: A dance stance (Araimandi/Samapada/Muzhumandi/Nattadavu)
-  // evaluates knee flexion & hip alignment. Hips & knees MUST be visible in frame.
-  if (!hipsValid || !kneesValid) {
+  // MANDATORY CLOSE-UP GUARD:
+  // In a standing full body stance, shoulders must be in top 42% of camera frame (avgShoulderY < 0.42).
+  // If shoulders y >= 0.42, the student is sitting/framed close-up and lower body is off-screen.
+  if (avgShoulderY >= 0.42) {
+    return buildMissingResult(
+      targetStance,
+      'Please step back — your feet and legs are out of frame.',
+      'FEET_MISSING'
+    );
+  }
+
+  // MANDATORY STANCE RULE: Full body dance stance requires visible hips, knees, feet
+  // AND a minimum vertical span (>= 0.54 of camera height) from shoulders to ankles.
+  if (!hipsValid || !kneesValid || !feetValid || fullBodySpan < 0.54 || avgAnkleY > 0.90) {
     return buildMissingResult(
       targetStance,
       'Full body not detected. Step back so your entire body is visible.',
@@ -123,7 +141,6 @@ export function evaluateFullBodyStance(poseLandmarks, targetStance = 'Araimandi 
 
   // MANDATORY STANDING POSTURE GATE:
   // Disambiguates a standing dancer from a seated desk posture where wrists are misidentified as knees/ankles.
-  const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
   const avgHipY = (lHip.y + rHip.y) / 2;
   const avgLegY = (lAnkle?.y && rAnkle?.y && isLandmarkValid(lAnkle) && isLandmarkValid(rAnkle))
     ? (lAnkle.y + rAnkle.y) / 2

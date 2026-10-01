@@ -1920,8 +1920,19 @@ def get_voice():
         if not text:
             return jsonify({"error": "No text provided"}), 400
             
-        print(f"[VOICE] Generating: '{text}' ({lang})")
-        tts = gTTS(text=text, lang=lang)
+        try:
+            print(f"[VOICE] Generating: '{text.encode('ascii', 'backslashreplace').decode('ascii')}' ({lang})")
+        except Exception:
+            pass
+            
+        try:
+            tts = gTTS(text=text, lang=lang)
+        except Exception as lang_err:
+            try:
+                print(f"[VOICE] Fallback to 'en' due to lang error: {lang_err}")
+            except Exception:
+                pass
+            tts = gTTS(text=text, lang='en')
         
         # Save to memory instead of disk
         mp3_fp = io.BytesIO()
@@ -1937,8 +1948,12 @@ def get_voice():
         })
         
     except Exception as e:
-        print(f"[VOICE] Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        err_msg = str(e)
+        try:
+            print(f"[VOICE] Error: {err_msg.encode('ascii', 'backslashreplace').decode('ascii')}")
+        except Exception:
+            pass
+        return jsonify({"error": err_msg}), 500
 
 @app.route('/api/clear_history', methods=['POST'])
 @app.route('/api/reset_registry', methods=['POST'])

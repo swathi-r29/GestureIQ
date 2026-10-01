@@ -377,6 +377,20 @@ const StaffConductClass = () => {
           clearTimeout(iceRestartTimersRef.current.get(studentSocketId));
           iceRestartTimersRef.current.delete(studentSocketId);
         }
+        const studentId = socketToUserIdRef.current[studentSocketId];
+        if (studentId) {
+          setStudents(prev => {
+            if (!prev[studentId]) return prev;
+            return {
+              ...prev,
+              [studentId]: {
+                ...prev[studentId],
+                status: prev[studentId].status === 'Connecting...' ? 'Connected' : prev[studentId].status,
+                mudra: prev[studentId].mudra === 'Joining...' ? 'Active' : prev[studentId].mudra
+              }
+            };
+          });
+        }
       }
     };
 
@@ -402,13 +416,16 @@ const StaffConductClass = () => {
       setStudents(prev => {
         if (!prev[studentId]) return prev;
 
-        // Only update state if it's a new stream object or if we don't have one yet
-        if (prev[studentId].remoteStream === remoteStream) return prev;
+        const current = prev[studentId];
+        const status = current.status === 'Connecting...' ? 'Connected' : current.status;
+        const mudra = current.mudra === 'Joining...' ? 'Active' : current.mudra;
 
-        console.log('[WebRTC Teacher] Updating remoteStream for student:', studentId);
+        if (current.remoteStream === remoteStream && current.status === status && current.mudra === mudra) return prev;
+
+        console.log('[WebRTC Teacher] Updating remoteStream & status for student:', studentId);
         return {
           ...prev,
-          [studentId]: { ...prev[studentId], remoteStream: remoteStream }
+          [studentId]: { ...current, remoteStream: remoteStream, status, mudra }
         };
       });
     };
@@ -682,7 +699,7 @@ const StaffConductClass = () => {
       s.on('student_performance_update', updateStudentData);
 
       s.on('student_posture_metric', (data) => {
-        if (!data || !data.studentId) return;
+        if (!data || (!data.studentId && !data.socketId)) return;
         setStudentPostures((prev) => ({
           ...prev,
           [data.studentId]: {
@@ -692,15 +709,19 @@ const StaffConductClass = () => {
         }));
         setStudents(prev => {
           const sId = data.studentId;
-          if (!sId || !prev[sId]) return prev;
-          const currentStudent = prev[sId];
+          const targetKey = (sId && prev[sId]) ? sId : Object.keys(prev).find(k => k === sId || prev[k].socketId === data.socketId) || Object.keys(prev)[0];
+          if (!targetKey || !prev[targetKey]) return prev;
+
+          const currentStudent = prev[targetKey];
           const status = data.score >= 90 ? 'Excellent' : data.score >= 75 ? 'Good' : 'Practicing';
+          const mudra = data.stance || (currentStudent.mudra !== 'Joining...' ? currentStudent.mudra : 'Active');
+
           return {
             ...prev,
-            [sId]: {
+            [targetKey]: {
               ...currentStudent,
               score: data.score !== undefined ? data.score : currentStudent.score || 0,
-              mudra: data.stance || currentStudent.mudra || '',
+              mudra,
               status,
               lastSeen: Date.now()
             }
@@ -726,17 +747,21 @@ const StaffConductClass = () => {
 
   const updateStudentData = (data) => {
     setStudents(prev => {
-      const studentId = data.studentId;
-      if (!studentId) return prev;
-      const currentStudent = prev[studentId] || {};
-      const status = data.score >= 90 ? 'Excellent' : data.score >= 75 ? 'Good' : 'Practicing';
+      const sId = data.studentId;
+      const targetKey = (sId && prev[sId]) ? sId : Object.keys(prev).find(k => k === sId || prev[k].socketId === data.socketId) || Object.keys(prev)[0];
+      if (!targetKey || !prev[targetKey]) return prev;
+
+      const currentStudent = prev[targetKey] || {};
+      const status = data.status && data.status !== 'Connecting...' ? data.status : (data.score >= 90 ? 'Excellent' : data.score >= 75 ? 'Good' : 'Practicing');
+      const mudra = data.mudra && data.mudra !== 'Joining...' ? data.mudra : (currentStudent.mudra !== 'Joining...' ? currentStudent.mudra : 'Active');
+
       return {
         ...prev,
-        [studentId]: {
+        [targetKey]: {
           ...currentStudent,
           name: data.studentName || currentStudent.name || 'Student',
           score: data.score !== undefined ? data.score : currentStudent.score || 0,
-          mudra: data.mudra || currentStudent.mudra || '',
+          mudra,
           status,
           lastSeen: Date.now(),
           frame: data.frame || currentStudent.frame || null,
