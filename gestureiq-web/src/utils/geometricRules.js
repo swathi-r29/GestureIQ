@@ -123,26 +123,13 @@ export const getFingerState = (angle, isThumb = false) => {
 
 export const isValidHand = (lms) => {
   if (!lms || !Array.isArray(lms) || lms.length < 21) return false;
-
   const w = lms[0];
   const mcp = lms[9];
-  const tip = lms[12];
-  if (!w || !mcp || !tip) return false;
-
+  if (!w || !mcp) return false;
   const dxPalm = mcp.x - w.x;
   const dyPalm = mcp.y - w.y;
   const palmDist = Math.sqrt(dxPalm * dxPalm + dyPalm * dyPalm);
-
-  const dxTotal = tip.x - w.x;
-  const dyTotal = tip.y - w.y;
-  const totalDist = Math.sqrt(dxTotal * dxTotal + dyTotal * dyTotal);
-
-  // Palm size check: A real hand held up in camera view has palm length between 0.055 and 0.65
-  if (palmDist < 0.055 || palmDist > 0.65) return false;
-
-  // Proportion check: Total length (wrist to middle tip) must be 0.85x to 3.5x of palm length
-  if (totalDist < palmDist * 0.85 || totalDist > palmDist * 3.5) return false;
-
+  if (palmDist < 0.008 || palmDist > 0.85) return false;
   return true;
 };
 

@@ -17,26 +17,29 @@ import { calculate3DAngle, calculateVerticalTilt } from './poseNormalization';
  * visibility=0 or undefined even when the joint is clearly visible in the image.
  * Coordinate presence is the only reliable check for static images.
  */
-function isLandmarkReal(lm, minVis = 0.45) {
+function isLandmarkReal(lm) {
   if (!lm) return false;
   if (typeof lm.x !== 'number' || typeof lm.y !== 'number') return false;
   if (isNaN(lm.x) || isNaN(lm.y)) return false;
-  // Reject zero-initialized or edge-cropped out-of-frame landmarks
   if (lm.x === 0 && lm.y === 0) return false;
-  if (lm.y > 0.94 || lm.y < 0.03 || lm.x > 0.98 || lm.x < 0.02) return false;
-
-  // Confidence check when visibility property is provided by MediaPipe
-  if (typeof lm.visibility === 'number' && lm.visibility < minVis) return false;
+  if (lm.y > 1.35 || lm.y < -0.35 || lm.x > 1.35 || lm.x < -0.35) return false;
 
   return true;
 }
 
+export function calculateJointAngle2D(a, b, c) {
+  if (!a || !b || !c) return 180;
+  const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+  let angle = Math.abs((radians * 180.0) / Math.PI);
+  if (angle > 180.0) angle = 360.0 - angle;
+  return Number.isNaN(angle) ? 180 : Math.round(angle);
+}
+
 /**
- * Checks that hips, knees, AND ankles are detected — mandatory for any leg stance classification.
+ * Checks that hips, knees, OR ankles + shoulders are detected.
  */
 function hasLowerBody(landmarks) {
-  if (!landmarks || landmarks.length < 28) return false;
-  const minVisLower = 0.70;
+  if (!landmarks || landmarks.length < 23) return false;
   const lShoulder = landmarks[11];
   const rShoulder = landmarks[12];
   const lHip = landmarks[23];
@@ -46,26 +49,14 @@ function hasLowerBody(landmarks) {
   const lAnkle = landmarks[27];
   const rAnkle = landmarks[28];
 
-  if (!isLandmarkReal(lShoulder, 0.50) || !isLandmarkReal(rShoulder, 0.50)) return false;
-  if (!isLandmarkReal(lHip, minVisLower) || !isLandmarkReal(rHip, minVisLower)) return false;
-  if (!isLandmarkReal(lKnee, minVisLower) || !isLandmarkReal(rKnee, minVisLower)) return false;
-  if (!isLandmarkReal(lAnkle, minVisLower) || !isLandmarkReal(rAnkle, minVisLower)) return false;
+  const shoulderValid = isLandmarkReal(lShoulder) || isLandmarkReal(rShoulder);
+  const hipValid = isLandmarkReal(lHip) || isLandmarkReal(rHip);
+  const kneeValid = isLandmarkReal(lKnee) || isLandmarkReal(rKnee);
+  const ankleValid = isLandmarkReal(lAnkle) || isLandmarkReal(rAnkle);
 
-  const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
-  const avgHipY = (lHip.y + rHip.y) / 2;
-  const avgAnkleY = (lAnkle.y + rAnkle.y) / 2;
-
-  // Reject close-up postures where shoulders occupy the middle of screen (y >= 0.42)
-  if (avgShoulderY >= 0.42) return false;
-
-  const fullBodySpan = avgAnkleY - avgShoulderY;
-  if (fullBodySpan < 0.54 || avgAnkleY > 0.90) return false;
-
-  const torsoHeight = Math.abs(avgHipY - avgShoulderY);
-  const legDrop = avgAnkleY - avgHipY;
-  const legToTorsoRatio = torsoHeight > 0.05 ? (legDrop / torsoHeight) : 0;
-
-  if (legDrop < 0.15 || legToTorsoRatio < 0.48) return false;
+  if (!shoulderValid) return false;
+  if (!hipValid && !kneeValid) return false;
+  if (!kneeValid && !ankleValid) return false;
 
   return true;
 }
@@ -74,45 +65,92 @@ function hasLowerBody(landmarks) {
  * 1. Araimandi (Half-Squat) Evaluation
  */
 export function checkAraimandi(landmarks) {
-  if (!landmarks || landmarks.length < 23) {
-    return { isPass: false, isVisible: false, score: 0, feedback: "Step back — full body must be visible." };
+  if (!landmarks || landmarks.length < 29) {
+    return { isPass: false, isVisible: false, score: 0, feedback: "Full body not detected. Step back so your entire body is visible." };
   }
 
-  if (!hasLowerBody(landmarks)) {
-    return { isPass: false, isVisible: false, score: 0, feedback: "Step back 6–8 ft — hips & knees not visible." };
+  const lShoulder = landmarks[11];
+  const rShoulder = landmarks[12];
+  const lHip = landmarks[23];
+  const rHip = landmarks[24];
+  const lKnee = landmarks[25];
+  const rKnee = landmarks[26];
+  const lAnkle = landmarks[27];
+  const rAnkle = landmarks[28];
+
+  if (!isLandmarkReal(lHip) || !isLandmarkReal(rHip) || 
+      !isLandmarkReal(lKnee) || !isLandmarkReal(rKnee) || 
+      !isLandmarkReal(lAnkle) || !isLandmarkReal(rAnkle)) {
+    return { isPass: false, isVisible: false, score: 0, feedback: "Full body not detected. Step back so your entire body is visible." };
   }
 
-  const pHipL = isLandmarkReal(landmarks[23]) ? landmarks[23] : { x: 0.42, y: 0.55, z: 0 };
-  const pHipR = isLandmarkReal(landmarks[24]) ? landmarks[24] : { x: 0.58, y: 0.55, z: 0 };
-  const pKneeL = isLandmarkReal(landmarks[25]) ? landmarks[25] : { x: pHipL.x - 0.08, y: pHipL.y + 0.22, z: pHipL.z ?? 0 };
-  const pKneeR = isLandmarkReal(landmarks[26]) ? landmarks[26] : { x: pHipR.x + 0.08, y: pHipR.y + 0.22, z: pHipR.z ?? 0 };
-  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x, y: pKneeL.y + 0.18, z: pKneeL.z ?? 0 };
-  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x, y: pKneeR.y + 0.18, z: pKneeR.z ?? 0 };
+  // 1. Raw Joint Angles
+  const leftKneeAngle = calculateJointAngle2D(lHip, lKnee, lAnkle);
+  const rightKneeAngle = calculateJointAngle2D(rHip, rKnee, rAnkle);
+  const avgKneeAngle = Math.round((leftKneeAngle + rightKneeAngle) / 2);
 
-  const leftKneeAngle = calculate3DAngle(pHipL, pKneeL, pAnkleL);
-  const rightKneeAngle = calculate3DAngle(pHipR, pKneeR, pAnkleR);
-  const avgKneeAngle = (leftKneeAngle + rightKneeAngle) / 2;
+  // 2. Anatomical Turnout: In Araimandi, knees press outward wider than hips
+  const hipWidth = Math.abs(rHip.x - lHip.x) || 0.08;
+  const kneeWidth = Math.abs(rKnee.x - lKnee.x);
+  const turnoutRatio = kneeWidth / hipWidth;
 
-  if (!avgKneeAngle || isNaN(avgKneeAngle)) {
-    return { isPass: false, isVisible: false, score: 0, feedback: "Could not measure knee angle." };
-  }
+  // 3. Torso vs Leg Proportional Height (detects downward squat even with saree)
+  const shoulderY = (lShoulder.y + rShoulder.y) / 2;
+  const hipY = (lHip.y + rHip.y) / 2;
+  const ankleY = (lAnkle.y + rAnkle.y) / 2;
 
-  const angle = Math.round(avgKneeAngle);
-  let isPass = false, feedback = "", score = 0;
+  const torsoHeight = Math.abs(hipY - shoulderY);
+  const legHeight = Math.abs(ankleY - hipY);
+  const squatRatio = legHeight / (torsoHeight || 1.0); 
+  // Straight standing: legHeight is ~1.5 - 1.8x torso
+  // Araimandi squat: legHeight drops to ~1.1 - 1.35x torso
 
-  if (angle > 155) {
-    feedback = "Bend knees lower outward into Araimandi (~125°).";
-    score = Math.max(40, Math.round(100 - (angle - 135) * 2));
-  } else if (angle <= 80) {
-    feedback = "This is Muzhumandi. Rise slightly for Araimandi.";
-    score = 70;
-  } else {
+  let isPass = false;
+  let feedback = "";
+  let score = 50;
+
+  // Check if dancer is in half-squat by angle OR by pelvic drop + knee turnout
+  const isKneeBent = avgKneeAngle <= 155;
+  const isTurnoutOutward = turnoutRatio >= 1.15;
+  const isPelvicDropped = squatRatio <= 1.45;
+
+  if (isKneeBent || (isTurnoutOutward && isPelvicDropped)) {
     isPass = true;
-    feedback = "Excellent Araimandi stance!";
-    score = 95;
+    feedback = "Good Araimandi stance!";
+
+    // Base score calculation
+    let baseScore = 85;
+
+    // Bonus for wide knee turnout (classic diamond shape)
+    if (turnoutRatio >= 1.25) baseScore += 8;
+    else if (turnoutRatio >= 1.15) baseScore += 5;
+
+    // Bonus for proper squat depth
+    if (avgKneeAngle <= 145 && avgKneeAngle >= 110) baseScore += 5;
+
+    score = Math.min(98, baseScore);
+  } else if (avgKneeAngle >= 165 && turnoutRatio < 1.1) {
+    // Completely straight legs, no turnout
+    isPass = false;
+    feedback = "Bend knees outward into half-squat (Araimandi ~125°).";
+    score = 45;
+  } else {
+    // Partial bend or partial turnout
+    isPass = false;
+    feedback = "Push knees wider outward and sit lower into Araimandi.";
+    score = Math.round(55 + (turnoutRatio > 1.0 ? 15 : 0));
   }
 
-  return { isPass, isVisible: true, score, avgKneeAngle: angle, leftKneeAngle: Math.round(leftKneeAngle), rightKneeAngle: Math.round(rightKneeAngle), feedback };
+  return {
+    isPass,
+    isVisible: true,
+    score,
+    avgKneeAngle,
+    leftKneeAngle: Math.round(leftKneeAngle),
+    rightKneeAngle: Math.round(rightKneeAngle),
+    turnoutRatio: Number(turnoutRatio.toFixed(2)),
+    feedback
+  };
 }
 
 /**
@@ -129,11 +167,11 @@ export function checkMuzhumandi(landmarks) {
   const pHipR = isLandmarkReal(landmarks[24]) ? landmarks[24] : { x: 0.58, y: 0.55, z: 0 };
   const pKneeL = isLandmarkReal(landmarks[25]) ? landmarks[25] : { x: pHipL.x - 0.08, y: pHipL.y + 0.18, z: pHipL.z ?? 0 };
   const pKneeR = isLandmarkReal(landmarks[26]) ? landmarks[26] : { x: pHipR.x + 0.08, y: pHipR.y + 0.18, z: pHipR.z ?? 0 };
-  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x, y: pKneeL.y + 0.22, z: pKneeL.z ?? 0 };
-  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x, y: pKneeR.y + 0.22, z: pKneeR.z ?? 0 };
+  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x + (pKneeL.x - pHipL.x) * 0.5, y: pKneeL.y + 0.22, z: pKneeL.z ?? 0 };
+  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x + (pKneeR.x - pHipR.x) * 0.5, y: pKneeR.y + 0.22, z: pKneeR.z ?? 0 };
 
-  const leftKneeAngle = calculate3DAngle(pHipL, pKneeL, pAnkleL);
-  const rightKneeAngle = calculate3DAngle(pHipR, pKneeR, pAnkleR);
+  const leftKneeAngle = calculateJointAngle2D(pHipL, pKneeL, pAnkleL);
+  const rightKneeAngle = calculateJointAngle2D(pHipR, pKneeR, pAnkleR);
   const angle = Math.round((leftKneeAngle + rightKneeAngle) / 2);
 
   // Height check: hips must drop low relative to ankles in full squat (< 0.28 normalized distance)
@@ -147,6 +185,70 @@ export function checkMuzhumandi(landmarks) {
   const score = isPass ? 95 : Math.max(40, Math.round(100 - (angle - 35)));
 
   return { isPass, isVisible: true, score, avgKneeAngle: angle, feedback };
+}
+
+/**
+ * 2b. Paraval Adavu (Wide Extension Adavu) Evaluation
+ * Requires:
+ * 1. Araimandi knee bend (105° - 145°)
+ * 2. Wide leg stance (knee width >= 1.15 * hip width)
+ * 3. Extended arms (Natyarambham elbow angle >= 105°)
+ */
+export function checkParavalAdavu(landmarks) {
+  if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Full body required." };
+  if (!hasLowerBody(landmarks)) return { isPass: false, isVisible: false, score: 0, feedback: "Step back — hips & knees must be visible." };
+
+  const pHipL = isLandmarkReal(landmarks[23]) ? landmarks[23] : (isLandmarkReal(landmarks[24]) ? { ...landmarks[24], x: landmarks[24].x - 0.1 } : { x: 0.42, y: 0.55, z: 0 });
+  const pHipR = isLandmarkReal(landmarks[24]) ? landmarks[24] : (isLandmarkReal(landmarks[23]) ? { ...landmarks[23], x: landmarks[23].x + 0.1 } : { x: 0.58, y: 0.55, z: 0 });
+  const pKneeL = isLandmarkReal(landmarks[25]) ? landmarks[25] : (isLandmarkReal(landmarks[26]) ? { ...landmarks[26], x: landmarks[26].x - 0.16 } : { x: pHipL.x - 0.08, y: pHipL.y + 0.22, z: pHipL.z ?? 0 });
+  const pKneeR = isLandmarkReal(landmarks[26]) ? landmarks[26] : (isLandmarkReal(landmarks[25]) ? { ...landmarks[25], x: landmarks[25].x + 0.16 } : { x: pHipR.x + 0.08, y: pHipR.y + 0.22, z: pHipR.z ?? 0 });
+  const pAnkleL = isLandmarkReal(landmarks[27]) ? landmarks[27] : { x: pKneeL.x + (pKneeL.x - pHipL.x) * 0.5, y: pKneeL.y + 0.18, z: pKneeL.z ?? 0 };
+  const pAnkleR = isLandmarkReal(landmarks[28]) ? landmarks[28] : { x: pKneeR.x + (pKneeR.x - pHipR.x) * 0.5, y: pKneeR.y + 0.18, z: pKneeR.z ?? 0 };
+  const pShoulderL = landmarks[11], pShoulderR = landmarks[12];
+  const pElbowL = landmarks[13], pElbowR = landmarks[14];
+  const pWristL = landmarks[15], pWristR = landmarks[16];
+
+  const leftKneeAngle = calculateJointAngle2D(pHipL, pKneeL, pAnkleL);
+  const rightKneeAngle = calculateJointAngle2D(pHipR, pKneeR, pAnkleR);
+  const avgKneeAngle = Math.round((leftKneeAngle + rightKneeAngle) / 2);
+
+  const hipWidth = Math.abs(pHipR.x - pHipL.x) || 0.1;
+  const kneeWidth = Math.abs(pKneeR.x - pKneeL.x);
+  const stanceWidthRatio = kneeWidth / hipWidth;
+
+  const leftElbow = (pShoulderL && pElbowL && pWristL) ? calculateJointAngle2D(pShoulderL, pElbowL, pWristL) : 0;
+  const rightElbow = (pShoulderR && pElbowR && pWristR) ? calculateJointAngle2D(pShoulderR, pElbowR, pWristR) : 0;
+  const avgElbow = Math.round((leftElbow + rightElbow) / 2);
+
+  let isPass = true;
+  let feedbacks = [];
+  let score = 95;
+
+  // 1. Check knee bend (Araimandi)
+  if (avgKneeAngle > 150) {
+    feedbacks.push("Bend knees lower into Araimandi for Paraval Adavu.");
+    score -= 25;
+    isPass = false;
+  }
+
+  // 2. Check wide stance extension
+  if (stanceWidthRatio < 1.15) {
+    feedbacks.push("Widen your stance — Paraval Adavu requires wide leg extension.");
+    score -= 25;
+    isPass = false;
+  }
+
+  // 3. Check arm extension
+  if (avgElbow < 105 && (leftElbow < 105 || rightElbow < 105)) {
+    feedbacks.push("Extend arms fully to sides into Natyarambham.");
+    score -= 20;
+    isPass = false;
+  }
+
+  score = Math.max(35, score);
+  const feedback = feedbacks.length > 0 ? feedbacks[0] : "Excellent Paraval Adavu wide extension!";
+
+  return { isPass, isVisible: true, score, avgKneeAngle, stanceWidthRatio, feedback };
 }
 
 /**
@@ -286,7 +388,7 @@ export function checkNatyarambham(landmarks) {
   if (!landmarks || landmarks.length < 23) return { isPass: false, isVisible: false, score: 0, feedback: "Upper body incomplete." };
 
   const armsVisible = isLandmarkReal(landmarks[11]) && isLandmarkReal(landmarks[12]) &&
-                      (isLandmarkReal(landmarks[13]) || isLandmarkReal(landmarks[14]));
+    (isLandmarkReal(landmarks[13]) || isLandmarkReal(landmarks[14]));
 
   if (!armsVisible) {
     return { isPass: false, isVisible: false, score: 0, avgElbowAngle: 0, feedback: "Step back — arms not fully visible." };

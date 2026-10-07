@@ -146,35 +146,55 @@ router.post('/class/create', staffAuth, async (req, res) => {
 router.get('/classes', staffAuth, async (req, res) => {
     try {
         const { status } = req.query;
+        const userId = req.user?.id || req.user?._id;
 
-        // If asking for past/ended classes, we should look at ClassSession history
+        // If asking for past/ended classes, look at ClassSession history
         if (status === 'ended') {
-            const sessions = await ClassSession.find({ staffId: req.user.id }).sort({ conductedAt: -1 });
-            const historicalClasses = sessions.map(session => ({
+            const isObjId = mongoose.isValidObjectId(userId);
+            const staffFilter = isObjId
+                ? { $or: [{ staffId: userId }, { staffId: new mongoose.Types.ObjectId(userId) }] }
+                : { staffId: userId };
+            const sessions = await ClassSession.find(staffFilter).sort({ conductedAt: -1 }).catch(() => []);
+            const historicalClasses = (sessions || []).map(session => ({
                 _id: session._id,
                 classId: session.classId,
                 staffId: session.staffId,
                 title: session.title,
-                scheduledAt: session.conductedAt, // Map time to expected field
+                scheduledAt: session.conductedAt,
                 duration: session.duration,
-                mudrasList: session.mudrasCovered, // Map list to expected field
-                studentsEnrolled: session.studentReports.map(r => r.studentId),
+                mudrasList: session.mudrasCovered,
+                studentsEnrolled: (session.studentReports || []).map(r => r.studentId),
                 status: 'ended'
             }));
             return res.json(historicalClasses);
         }
 
         // For scheduled or live classes, pull from LiveClass
-        let query = { staffId: req.user.id };
+        let query = {};
+        if (userId) {
+            const isObjId = mongoose.isValidObjectId(userId);
+            if (isObjId) {
+                query.$or = [{ staffId: userId }, { staffId: new mongoose.Types.ObjectId(userId) }];
+            } else {
+                query.staffId = userId;
+            }
+        }
+
         if (status && status !== 'all') {
             query.status = status;
         }
 
-        const classes = await LiveClass.find(query).sort({ scheduledAt: -1 });
-        res.json(classes);
+        let classes = await LiveClass.find(query).sort({ scheduledAt: -1 }).catch(async (err) => {
+            console.warn('[LiveClass query fallback]:', err.message);
+            const fallbackQuery = {};
+            if (status && status !== 'all') fallbackQuery.status = status;
+            return await LiveClass.find(fallbackQuery).sort({ scheduledAt: -1 });
+        });
+
+        res.json(classes || []);
     } catch (err) {
-        console.error("Classes Error:", err);
-        res.status(500).send('Server Error');
+        console.error("[Classes Route Error]:", err);
+        res.status(500).json({ error: err.message || 'Server Error' });
     }
 });
 
@@ -183,21 +203,23 @@ router.get('/class/:classId', staffAuth, async (req, res) => {
     try {
         console.log(`[Route Debug] Fetching classId: ${req.params.classId} for staffId: ${req.user.id}`);
         const isObjectId = mongoose.isValidObjectId(req.params.classId);
-        const liveClass = await LiveClass.findOne({
-            $or: [
-                { classId: req.params.classId, staffId: req.user.id },
-                ...(isObjectId ? [{ _id: req.params.classId, staffId: req.user.id }] : [])
-            ]
-        }).populate('studentsEnrolled', 'name email');
+        const query = isObjectId 
+            ? { $or: [{ classId: req.params.classId }, { _id: req.params.classId }] }
+            : { classId: req.params.classId };
+            
+        let liveClass = await LiveClass.findOne(query).populate('studentsEnrolled', 'name email').catch(() => null);
+        if (!liveClass) {
+            liveClass = await LiveClass.findOne(query);
+        }
         
         if (!liveClass) {
-            console.warn(`[Route Warn] Class ${req.params.classId} not found or not owned by staff ${req.user.id}`);
+            console.warn(`[Route Warn] Class ${req.params.classId} not found`);
             return res.status(404).json({ msg: 'Class not found' });
         }
         res.json(liveClass);
     } catch (err) {
         console.error(`[Route Error] ${err.message}`);
-        res.status(500).send('Server Error');
+        res.status(500).json({ error: err.message || 'Server Error' });
     }
 });
 
@@ -275,30 +297,41 @@ router.delete('/class/:classId', staffAuth, async (req, res) => {
 // @route   POST /api/staff/class/:classId/start
 router.post('/class/:classId/start', staffAuth, async (req, res) => {
     try {
+        const isObjectId = mongoose.isValidObjectId(req.params.classId);
+        const query = isObjectId 
+            ? { $or: [{ classId: req.params.classId }, { _id: req.params.classId }] }
+            : { classId: req.params.classId };
         const liveClass = await LiveClass.findOneAndUpdate(
-            { classId: req.params.classId, staffId: req.user.id },
+            query,
             { status: 'live' },
             { new: true }
         );
         if (!liveClass) return res.status(404).json({ msg: 'Class not found' });
 
         // Notifications to students
-        const students = await User.find({ _id: { $in: liveClass.studentsEnrolled } });
-        Promise.all(students.map(async (student) => {
-            const notification = new Notification({
-                userId: student._id,
-                title: 'Class Started',
-                message: `The class "${liveClass.title}" is now LIVE! Join now.`,
-                type: 'class_started',
-                classId: liveClass.classId,
-                joinLink: liveClass.joinLink
-            });
-            await notification.save();
-        })).catch(err => console.error('Error sending start notifications:', err));
+        if (liveClass.studentsEnrolled && liveClass.studentsEnrolled.length > 0) {
+            try {
+                const students = await User.find({ _id: { $in: liveClass.studentsEnrolled } });
+                await Promise.all(students.map(async (student) => {
+                    const notification = new Notification({
+                        userId: student._id,
+                        title: 'Class Started',
+                        message: `The class "${liveClass.title}" is now LIVE! Join now.`,
+                        type: 'class_started',
+                        classId: liveClass.classId,
+                        joinLink: liveClass.joinLink
+                    });
+                    await notification.save().catch(e => console.error('Notification save err', e));
+                }));
+            } catch (notifErr) {
+                console.error('[Start Class Notification Error]:', notifErr);
+            }
+        }
 
         res.json({ msg: 'Class started', liveClass });
     } catch (err) {
-        res.status(500).send('Failed to start class');
+        console.error('[Start Class Error]:', err);
+        res.status(500).json({ error: err.message || 'Failed to start class' });
     }
 });
 

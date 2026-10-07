@@ -1950,10 +1950,10 @@ def get_voice():
     except Exception as e:
         err_msg = str(e)
         try:
-            print(f"[VOICE] Error: {err_msg.encode('ascii', 'backslashreplace').decode('ascii')}")
+            print(f"[VOICE] gTTS fallback to browser TTS: {err_msg.encode('ascii', 'backslashreplace').decode('ascii')}")
         except Exception:
             pass
-        return jsonify({"error": err_msg}), 500
+        return jsonify({"status": "fallback_to_browser", "error": err_msg, "audio": None}), 200
 
 @app.route('/api/clear_history', methods=['POST'])
 @app.route('/api/reset_registry', methods=['POST'])

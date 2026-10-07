@@ -22,7 +22,23 @@ const RTC_CONFIG = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-  ]
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 
@@ -32,7 +48,7 @@ const formatTime = (seconds) => {
   return `${m}:${s}`;
 };
 
-const STANCE_KEYS = ['araimandi', 'muzhumandi', 'samapada', 'nattadavu', 'tillana', 'stance', 'adavu', 'posture'];
+const STANCE_KEYS = ['araimandi', 'muzhumandi', 'samapada', 'nattadavu', 'natta', 'paraval', 'veeshi', 'tatta', 'tillana', 'stance', 'adavu', 'posture', 'step', 'pose'];
 const isStanceTarget = (target) => {
   if (!target) return false;
   const t = target.toLowerCase();
@@ -43,6 +59,12 @@ const isMudraMatch = (d, t) => {
   if (!d || !t) return false;
   const normD = d.toLowerCase().replace(/[^a-z]/g, '');
   const normT = t.toLowerCase().replace(/[^a-z]/g, '');
+
+  if (normT.includes('veeshi') || normT.includes('adavu')) {
+    const validAdavuMudras = ['pataka', 'tripataka', 'alapadma', 'katakamukha', 'ardhapataka', 'mayura', 'handpresent', 'mudra'];
+    return validAdavuMudras.some(m => normD.includes(m)) || normD === normT;
+  }
+
   return normD === normT || normD.includes(normT) || normT.includes(normD);
 };
 
@@ -50,64 +72,110 @@ const scoreColor = (s) => s >= 75 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626';
 const scoreBg = (s) => s >= 75 ? '#ECFDF5' : s >= 50 ? '#FFFBEB' : '#FEF2F2';
 const scoreBorder = (s) => s >= 75 ? '#A7F3D0' : s >= 50 ? '#FDE68A' : '#FECACA';
 
-function drawStanceSkeletonAndHUD(ctx, landmarks, result) {
-  ctx.save();
+export function identifyDanceAdavu(stanceName, handMudra) {
+  const stance = (stanceName || '').toLowerCase();
+  const mudra = (handMudra || '').toLowerCase();
+
+  if ((stance.includes('araimandi') || stance.includes('muzhumandi')) &&
+    (mudra.includes('pataka') || mudra.includes('tripataka') || mudra.includes('alapadma') || mudra.includes('detecting') || mudra === '')) {
+    return 'Veeshi Adavu';
+  }
+  if (stance.includes('nattadavu')) {
+    return 'Natta Adavu';
+  }
+  if (stance.includes('muzhumandi')) {
+    return 'Kuditta Natta Adavu';
+  }
+  if (stance.includes('samapada')) {
+    return 'Tatta Adavu';
+  }
+  if (stanceName && !stanceName.includes('Step Back')) {
+    return stanceName.endsWith('Adavu') ? stanceName : `${stanceName.replace(' Stance', '')} Adavu`;
+  }
+  return 'Bharatanatyam Adavu';
+}
+
+function drawStanceSkeletonAndHUD(ctx, landmarks, result, currentMudraName = '') {
+  if (!ctx || !ctx.canvas) return;
+
+  // Reset transform matrix to default identity matrix
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-  // Mirror transformation: translate to right edge and flip horizontal axis
-  ctx.translate(ctx.canvas.width, 0);
-  ctx.scale(-1, 1);
+  try {
+    ctx.save();
+    // Mirror
+    ctx.translate(ctx.canvas.width, 0);
+    ctx.scale(-1, 1);
 
-  const isGreen = result.score >= 75;
-  const accentColor = isGreen ? '#00FF7F' : '#FF4500';
+    const isGreen = (result?.score || 0) >= 75;
+    const accentColor = isGreen ? '#00FF7F' : '#FF4500';
 
-  if (landmarks && drawConnectors && POSE_CONNECTIONS) {
-    drawConnectors(ctx, landmarks, POSE_CONNECTIONS, {
-      color: accentColor,
-      lineWidth: 3
-    });
-    drawLandmarks(ctx, landmarks, {
-      color: '#FFFFFF',
-      fillColor: accentColor,
-      lineWidth: 1,
-      radius: 4
-    });
+    const conn = POSE_CONNECTIONS || window.POSE_CONNECTIONS;
+    const drawConn = drawConnectors || window.drawConnectors;
+    const drawLms = drawLandmarks || window.drawLandmarks;
+
+    if (landmarks && drawConn && conn) {
+      drawConn(ctx, landmarks, conn, {
+        color: accentColor,
+        lineWidth: 3
+      });
+      if (drawLms) {
+        drawLms(ctx, landmarks, {
+          color: '#FFFFFF',
+          fillColor: accentColor,
+          lineWidth: 1,
+          radius: 4
+        });
+      }
+    }
+    ctx.restore();
+
+    // Draw HUD card
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(16, 16, 310, 145, 14);
+    } else {
+      ctx.rect(16, 16, 310, 145);
+    }
+    ctx.fill();
+
+    const detectedAdavu = identifyDanceAdavu(result?.stanceName, currentMudraName);
+
+    ctx.fillStyle = accentColor;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(`✨ ${detectedAdavu}: ${result?.score || 0}%`, 28, 42);
+
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = '13px sans-serif';
+    if (currentMudraName) {
+      ctx.fillText(`✋ Hand Mudra: ${currentMudraName.charAt(0).toUpperCase() + currentMudraName.slice(1)}`, 28, 66);
+    } else {
+      ctx.fillText(`🧘 Stance: ${result?.stanceName || 'Detecting...'}`, 28, 66);
+    }
+
+    if (result?.kneeAngles && result.kneeAngles.left !== null) {
+      ctx.fillText(`🦵 Knees: L ${result.kneeAngles.left}° | R ${result.kneeAngles.right}°`, 28, 88);
+      ctx.fillText(`📐 Torso Tilt: ${result.torsoTilt || 0}°`, 28, 106);
+    } else if (result?.evaluationTier === 'UPPER_BODY') {
+      ctx.fillText(`Upper Body Mode — Torso Tilt: ${result?.torsoTilt || 0}°`, 28, 88);
+      ctx.fillText(`Step back for full leg tracking`, 28, 106);
+    } else {
+      ctx.fillText(`Stance Evaluation Active`, 28, 88);
+      ctx.fillText(`Step back 6–8 ft from camera`, 28, 106);
+    }
+
+    ctx.fillStyle = isGreen ? '#86EFAC' : '#FCA5A5';
+    ctx.font = '12px sans-serif';
+    const tip = (result?.feedback && result.feedback[0]) || 'Good posture';
+    ctx.fillText(tip.length > 38 ? tip.substring(0, 36) + '...' : tip, 28, 128);
+  } catch (err) {
+    console.warn('[HUD Render Error]:', err);
+  } finally {
+    ctx.restore();
   }
-  ctx.restore();
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(16, 16, 280, 130, 12);
-  } else {
-    ctx.rect(16, 16, 280, 130);
-  }
-  ctx.fill();
-
-  ctx.fillStyle = accentColor;
-  ctx.font = 'bold 16px sans-serif';
-  ctx.fillText(`${result.stanceName}: ${result.score}%`, 28, 42);
-
-  ctx.fillStyle = '#E2E8F0';
-  ctx.font = '13px sans-serif';
-  if (result.kneeAngles && result.kneeAngles.left !== null) {
-    ctx.fillText(`Knees: L ${result.kneeAngles.left}° | R ${result.kneeAngles.right}°`, 28, 68);
-    ctx.fillText(`Torso Tilt: ${result.torsoTilt}°`, 28, 88);
-  } else if (result.evaluationTier === 'UPPER_BODY') {
-    ctx.fillText(`Upper Body Mode — Torso Tilt: ${result.torsoTilt}°`, 28, 68);
-    ctx.fillText(`Framing too close for leg tracking`, 28, 88);
-  } else {
-    ctx.fillText(`⚠️ Framing Warning: Legs Out of Frame`, 28, 68);
-    ctx.fillText(`Please step back so full body is visible`, 28, 88);
-  }
-
-  ctx.fillStyle = isGreen ? '#86EFAC' : '#FCA5A5';
-  ctx.font = '12px sans-serif';
-  const tip = (result.feedback && result.feedback[0]) || 'Good posture';
-  ctx.fillText(tip.length > 38 ? tip.substring(0, 36) + '...' : tip, 28, 115);
-
-  ctx.restore();
 }
 
 const StudentLiveClass = () => {
@@ -204,8 +272,16 @@ const StudentLiveClass = () => {
   // NEW: track last offer handshake to prevent duplicates
   const lastHandshakeTimeRef = useRef(0);
 
+  const sendingPoseRef = useRef(false);
+  const sendingHandsRef = useRef(false);
+  const poseCrashedRef = useRef(false);
+  const handsCrashedRef = useRef(false);
+  const lastPoseSendTimeRef = useRef(0);
+  const lastHandsSendTimeRef = useRef(0);
+
   const detectedMudraRef = useRef('');
   const aiScoreRef = useRef(0);
+  const handScoreRef = useRef(0);
   const sessionStatusRef = useRef('Incorrect');
   const consecutiveRef = useRef({ name: null, count: 0 });
   const preStabilityRef = useRef({ name: null, count: 0 });
@@ -262,8 +338,8 @@ const StudentLiveClass = () => {
     // Close any existing stale connection
     const currentPC = peerConnectionRef.current;
     if (currentPC) {
-      if ((currentPC.iceConnectionState === 'connected' || currentPC.iceConnectionState === 'completed') && currentPC.signalingState === 'stable') {
-        console.log('[WebRTC Student] Already connected and stable — ignoring redundant offer');
+      if ((currentPC.iceConnectionState === 'connected' || currentPC.iceConnectionState === 'completed' || currentPC.iceConnectionState === 'checking') && currentPC.signalingState === 'stable') {
+        console.log('[WebRTC Student] Already connected/negotiating and stable — ignoring redundant offer');
         return;
       }
       // Detach handlers before closing to prevent stale events
@@ -283,28 +359,34 @@ const StudentLiveClass = () => {
 
     pc.ontrack = (event) => {
       console.log("🎧 Teacher stream received");
-      const remoteStream = event.streams[0];
+      const remoteStream = event.streams[0] || new MediaStream([event.track]);
 
-      console.log("🎧 Tracks from teacher:");
-      if (remoteStream) {
-        remoteStream.getTracks().forEach(t => {
-          console.log(`[Remote Track] ${t.kind}: ${t.enabled} (${t.readyState})`);
-        });
-
-        if (remoteVideoRef.current) {
+      if (remoteVideoRef.current) {
+        if (remoteVideoRef.current.srcObject !== remoteStream) {
           remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.muted = false;
-          remoteVideoRef.current.volume = 1.0;
+        }
 
-          remoteVideoRef.current.onloadedmetadata = () => {
+        const startPlayback = async () => {
+          try {
+            await remoteVideoRef.current.play();
+            setTeacherConnected(true);
+          } catch (playErr) {
+            console.warn("Audio autoplay blocked by browser policy; falling back to muted play:", playErr);
             if (remoteVideoRef.current) {
-              remoteVideoRef.current.play().catch(err => {
-                console.warn("Autoplay blocked:", err);
-              });
+              remoteVideoRef.current.muted = true;
+              await remoteVideoRef.current.play().catch(e => console.error("Video play failed:", e));
             }
+            setTeacherConnected(true);
+          }
+        };
+
+        if (remoteVideoRef.current.readyState >= 2) {
+          startPlayback();
+        } else {
+          remoteVideoRef.current.onloadedmetadata = () => {
+            startPlayback();
           };
         }
-        setTeacherConnected(true);
       }
     };
 
@@ -370,10 +452,19 @@ const StudentLiveClass = () => {
         // correctly reuse the offer's recvonly transceivers
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => {
-            pc.addTrack(track, streamRef.current);
-            console.log('[WebRTC Student] Adding local track to PC:', track.kind);
+            const senders = pc.getSenders();
+            if (!senders.some(s => s.track === track)) {
+              pc.addTrack(track, streamRef.current);
+              console.log('[WebRTC Student] Adding local track to PC:', track.kind);
+            }
           });
         }
+
+        ['video', 'audio'].forEach(kind => {
+          if (!pc.getTransceivers().some(t => t.receiver.track?.kind === kind)) {
+            pc.addTransceiver(kind, { direction: 'recvonly' });
+          }
+        });
 
         lastHandshakeTimeRef.current = Date.now();
         const answer = await pc.createAnswer();
@@ -451,14 +542,19 @@ const StudentLiveClass = () => {
           const t = data.target || data.mudra;
           setClassData(prev => prev ? { ...prev, targetMudra: t } : prev);
           targetMudraRef.current = t;
-          if (isStanceTarget(t)) {
-            setEvaluationMode('FULL_BODY_STANCE');
-            evaluationModeRef.current = 'FULL_BODY_STANCE';
+          if (evaluationModeRef.current !== 'FULL_SUITE') {
+            if (isStanceTarget(t)) {
+              setEvaluationMode('FULL_BODY_STANCE');
+              evaluationModeRef.current = 'FULL_BODY_STANCE';
+              setTargetStance(t);
+              targetStanceRef.current = t;
+            } else {
+              setEvaluationMode('FULL_BODY_MUDRA');
+              evaluationModeRef.current = 'FULL_BODY_MUDRA';
+            }
+          } else if (isStanceTarget(t)) {
             setTargetStance(t);
             targetStanceRef.current = t;
-          } else {
-            setEvaluationMode('FULL_BODY_MUDRA');
-            evaluationModeRef.current = 'FULL_BODY_MUDRA';
           }
           if (isVoiceEnabledRef.current && t) {
             const inst = getInstruction(t);
@@ -476,14 +572,19 @@ const StudentLiveClass = () => {
             targetMudraRef.current = newMudra;
             setTargetMudra(newMudra);
 
-            if (isStanceTarget(newMudra)) {
-              setEvaluationMode('FULL_BODY_STANCE');
-              evaluationModeRef.current = 'FULL_BODY_STANCE';
+            if (evaluationModeRef.current !== 'FULL_SUITE') {
+              if (isStanceTarget(newMudra)) {
+                setEvaluationMode('FULL_BODY_STANCE');
+                evaluationModeRef.current = 'FULL_BODY_STANCE';
+                setTargetStance(newMudra);
+                targetStanceRef.current = newMudra;
+              } else {
+                setEvaluationMode('FULL_BODY_MUDRA');
+                evaluationModeRef.current = 'FULL_BODY_MUDRA';
+              }
+            } else if (isStanceTarget(newMudra)) {
               setTargetStance(newMudra);
               targetStanceRef.current = newMudra;
-            } else {
-              setEvaluationMode('FULL_BODY_MUDRA');
-              evaluationModeRef.current = 'FULL_BODY_MUDRA';
             }
 
             // --- GURU SYNC: CLEAR BUFFERS ON MUDRA CHANGE ---
@@ -491,6 +592,7 @@ const StudentLiveClass = () => {
             detectedMudraRef.current = '';
             setAiScore(0);
             aiScoreRef.current = 0;
+            handScoreRef.current = 0;
             frameBufferRef.current = [];
             smoothedScoreRef.current = 0;
             consecutiveRef.current = { name: null, count: 0 };
@@ -538,9 +640,9 @@ const StudentLiveClass = () => {
             stanceName: data.targetStance || targetStanceRef.current || 'Araimandi Stance',
             score: 0,
             isAligned: false,
-            isVisible: false,
-            visibilityIssue: 'GENERAL_OUT_OF_FRAME',
-            feedback: ['Full body not detected. Step back so your entire body is visible.']
+            isVisible: true,
+            visibilityIssue: null,
+            feedback: ['Aligning camera and stance...']
           });
           stanceScoreBufferRef.current = [];
           framingIssueStartRef.current = null;
@@ -592,8 +694,11 @@ const StudentLiveClass = () => {
         // FIX F: request offer on page load — will be stored as pending if camera not ready yet
         // This handles the case where teacher is already broadcasting when student opens the page
         setTimeout(() => {
-          console.log('[WebRTC Student] Requesting initial offer (camera may not be ready — will pend)');
-          sock.emit('request_webrtc_offer', { classId: classId });
+          const pc = peerConnectionRef.current;
+          if (!pc || (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed' && pc.iceConnectionState !== 'checking')) {
+            console.log('[WebRTC Student] Requesting initial offer (not yet connected)');
+            sock.emit('request_webrtc_offer', { classId: classId });
+          }
         }, 2000);
 
       } catch (err) {
@@ -624,31 +729,38 @@ const StudentLiveClass = () => {
   useEffect(() => {
     let active = true;
     const init = async () => {
+      // 🛡️ GUARD: If already initialized, DO NOT create another instance!
+      if (poseRef.current && handsRef.current) {
+        return;
+      }
       try {
+        console.log('[MediaPipe] Starting script loaders...');
         const mpHands = await loadMediaPipeScripts();
         const mpPose = await loadMediaPipePoseScripts();
         if (!active) return;
 
         Hands = mpHands.Hands;
         HAND_CONNECTIONS = mpHands.HAND_CONNECTIONS;
-        drawConnectors = mpHands.drawConnectors;
-        drawLandmarks = mpHands.drawLandmarks;
+        drawConnectors = mpHands.drawConnectors || mpPose.drawConnectors;
+        drawLandmarks = mpHands.drawLandmarks || mpPose.drawLandmarks;
         Pose = mpPose.Pose;
         POSE_CONNECTIONS = mpPose.POSE_CONNECTIONS;
 
-        console.log('[MediaPipe] Hands & Pose scripts loaded successfully in StudentLiveClass');
+        console.log('✅ [MediaPipe] Hands & Pose scripts loaded successfully');
 
         // Initialize Hands
-        handsRef.current = new Hands({
-          locateFile: (file) => safeLocateFile('hands', file)
-        });
+        if (!handsRef.current && Hands) {
+          handsRef.current = new Hands({
+            locateFile: (file) => safeLocateFile('hands', file)
+          });
         handsRef.current.setOptions({
           maxNumHands: 2, modelComplexity: 1,
           minDetectionConfidence: 0.6, minTrackingConfidence: 0.6
         });
         handsRef.current.onResults((results) => {
-          // If in stance mode, let poseRef handle canvas drawing completely
-          if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+          sendingHandsRef.current = false;
+          // If in stance mode OR combined suite, let poseRef handle canvas drawing completely
+          if (evaluationModeRef.current === 'FULL_BODY_STANCE' || evaluationModeRef.current === 'FULL_SUITE') {
             return;
           }
 
@@ -658,7 +770,9 @@ const StudentLiveClass = () => {
           const ctx = canvas.getContext('2d');
           ctx.save();
           ctx.scale(-1, 1);
-          ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
+          if (evaluationModeRef.current !== 'FULL_SUITE') {
+            ctx.clearRect(-canvas.width, 0, canvas.width, canvas.height);
+          }
 
           const rawHList = results.multiHandLandmarks || [];
           const rawHness = results.multiHandedness || [];
@@ -722,9 +836,10 @@ const StudentLiveClass = () => {
 
           ctx.restore();
         });
+      }
 
         // Initialize Pose (Full Body Skeleton & Stance Classifier)
-        if (Pose) {
+        if (!poseRef.current && Pose) {
           poseRef.current = new Pose({
             locateFile: (file) => safeLocateFile('pose', file)
           });
@@ -733,69 +848,74 @@ const StudentLiveClass = () => {
             minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
           });
           poseRef.current.onResults((results) => {
+            sendingPoseRef.current = false;
             const poseLms = results ? results.poseLandmarks : null;
             const hasValidPose = poseLms && poseLms.length >= 23;
 
-            if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+            if (evaluationModeRef.current === 'FULL_BODY_STANCE' || evaluationModeRef.current === 'FULL_SUITE' || activeModulesRef.current.pose) {
               poseLandmarksRef.current = hasValidPose ? poseLms : null;
 
-              const rawResult = evaluateFullBodyStance(hasValidPose ? poseLms : null, targetStanceRef.current);
+              const activeStanceTarget = targetStanceRef.current || targetMudraRef.current || 'Araimandi Stance';
+              const rawResult = evaluateFullBodyStance(hasValidPose ? poseLms : null, activeStanceTarget);
 
-              if (!rawResult.isVisible) {
-                stanceScoreBufferRef.current = [0];
-              } else {
+              if (rawResult.isVisible && rawResult.score > 0) {
                 stanceScoreBufferRef.current.push(rawResult.score);
                 if (stanceScoreBufferRef.current.length > 6) {
                   stanceScoreBufferRef.current.shift();
                 }
+              } else {
+                stanceScoreBufferRef.current = [];
               }
 
               const smoothedScore = rawResult.isVisible
-                ? Math.round(stanceScoreBufferRef.current.reduce((a, b) => a + b, 0) / stanceScoreBufferRef.current.length)
+                ? (stanceScoreBufferRef.current.length > 0
+                    ? Math.round(stanceScoreBufferRef.current.reduce((a, b) => a + b, 0) / stanceScoreBufferRef.current.length)
+                    : rawResult.score)
                 : 0;
 
               const finalizedResult = { ...rawResult, score: smoothedScore };
               setStanceResult(finalizedResult);
-              setAiScore(finalizedResult.score);
-              aiScoreRef.current = finalizedResult.score;
 
-              if (finalizedResult.score > bestScoreRef.current) {
-                bestScoreRef.current = finalizedResult.score;
-                setBestScore(finalizedResult.score);
-                bestMudraRef.current = finalizedResult.stanceName || targetStanceRef.current || 'Araimandi Stance';
+              // Set score: strictly 0 if not full body
+              const effectiveScore = finalizedResult.isVisible ? finalizedResult.score : 0;
+              aiScoreRef.current = effectiveScore;
+              setAiScore(effectiveScore);
+
+              if (effectiveScore > bestScoreRef.current) {
+                bestScoreRef.current = effectiveScore;
+                setBestScore(effectiveScore);
+                bestMudraRef.current = finalizedResult.stanceName || 'Araimandi Stance';
               }
 
               if (finalizedResult.feedback && finalizedResult.feedback.length > 0) {
                 setFeedback(finalizedResult.feedback[0]);
               } else {
-                setFeedback(`${finalizedResult.stanceName}: ${finalizedResult.score}%`);
+                setFeedback(`${finalizedResult.stanceName}: ${effectiveScore}%`);
               }
 
+              // Draw skeleton and HUD only if full body is visible
               const canvas = canvasRef.current;
               if (canvas) {
                 const ctx = canvas.getContext('2d');
-                drawStanceSkeletonAndHUD(ctx, hasValidPose ? poseLms : null, finalizedResult);
+                if (finalizedResult.isVisible) {
+                  drawStanceSkeletonAndHUD(ctx, poseLms, finalizedResult, detectedMudraRef.current);
+                } else {
+                  ctx.setTransform(1, 0, 0, 1, 0, 0);
+                  ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
               }
 
               const now = Date.now();
 
-              // --- FRAMING WARNING TOAST ENGINE (PERSISTENT WHILE OUT OF FRAME WITH HYSTERESIS) ---
-              const isFramingIssue = !hasValidPose || finalizedResult.isVisible === false || finalizedResult.evaluationTier === 'UPPER_BODY' || finalizedResult.visibilityIssue !== null;
+              // --- FRAMING WARNING TOAST ENGINE ---
+              const isFramingIssue = !hasValidPose || finalizedResult.isVisible === false || effectiveScore === 0;
               if (isFramingIssue) {
                 framingClearStartRef.current = null;
                 if (framingIssueStartRef.current === null) {
                   framingIssueStartRef.current = now;
                 }
-                
-                let alertMsg = "Please step back — your feet and legs are out of frame.";
-                if (!hasValidPose || finalizedResult.visibilityIssue === 'GENERAL_OUT_OF_FRAME') {
-                  alertMsg = "Please step back — full body must be visible in camera.";
-                } else if (finalizedResult.visibilityIssue === 'UPPER_BODY_MISSING') {
-                  alertMsg = "Please adjust camera — your upper body is out of frame.";
-                } else if (finalizedResult.visibilityIssue === 'FEET_MISSING' || finalizedResult.evaluationTier === 'UPPER_BODY') {
-                  alertMsg = "Please step back — your feet and legs are out of frame.";
-                }
 
+                const alertMsg = finalizedResult?.feedback?.[0] || "Full body not detected. Step back so your entire body is visible.";
                 setToastType('wrong');
                 setToastData({
                   name: "⚠️ Framing Warning",
@@ -817,31 +937,25 @@ const StudentLiveClass = () => {
                   }
                 }
               } else {
-                if (framingClearStartRef.current === null) {
-                  framingClearStartRef.current = now;
-                }
-                if (now - framingClearStartRef.current >= 1500) {
-                  if (framingIssueStartRef.current !== null) {
-                    framingIssueStartRef.current = null;
-                    framingClearStartRef.current = null;
-                    setShowMudraToast(false);
-                  }
-                }
+                framingIssueStartRef.current = null;
+                framingClearStartRef.current = null;
+                setShowMudraToast(false);
               }
 
-              if (now - lastPostureEmitRef.current >= 500) {
+              if (now - lastPostureEmitRef.current >= 400) {
                 lastPostureEmitRef.current = now;
                 const socket = socketRef.current;
                 if (socket && socket.connected) {
                   socket.emit('student_posture_metric', {
                     classId,
                     studentId: user?._id || user?.id || 'unknown',
+                    socketId: socket.id,
                     studentName: user?.name || 'Student',
                     timestamp: new Date().toISOString(),
-                    evaluationMode: 'FULL_BODY_STANCE',
-                    evaluationTier: finalizedResult.evaluationTier || 'FULL_BODY',
+                    evaluationMode: evaluationModeRef.current,
+                    evaluationTier: finalizedResult.isVisible ? 'FULL_BODY' : null,
                     stance: finalizedResult.stanceName,
-                    score: finalizedResult.score,
+                    score: effectiveScore,
                     feedback: finalizedResult.feedback,
                     kneeAngles: finalizedResult.kneeAngles,
                     torsoTilt: finalizedResult.torsoTilt,
@@ -850,12 +964,15 @@ const StudentLiveClass = () => {
                   socket.emit('student_performance_update', {
                     classId: classId,
                     studentId: user?.id || user?._id || 'unknown',
+                    socketId: socket.id,
                     studentName: user?.name || 'Student',
                     mudra: finalizedResult.stanceName,
-                    score: finalizedResult.score,
-                    status: finalizedResult.score >= 75 ? 'Good' : 'Practicing',
-                    landmarks: poseLms || null,
-                    frame: null
+                    score: effectiveScore,
+                    postureScore: effectiveScore,
+                    status: effectiveScore >= 70 ? 'Good' : (finalizedResult.isVisible ? 'Practicing' : 'Framing Warning'),
+                    landmarks: finalizedResult.isVisible ? poseLms : null,
+                    poseLandmarks: finalizedResult.isVisible ? poseLms : null,
+                    frame: captureFrame()
                   });
                 }
               }
@@ -932,7 +1049,7 @@ const StudentLiveClass = () => {
                 if (framingIssueStartRef.current === null) {
                   framingIssueStartRef.current = now;
                 }
-                
+
                 const alertMsg = "Please step back — you are framed too close to the camera.";
                 setToastType('wrong');
                 setToastData({
@@ -970,6 +1087,23 @@ const StudentLiveClass = () => {
             }
           });
         }
+
+        if (handsRef.current) {
+          try {
+            await handsRef.current.initialize();
+            console.log('✅ [MediaPipe] Hands WASM pre-warmed');
+          } catch (e) {
+            console.warn('[MediaPipe] Hands initialize warning:', e);
+          }
+        }
+        if (poseRef.current) {
+          try {
+            await poseRef.current.initialize();
+            console.log('✅ [MediaPipe] Pose WASM pre-warmed');
+          } catch (e) {
+            console.warn('[MediaPipe] Pose initialize warning:', e);
+          }
+        }
       } catch (err) {
         console.error('[MediaPipe] Initialization failed:', err);
       }
@@ -979,10 +1113,9 @@ const StudentLiveClass = () => {
 
     return () => {
       active = false;
-      handsRef.current?.close();
-      poseRef.current?.close();
+      // Don't close instances on minor state re-renders, close only when navigating away
     };
-  }, [announce]);
+  }, [classId]);
 
   // ── 3. Webcam control ──────────────────────────────────────
   const stopWebcam = useCallback(() => {
@@ -995,15 +1128,33 @@ const StudentLiveClass = () => {
 
   const startWebcam = useCallback(async () => {
     setCameraError('');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 1.7777777778 }, facingMode: 'user' },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
+    let stream = null;
 
+    try {
+      // Primary attempt with ideal constraints
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+    } catch (err1) {
+      console.warn('[Webcam] Ideal constraints failed, trying basic constraints:', err1.message);
+      try {
+        // Fallback attempt: simple video + audio
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch (err2) {
+        console.warn('[Webcam] Video+audio fallback failed, trying video-only:', err2.message);
+        try {
+          // Fallback attempt: video only
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        } catch (err3) {
+          setCameraError('Camera error: ' + (err3.message || err1.message || 'Could not access webcam'));
+          setSessionStarted(false);
+          return;
+        }
+      }
+    }
+
+    try {
       // --- AUDIO AUDIT: Verify Mic Capture ---
       const audioTracks = stream.getAudioTracks();
       if (audioTracks.length > 0) {
@@ -1081,30 +1232,72 @@ const StudentLiveClass = () => {
     return () => clearInterval(interval);
   }, [webcamActive, sessionStarted]);
 
-  const processFrame = useCallback(async () => {
+  const processFrame = useCallback(() => {
     if (!videoRef.current || videoRef.current.readyState < 2 || !videoRef.current.videoWidth || !videoRef.current.videoHeight) {
       requestRef.current = requestAnimationFrame(processFrame);
       return;
     }
+
+    if (canvasRef.current && videoRef.current) {
+      if (canvasRef.current.width !== videoRef.current.videoWidth && videoRef.current.videoWidth > 0) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+      }
+    }
+
     try {
       const mode = evaluationModeRef.current;
+      const now = Date.now();
+
+      const sendHandsFrame = () => {
+        if (handsRef.current && !handsCrashedRef.current && !sendingHandsRef.current && (now - lastHandsSendTimeRef.current >= 60)) {
+          sendingHandsRef.current = true;
+          lastHandsSendTimeRef.current = now;
+          handsRef.current.send({ image: videoRef.current })
+            .catch((err) => {
+              console.warn('[MediaPipe Hands] Send error:', err?.message || err);
+              if (err?.message && String(err.message).includes('Aborted')) {
+                handsCrashedRef.current = true;
+              }
+            })
+            .finally(() => {
+              sendingHandsRef.current = false;
+            });
+        }
+      };
+
+      const sendPoseFrame = () => {
+        if (poseRef.current && !poseCrashedRef.current && !sendingPoseRef.current && (now - lastPoseSendTimeRef.current >= 60)) {
+          sendingPoseRef.current = true;
+          lastPoseSendTimeRef.current = now;
+          poseRef.current.send({ image: videoRef.current })
+            .catch((err) => {
+              console.warn('[MediaPipe Pose] Send error:', err?.message || err);
+              if (err?.message && String(err.message).includes('Aborted')) {
+                poseCrashedRef.current = true;
+              }
+            })
+            .finally(() => {
+              sendingPoseRef.current = false;
+            });
+        }
+      };
 
       if (mode === 'FULL_BODY_STANCE') {
-        // Mode 3: Full Body Stance (Pose AI only, Hand Detection OFF)
-        if (poseRef.current) {
-          await poseRef.current.send({ image: videoRef.current });
-        }
+        sendPoseFrame();
+      } else if (mode === 'FULL_SUITE') {
+        sendHandsFrame();
+        sendPoseFrame();
       } else {
-        // Mode 1, 2, 4 & default: Send to Hands AI (if active) AND Pose AI (for framing checks)
-        if (handsRef.current && activeModulesRef.current.mudra) {
-          await handsRef.current.send({ image: videoRef.current });
+        if (activeModulesRef.current.mudra) {
+          sendHandsFrame();
         }
-        if (poseRef.current) {
-          await poseRef.current.send({ image: videoRef.current });
-        }
+        sendPoseFrame();
       }
     } catch (err) {
-      console.warn('[Frame Processing] MediaPipe frame error:', err);
+      console.warn('[Frame Processing Error]:', err);
+      sendingPoseRef.current = false;
+      sendingHandsRef.current = false;
     }
     frameCountRef.current++;
     if (frameCountRef.current % 5 === 0 && !isDetectingRef.current) {
@@ -1124,8 +1317,8 @@ const StudentLiveClass = () => {
   }, []);
 
   const runDetection = async () => {
-    if (evaluationModeRef.current === 'FULL_BODY_STANCE' || framingIssueStartRef.current !== null) {
-      // Full Body Stance / Active Framing Warning — handled directly by MediaPipe Pose onResults
+    if (evaluationModeRef.current === 'FULL_BODY_STANCE') {
+      // Full Body Stance mode — handled directly by MediaPipe Pose onResults
       return;
     }
 
@@ -1134,6 +1327,12 @@ const StudentLiveClass = () => {
     const socket = socketRef.current;
 
     if (!lmData) {
+      if (evaluationModeRef.current === 'FULL_SUITE' || evaluationModeRef.current === 'FULL_BODY_MUDRA' || isStanceTargetActive) {
+        // When performing full body dance stance, hands are 6-8 ft from camera —
+        // do not wipe out the posture stance score or emit score: 0!
+        return;
+      }
+
       setSessionStatus('No Hand');
       sessionStatusRef.current = 'No Hand';
       setFeedback('Show your hand to the camera');
@@ -1146,6 +1345,7 @@ const StudentLiveClass = () => {
       // frameBuffer and smoothing are cleared to ensure no "legacy" score leaks back
       frameBufferRef.current = [];
       smoothedScoreRef.current = 0;
+      handScoreRef.current = 0;
 
       if (socket && socket.connected) {
         socket.emit('student_performance_update', {
@@ -1254,6 +1454,7 @@ const StudentLiveClass = () => {
         // RESET EVERYTHING IMMEDIATELY
         setAiScore(0);
         aiScoreRef.current = 0;
+        handScoreRef.current = 0;
         smoothedScoreRef.current = 0;
         frameBufferRef.current = [];
 
@@ -1337,8 +1538,15 @@ const StudentLiveClass = () => {
         // 🚨 STEP 5: FINAL SCORE SET (WITH HOLD)
         setDetectedMudra(detectedName);
         detectedMudraRef.current = detectedName;
-        setAiScore(finalScore);
-        aiScoreRef.current = finalScore;
+        handScoreRef.current = finalScore;
+        
+        let effectiveScore = finalScore;
+        if (evaluationModeRef.current === 'FULL_SUITE') {
+          const stanceVal = stanceResult?.score || 0;
+          effectiveScore = stanceVal > 0 ? Math.round(0.5 * finalScore + 0.5 * stanceVal) : finalScore;
+        }
+        setAiScore(effectiveScore);
+        aiScoreRef.current = effectiveScore;
         setSessionStatus(finalScore >= 75 ? 'Correct' : 'Incorrect');
         sessionStatusRef.current = finalScore >= 75 ? 'Correct' : 'Incorrect';
         setFeedback(finalScore >= 90 ? '✓ Correct! Perfect form.' : 'Good! Keep holding...');
@@ -1385,6 +1593,7 @@ const StudentLiveClass = () => {
         holdTimerRef.current = setTimeout(() => {
           setAiScore(0);
           aiScoreRef.current = 0;
+          handScoreRef.current = 0;
           setDetectedMudra('');
           detectedMudraRef.current = '';
         }, 1500);
@@ -1398,18 +1607,26 @@ const StudentLiveClass = () => {
       }
 
       if (socket && socket.connected) {
+        const emittedScore = evaluationModeRef.current === 'FULL_BODY_STANCE'
+          ? (stanceResult?.score || 0)
+          : (aiScoreRef.current || 0);
+
+        const emittedLabel = evaluationModeRef.current === 'FULL_BODY_STANCE'
+          ? (targetStanceRef.current || stanceResult?.stanceName || 'Stance')
+          : (detectedMudraRef.current || targetMudraRef.current || 'Mudra');
+
         socket.emit('student_performance_update', {
           classId: classId,
           studentId: user?.id || user?._id || 'unknown',
           studentName: user?.name || 'Student',
-          mudra: detectedMudraRef.current || poseEvaluationRef.current?.stanceName || 'Practicing',
-          score: aiScoreRef.current || poseEvaluationRef.current?.totalScore || 0,
+          mudra: emittedLabel,
+          score: emittedScore,
           status: sessionStatusRef.current,
           landmarks: lmData?.landmarks || null,
           poseLandmarks: poseLandmarksRef.current || null,
-          stanceName: poseEvaluationRef.current?.stanceName || 'Araimandi Stance',
-          postureScore: poseEvaluationRef.current?.totalScore || 0,
-          corrections: poseEvaluationRef.current?.feedbacks || [],
+          stanceName: stanceResult?.stanceName || poseEvaluationRef.current?.stanceName || 'Araimandi Stance',
+          postureScore: stanceResult?.score || poseEvaluationRef.current?.totalScore || 0,
+          corrections: stanceResult?.feedback || poseEvaluationRef.current?.feedbacks || [],
           frame: captureFrame()
         });
       }
@@ -1692,8 +1909,8 @@ const StudentLiveClass = () => {
               setIsVoiceEnabled(!isVoiceEnabled);
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${isVoiceEnabled
-                ? 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
-                : 'bg-slate-100 border-slate-200 text-slate-400 hover:bg-slate-200'
+              ? 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
+              : 'bg-slate-100 border-slate-200 text-slate-400 hover:bg-slate-200'
               }`}
             title={isVoiceEnabled ? 'Mute Voice Guide' : 'Enable Voice Guide'}
           >
@@ -1742,8 +1959,22 @@ const StudentLiveClass = () => {
               className="absolute inset-0 w-full h-full pointer-events-none z-10"
               width={1280} height={720} />
 
-            {/* MUDRA CHANGE TOAST OVERLAY */}
-            {showMudraToast && (
+            {/* DEDICATED FRAMING ALERT MODAL FOR STANCE & COMBINED MODES */}
+            {(evaluationMode === 'FULL_BODY_STANCE' || evaluationMode === 'FULL_SUITE') && stanceResult && stanceResult.isVisible === false && stanceResult.score === 0 ? (
+              <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none animate-in fade-in zoom-in duration-300">
+                <div className="px-8 py-6 rounded-[32px] backdrop-blur-2xl shadow-2xl border border-red-400/40 bg-red-600/90 text-center flex flex-col items-center gap-2 max-w-sm">
+                  <span className="text-[10px] font-black uppercase tracking-[5px] text-white/80">ALERT</span>
+                  <h2 className="text-3xl font-black text-white flex items-center gap-2">
+                    <AlertTriangle className="w-8 h-8 text-yellow-300 flex-shrink-0" />
+                    Framing Warning
+                  </h2>
+                  <div className="h-[1px] w-20 bg-white/30 my-1" />
+                  <p className="text-sm font-bold text-white/95 leading-relaxed italic">
+                    {stanceResult?.feedback?.[0] || "Please step back — your feet and legs are out of frame."}
+                  </p>
+                </div>
+              </div>
+            ) : showMudraToast && !toastData?.name?.includes('Framing Warning') && (
               <div className="absolute inset-0 flex items-center justify-center z-[100] pointer-events-none animate-in fade-in zoom-in duration-500">
                 <div className="px-8 py-6 rounded-[32px] backdrop-blur-2xl shadow-2xl border border-white/40 flex flex-col items-center gap-2 text-center"
                   style={{
@@ -1808,7 +2039,11 @@ const StudentLiveClass = () => {
               {/* Manual Mode Switcher */}
               <button
                 onClick={() => {
-                  const nextMode = evaluationMode === 'FULL_BODY_STANCE' ? 'FULL_BODY_MUDRA' : 'FULL_BODY_STANCE';
+                  const nextMode = evaluationMode === 'FULL_SUITE'
+                    ? 'FULL_BODY_MUDRA'
+                    : evaluationMode === 'FULL_BODY_MUDRA'
+                      ? 'FULL_BODY_STANCE'
+                      : 'FULL_SUITE';
                   setEvaluationMode(nextMode);
                   evaluationModeRef.current = nextMode;
                   if (toastTimerRef.current) {
@@ -1820,12 +2055,16 @@ const StudentLiveClass = () => {
                   lastFramingToastTimeRef.current = 0;
                   stanceScoreBufferRef.current = [];
                   setShowMudraToast(false);
-                  setFeedback(nextMode === 'FULL_BODY_STANCE' ? 'Evaluating posture...' : 'Show your hand to the camera');
+                  setFeedback(nextMode === 'FULL_SUITE' ? 'Evaluating Combined Dance Suite…' : nextMode === 'FULL_BODY_STANCE' ? 'Evaluating posture…' : 'Show your hand to the camera');
                 }}
                 className="px-3.5 py-2.5 rounded-2xl backdrop-blur-md border bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all shadow-lg shadow-violet-500/20"
                 title="Switch Evaluation Mode"
               >
-                {evaluationMode === 'FULL_BODY_STANCE' ? '🧘 Stance Active' : '✋ Hand Mode'}
+                {evaluationMode === 'FULL_SUITE'
+                  ? '✨ Combined Suite (Full Body + Mudra)'
+                  : evaluationMode === 'FULL_BODY_STANCE'
+                    ? '🧘 Stance Mode (Pose Only)'
+                    : '✋ Hand Mode (Mudra Only)'}
               </button>
 
               {/* Refresh Camera Button */}
@@ -1888,7 +2127,12 @@ const StudentLiveClass = () => {
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                controls={false}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.currentTarget.muted = false;
+                  e.currentTarget.play().catch(console.warn);
+                }}
               />
               {!teacherConnected && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
@@ -1899,6 +2143,7 @@ const StudentLiveClass = () => {
                   <button
                     onClick={() => {
                       console.log('[Recovery] Manual connection reset');
+                      lastHandshakeTimeRef.current = 0;
                       // Reset local PC state to allow fresh offer processing
                       if (peerConnectionRef.current) {
                         peerConnectionRef.current.close();
@@ -1958,8 +2203,48 @@ const StudentLiveClass = () => {
             </div>
           </div>
 
-          {/* Full Body Stance Mode Widget */}
-          {evaluationMode === 'FULL_BODY_STANCE' ? (
+          {/* Full Body Stance / Combined Suite Widget */}
+          {evaluationMode === 'FULL_SUITE' ? (
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-violet-500/50 text-white space-y-3 shadow-xl">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase tracking-wider text-violet-400">
+                  ✨ Combined Suite Active
+                </span>
+                <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                  Both AI Modules ON
+                </span>
+              </div>
+
+              <div className="space-y-1 border-b border-slate-800 pb-2">
+                <div className="text-[9px] uppercase tracking-widest text-slate-400 font-bold">Detected Dance Adavu</div>
+                <div className="text-base font-black text-violet-300">
+                  {identifyDanceAdavu(stanceResult?.stanceName || targetStance, detectedMudra)}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2 rounded-xl bg-slate-800/80 border border-slate-700">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">Hand Mudra</div>
+                  <div className="text-xs font-black text-violet-300 truncate">
+                    {detectedMudra ? detectedMudra.charAt(0).toUpperCase() + detectedMudra.slice(1) : 'Detecting…'}
+                  </div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-800/80 border border-slate-700">
+                  <div className="text-[8px] uppercase tracking-widest text-slate-400 font-bold">Stance Align</div>
+                  <div className={`text-xs font-black ${stanceResult?.score >= 75 ? 'text-emerald-400' : 'text-orange-400'}`}>
+                    {stanceResult ? `${stanceResult.score}%` : 'Evaluating…'}
+                  </div>
+                </div>
+              </div>
+
+              {stanceResult?.kneeAngles?.left != null && (
+                <div className="text-[11px] text-slate-400 space-y-0.5 border-t border-slate-800 pt-2">
+                  <div>Knee Flexion: L {stanceResult.kneeAngles.left}° | R {stanceResult.kneeAngles.right}°</div>
+                  <div>Torso Tilt: {stanceResult.torsoTilt}°</div>
+                </div>
+              )}
+            </div>
+          ) : evaluationMode === 'FULL_BODY_STANCE' ? (
             <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/40 text-white space-y-3 shadow-lg">
               <div className="flex justify-between items-center">
                 <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
@@ -1976,11 +2261,6 @@ const StudentLiveClass = () => {
                   {stanceResult ? `${stanceResult.score}%` : 'Evaluating...'}
                 </span>
               </div>
-              {stanceResult?.evaluationTier === 'UPPER_BODY' && (
-                <div className="text-[10px] font-bold text-amber-400 border-t border-slate-800 pt-2">
-                  Upper Body Mode — step back for full leg tracking
-                </div>
-              )}
               {stanceResult?.kneeAngles?.left != null && (
                 <div className="text-[11px] text-slate-400 space-y-0.5 border-t border-slate-800 pt-2">
                   <div>Knee Flexion: L {stanceResult.kneeAngles.left}° | R {stanceResult.kneeAngles.right}°</div>
@@ -2065,4 +2345,4 @@ const StudentLiveClass = () => {
   );
 };
 
-export default StudentLiveClass;
+export default StudentLiveClass;

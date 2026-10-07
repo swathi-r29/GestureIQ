@@ -141,5 +141,4 @@ router.post('/modules/:classId', auth, async (req, res) => {
     res.json(activeModules[req.params.classId]);
 });
 
-//>>>>>>> Stashed changes
 module.exports = router;

@@ -15,7 +15,23 @@ const RTC_CONFIG = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-  ]
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 // ── Skeleton overlay for student cards ──────────────────────
@@ -115,20 +131,26 @@ const StudentVideo = ({ stream, name }) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      if (videoRef.current.srcObject !== stream) {
-        console.log('[WebRTC Teacher] Attaching stream to monitor for:', name);
-        videoRef.current.srcObject = stream;
-      }
+    const video = videoRef.current;
+    if (!video || !stream) return;
 
-      // Auto-play the monitor (Audio will play if the browser is 'unlocked' by a user gesture)
-      const playPromise = videoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(err => {
-          console.warn('[WebRTC Teacher] Monitor playback blocked (gesture needed):', name, err);
-        });
-      }
+    if (video.srcObject !== stream) {
+      console.log('[WebRTC Teacher] Attaching stream to monitor for:', name);
+      video.srcObject = stream;
     }
+
+    const tryPlay = () => {
+      video.play().catch(err => {
+        console.warn('[WebRTC] Autoplay waiting for user gesture:', err);
+      });
+    };
+
+    tryPlay();
+
+    stream.onactive = tryPlay;
+    stream.getVideoTracks().forEach(track => {
+      track.onunmute = tryPlay;
+    });
   }, [stream, name]);
 
   return (
@@ -136,16 +158,9 @@ const StudentVideo = ({ stream, name }) => {
       ref={videoRef}
       autoPlay
       playsInline
-      muted={false}
+      muted={true}
       className="w-full h-full object-contain bg-zinc-950"
       style={{ transform: 'scaleX(-1)' }}
-      onLoadedMetadata={() => {
-        console.log('[WebRTC Teacher] Monitor metadata loaded, unmuting audio for:', name);
-        if (videoRef.current) {
-          videoRef.current.muted = false;
-          videoRef.current.play().catch(e => console.warn('[WebRTC Teacher] Play failed for monitor:', name, e));
-        }
-      }}
     />
   );
 };
@@ -433,7 +448,7 @@ const StaffConductClass = () => {
     return pc;
   };
 
-  const handleCreateOffer = async (studentSocketId) => {
+  const handleCreateOffer = async (studentSocketId, force = false) => {
     if (!streamReadyRef.current || !localStreamRef.current) {
       console.warn('[WebRTC Teacher] Stream not ready, skipping offer for:', studentSocketId);
       return;
@@ -442,28 +457,28 @@ const StaffConductClass = () => {
     // NEW GUARD: Rate limit offers (max 1 per 2 seconds per student)
     const now = Date.now();
     const lastTime = lastOfferTimeRef.current.get(studentSocketId) || 0;
-    if (now - lastTime < 2000) {
+    if (!force && (now - lastTime < 2000)) {
       console.warn('[WebRTC Teacher] Signaling rate limit — skipping offer for:', studentSocketId);
       return;
     }
 
     // FIX 7: prevent duplicate simultaneous offers for same student
-    if (offerInProgressRef.current.has(studentSocketId)) {
+    if (!force && offerInProgressRef.current.has(studentSocketId)) {
       console.warn('[WebRTC Teacher] Offer already in progress for:', studentSocketId);
       return;
     }
 
     const pc = peerConnectionsRef.current.get(studentSocketId);
 
-    // GUARD: If already processing a handshake, don't interrupt it
-    if (pc && pc.signalingState !== 'stable') {
+    // GUARD: If already processing a handshake, don't interrupt it unless forced
+    if (!force && pc && pc.signalingState !== 'stable') {
       console.warn('[WebRTC Teacher] signalingState is', pc.signalingState, '— skipping reset for:', studentSocketId);
       return;
     }
 
-    // GUARD: If already connected and stable, skip unless specifically requested
-    if (pc && pc.signalingState === 'stable' && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
-      console.log('[WebRTC Teacher] Connection already stable for:', studentSocketId);
+    // GUARD: If already connected or negotiating and stable, skip unless specifically forced
+    if (!force && pc && pc.signalingState === 'stable' && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
+      console.log('[WebRTC Teacher] Connection already active for:', studentSocketId);
       return;
     }
 
@@ -532,10 +547,14 @@ const StaffConductClass = () => {
       s.on('connect', joinRoom);
       s.on('reconnect', joinRoom);
 
-      await axios.post(
-        `/api/staff/class/${classId}/start`, {},
-        { headers: { 'x-auth-token': token } }
-      );
+      try {
+        await axios.post(
+          `/api/staff/class/${classId}/start`, {},
+          { headers: { 'x-auth-token': token } }
+        );
+      } catch (startErr) {
+        console.warn('[StaffConductClass] Start endpoint non-fatal warning:', startErr.message);
+      }
 
       if (s.connected) {
         s.emit('start_live_session', classId);
@@ -601,17 +620,8 @@ const StaffConductClass = () => {
           return;
         }
 
-        // FIX 9: if we get an answer and we're stable, check if it's a "zombie" connection
         if (pc.signalingState === 'stable') {
-          // If we are stable but don't have tracks OR connection is failed, allow a reset
-          const hasTracks = pc.getReceivers().some(r => r.track && r.track.readyState === 'live');
-          if (!hasTracks || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-            console.log('[WebRTC Teacher] Connection looks stale/zombie — force-restarting for:', studentSocketId);
-            processingAnswerRef.current.delete(studentSocketId);
-            handleCreateOffer(studentSocketId);
-          } else {
-            console.warn('[WebRTC Teacher] Got answer but state is already stable and active — ignoring');
-          }
+          console.warn('[WebRTC Teacher] Got answer but state is already stable — ignoring redundant answer');
           return;
         }
 
@@ -666,11 +676,11 @@ const StaffConductClass = () => {
       //   announce?.raw(`Student AI: ${data.text}`, 2);
       // });
 
-      // Student requests offer (e.g. they refreshed or joined late)
+      // Student requests offer (e.g. they refreshed, joined late, or clicked Fix Connection)
       s.on('request_webrtc_offer', async ({ from }) => {
-        console.log('[WebRTC Teacher] Student requested offer:', from);
+        console.log('[WebRTC Teacher] Student requested offer (forcing fresh offer):', from);
         if (streamReadyRef.current) {
-          handleCreateOffer(from);
+          handleCreateOffer(from, true);
         }
       });
 
@@ -700,12 +710,10 @@ const StaffConductClass = () => {
 
       s.on('student_posture_metric', (data) => {
         if (!data || (!data.studentId && !data.socketId)) return;
+        const pKey = data.studentId || data.socketId;
         setStudentPostures((prev) => ({
           ...prev,
-          [data.studentId]: {
-            ...data,
-            receivedAt: Date.now()
-          }
+          [pKey]: { ...data, receivedAt: Date.now() }
         }));
         setStudents(prev => {
           const sId = data.studentId;
@@ -721,6 +729,7 @@ const StaffConductClass = () => {
             [targetKey]: {
               ...currentStudent,
               score: data.score !== undefined ? data.score : currentStudent.score || 0,
+              postureScore: data.score,
               mudra,
               status,
               lastSeen: Date.now()
@@ -765,7 +774,8 @@ const StaffConductClass = () => {
           status,
           lastSeen: Date.now(),
           frame: data.frame || currentStudent.frame || null,
-          landmarks: data.landmarks || currentStudent.landmarks || null
+          landmarks: data.landmarks !== undefined ? data.landmarks : null,
+          poseLandmarks: data.poseLandmarks !== undefined ? data.poseLandmarks : (data.landmarks && data.landmarks.length >= 33 ? data.landmarks : null)
         }
       };
     });
@@ -804,6 +814,20 @@ const StaffConductClass = () => {
   const handleSelectMode = (modeKey, stanceName = targetStance) => {
     setEvaluationMode(modeKey);
     if (stanceName) setTargetStance(stanceName);
+
+    const updatedModules = { ...activeModules };
+    if (modeKey === 'FULL_BODY_STANCE') {
+      updatedModules.pose = true;
+      // Keep mudra active if set
+    } else if (modeKey === 'FULL_SUITE') {
+      updatedModules.pose = true;
+      updatedModules.mudra = true;
+    } else if (modeKey === 'FULL_BODY_MUDRA') {
+      updatedModules.pose = false;
+      updatedModules.mudra = true;
+    }
+    setActiveModules(updatedModules);
+
     const sock = socketRef.current;
     if (sock && sock.connected) {
       sock.emit('teacher_update_evaluation_mode', {
@@ -811,6 +835,12 @@ const StaffConductClass = () => {
         evaluationMode: modeKey,
         targetStance: stanceName
       });
+      sock.emit('update_class_state', {
+        classId: classId,
+        targetMudra: currentMudra,
+        activeModules: updatedModules
+      });
+      sock.emit('modules_changed', { classId: classId, modules: updatedModules });
     }
   };
 
@@ -1165,8 +1195,8 @@ const StaffConductClass = () => {
                 </span>
               </div>
               <div className="divide-y divide-zinc-800/80 space-y-2">
-                {Object.values(studentPostures).map((st) => (
-                  <div key={st.studentId} className="pt-2 flex items-center justify-between text-xs">
+                {Object.values(studentPostures).map((st, idx) => (
+                  <div key={st.studentId || st.socketId || `st-${idx}`} className="pt-2 flex items-center justify-between text-xs">
                     <div className="space-y-0.5">
                       <span className="font-bold text-zinc-100">{st.studentName}</span>
                       <div className="text-[10px] text-zinc-400 flex gap-2 flex-wrap">
@@ -1200,11 +1230,11 @@ const StaffConductClass = () => {
           {Object.keys(students).length > 0 ? (
             <div className="space-y-6">
               {Object.entries(students).map(([studentId, data], idx) => {
-                const posture = studentPostures[studentId];
+                const posture = studentPostures[studentId] || (data.userId ? studentPostures[data.userId] : null) || (data.socketId ? studentPostures[data.socketId] : null);
                 const mudraScore = data.score || 0;
-                const postureScore = posture?.score;
+                const postureScore = posture?.score ?? data.postureScore;
                 const combinedScore = evaluationMode === 'FULL_BODY_STANCE'
-                  ? (postureScore !== undefined ? postureScore : 0)
+                  ? (postureScore !== undefined ? postureScore : mudraScore)
                   : (postureScore !== undefined && activeModules.pose ? Math.round((mudraScore * 0.5) + (postureScore * 0.5)) : mudraScore);
 
                 return (
@@ -1220,10 +1250,10 @@ const StaffConductClass = () => {
                     }`} />
 
                   <div className="relative aspect-video rounded-2xl bg-black mb-5 overflow-hidden border border-white/10 group shadow-2xl">
-                    {data.remoteStream ? (
+                    {data.remoteStream && data.remoteStream.getVideoTracks().some(t => t.readyState === 'live' && !t.muted) ? (
                       <StudentVideo stream={data.remoteStream} name={data.name} />
                     ) : data.frame ? (
-                      <img src={data.frame} className="w-full h-full object-cover grayscale-[0.2]"
+                      <img src={data.frame} className="w-full h-full object-contain bg-zinc-950"
                         style={{ transform: 'scaleX(-1)' }} alt={data.name} />
                     ) : (
                       <div className="h-full flex flex-col items-center justify-center opacity-30">
@@ -1255,10 +1285,15 @@ const StaffConductClass = () => {
                         <h3 className="text-sm font-black text-white tracking-wide">{data.name}</h3>
                         <div className="flex items-center space-x-2 mt-1">
                           <Activity className="w-3 h-3 text-zinc-500" />
-                          <span className={`text-[11px] font-black uppercase tracking-tight ${data.mudra && data.mudra !== 'No Hand' ? 'text-blue-400' : 'text-zinc-500'
-                            }`}>
-                            {activeModules.mudra ? (data.mudra || 'No Action') : 'AI Paused'}
-                            {data.stanceName ? ` • ${data.stanceName}` : ''}
+                          <span className={`text-[11px] font-black uppercase tracking-tight ${
+                            (data.postureScore > 0 || data.score > 0 || combinedScore > 0) ? 'text-emerald-400' : 'text-zinc-500'
+                          }`}>
+                            {evaluationMode === 'FULL_BODY_STANCE'
+                              ? (data.mudra || targetStance || 'Stance Active')
+                              : activeModules.mudra
+                                ? (data.mudra || 'No Action')
+                                : (activeModules.pose ? (data.stanceName || 'Pose Active') : 'AI Paused')}
+                            {data.stanceName && evaluationMode !== 'FULL_BODY_STANCE' ? ` • ${data.stanceName}` : ''}
                           </span>
                         </div>
                       </div>

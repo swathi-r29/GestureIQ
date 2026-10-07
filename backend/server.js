@@ -81,6 +81,7 @@ const proxyToFlask = (req, res) => {
 app.use([
     '/api/predict',
     '/api/sequence',
+    '/api/evaluate_session',
     '/api/detect_landmarks',
     '/api/detect_double_landmarks',
     '/api/detect_holistic',
